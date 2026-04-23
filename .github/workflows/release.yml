@@ -10,17 +10,8 @@ env:
 
 jobs:
   build-linux:
-    name: Linux ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-22.04
-            qt_arch: linux_gcc_64
-          - arch: arm64
-            runner: ubuntu-22.04-arm
-            qt_arch: linux_gcc_arm64
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +21,10 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
-          arch: ${{ matrix.qt_arch }}
+          arch: linux_gcc_64
           modules: qtwebengine
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ matrix.qt_arch }}
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Configure
         run: |
@@ -47,25 +38,17 @@ jobs:
       - name: Strip & package
         run: |
           strip build/anoa-browser
-          tar czf anoa-browser-linux-${{ matrix.arch }}.tar.gz -C build anoa-browser
+          tar czf anoa-browser-linux-x86_64.tar.gz -C build anoa-browser
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-linux-${{ matrix.arch }}
-          path: anoa-browser-linux-${{ matrix.arch }}.tar.gz
+          name: anoa-browser-linux-x86_64
+          path: anoa-browser-linux-x86_64.tar.gz
 
   build-macos:
-    name: macOS ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64
-            runner: macos-13
-            qt_arch: clang_64
-          - arch: arm64
-            runner: macos-14
-            qt_arch: macos
+    # Qt 6.x ships clang_64 as a universal binary (x86_64 + arm64)
+    name: macOS universal
+    runs-on: macos-13
 
     steps:
       - uses: actions/checkout@v4
@@ -75,10 +58,10 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: mac
           target: desktop
-          arch: ${{ matrix.qt_arch }}
+          arch: clang_64
           modules: qtwebengine
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-${{ matrix.arch }}
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-clang64
 
       - name: Configure
         run: |
@@ -92,12 +75,12 @@ jobs:
       - name: Strip & package
         run: |
           strip build/anoa-browser
-          tar czf anoa-browser-macos-${{ matrix.arch }}.tar.gz -C build anoa-browser
+          tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-macos-${{ matrix.arch }}
-          path: anoa-browser-macos-${{ matrix.arch }}.tar.gz
+          name: anoa-browser-macos-universal
+          path: anoa-browser-macos-universal.tar.gz
 
   build-windows:
     name: Windows x86_64
@@ -111,10 +94,10 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: windows
           target: desktop
-          arch: win64_msvc2022_64
+          arch: win64_msvc2019_64
           modules: qtwebengine
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-windows-msvc2022
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-windows-msvc2019
 
       - name: Configure
         run: |
