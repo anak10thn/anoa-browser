@@ -24,6 +24,11 @@ add_executable(anoa-browser ${SOURCES})
 
 target_sources(anoa-browser PRIVATE
     src/config/config.cpp
+    src/browser/anoa_browser.cpp
+)
+
+target_include_directories(anoa-browser PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(anoa-browser PRIVATE
