@@ -20,13 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
           arch: linux_gcc_64
           modules: qtwebchannel qtpositioning qtwebengine
+          install-system-dependencies: qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -52,13 +53,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
           arch: linux_gcc_64
           modules: qtwebchannel qtpositioning qtwebengine
+          install-system-dependencies: qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -100,13 +102,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
           arch: linux_gcc_64
           modules: qtwebchannel qtpositioning qtwebengine
+          install-system-dependencies: qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -136,13 +139,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
           arch: linux_gcc_64
           modules: qtwebchannel qtpositioning qtwebengine
+          install-system-dependencies: qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -192,13 +196,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
           arch: linux_gcc_64
           modules: qtwebchannel qtpositioning qtwebengine
+          install-system-dependencies: qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
