@@ -3,6 +3,7 @@
 #include <QApplication>
 
 #include "browser/anoa_browser.h"
+#include "cdp/cdp_proxy.h"
 #include "config/config.h"
 #include "http/http_server.h"
 
@@ -36,7 +37,11 @@ int main(int argc, char *argv[])
                           &app);
     httpServer.start();
 
-    // CdpProxy will be wired here once implemented.
+    CdpProxy cdpProxy(static_cast<quint16>(config.port),
+                      static_cast<quint16>(config.port + 1),
+                      config.authToken,
+                      &app);
+    cdpProxy.start();
 
     return app.exec();
 }
