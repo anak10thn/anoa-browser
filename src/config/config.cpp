@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
@@ -87,7 +88,7 @@ Config loadConfigFile(const QString &path)
     return cfg;
 }
 
-Config parseArgs(int argc, char *argv[])
+Config parseArgs(int /*argc*/, char * /*argv*/[])
 {
     // QCommandLineParser requires a QCoreApplication to exist.
     // Callers must construct QApplication before calling parseArgs.

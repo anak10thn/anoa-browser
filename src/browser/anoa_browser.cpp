@@ -21,7 +21,8 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     // QTWEBENGINE_CHROMIUM_FLAGS must be set before WebEngine initializes its
     // profile/page. Setting it here, before creating QWebEngineProfile and
     // calling setPage(), ensures Chromium picks up the remote-debugging port.
-    QByteArray flags = "--remote-debugging-port=" + QByteArray::number(m_config.port);
+    // Chromium DevTools runs on port+1; our HTTP/WS proxy layer listens on port.
+    QByteArray flags = "--remote-debugging-port=" + QByteArray::number(m_config.port + 1);
     if (m_config.noSandbox)
         flags += " --no-sandbox";
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", flags);
@@ -35,6 +36,9 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
 
 void AnoaBrowser::init()
 {
+    // Navigating to about:blank ensures the renderer process is started and the
+    // page registers as a DevTools target in /json/list so CDP clients can attach.
+    load(QUrl(QStringLiteral("about:blank")));
     if (!m_config.headless)
         show();
 }

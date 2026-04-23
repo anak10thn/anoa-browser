@@ -11,12 +11,13 @@
 #include <QUrl>
 #include <QUrlQuery>
 
-HttpServer::HttpServer(quint16 port, quint16 debuggingPort, const QString &authToken,
-                       QObject *parent)
+HttpServer::HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
+                       const QString &authToken, QObject *parent)
     : QObject(parent)
     , m_server(new QTcpServer(this))
     , m_port(port)
     , m_debugPort(debuggingPort)
+    , m_proxyPort(proxyPort)
     , m_authToken(authToken)
 {
     connect(m_server, &QTcpServer::newConnection, this, &HttpServer::handleNewConnection);
@@ -115,6 +116,9 @@ void HttpServer::handleNewConnection()
     }
 
     // Route CDP discovery paths to the internal Chromium debugging port.
+    // Normalize trailing slash: Playwright requests /json/version/ with a slash.
+    if (path.endsWith('/') && path.size() > 1)
+        path.chop(1);
     bool isDiscovery = (path == QLatin1String("/json")
                         || path == QLatin1String("/json/list")
                         || path == QLatin1String("/json/version"));
@@ -136,8 +140,7 @@ void HttpServer::handleNewConnection()
         int statusCode = 200;
         if (reply->error() == QNetworkReply::NoError) {
             body = reply->readAll();
-            // Rewrite 127.0.0.1 to the client-visible hostname so that
-            // webSocketDebuggerUrl is reachable from outside the host.
+            // Strip port from Host header to get bare hostname.
             QString hostName = hostHeader;
             int colonIdx = hostName.lastIndexOf(':');
             if (colonIdx != -1) {
@@ -146,6 +149,14 @@ void HttpServer::handleNewConnection()
                 if (ok)
                     hostName = hostName.left(colonIdx);
             }
+            // Rewrite "127.0.0.1:<debugPort>" to "hostname:<proxyPort>" first so
+            // that webSocketDebuggerUrl points at the CDP proxy (port+2) rather than
+            // the raw Chromium DevTools port (port+1).
+            body.replace(
+                QByteArrayLiteral("127.0.0.1:") + QByteArray::number(m_debugPort),
+                hostName.toUtf8() + ":" + QByteArray::number(m_proxyPort)
+            );
+            // Rewrite any remaining bare 127.0.0.1 references.
             body.replace(QByteArrayLiteral("127.0.0.1"), hostName.toUtf8());
         } else {
             body = R"({"error":"upstream unavailable"})";

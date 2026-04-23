@@ -31,19 +31,23 @@ int main(int argc, char *argv[])
     browser.loadExtensions(config.extensionPaths);
     browser.init();
 
-    // debuggingPort = port+1: Qt/Chromium opens its DevTools HTTP endpoint on a
-    // separate port from the one we expose to clients. We listen on config.port
-    // and forward discovery requests to config.port+1 where Chromium runs.
-    HttpServer httpServer(static_cast<quint16>(config.port),
-                          static_cast<quint16>(config.port + 1),
-                          config.authToken,
-                          &app);
+    // Port layout:
+    //   config.port     (e.g. 9222) – HTTP discovery (HttpServer)
+    //   config.port + 1 (e.g. 9223) – Chromium DevTools internal (set via QTWEBENGINE_CHROMIUM_FLAGS)
+    //   config.port + 2 (e.g. 9224) – WebSocket CDP proxy (CdpProxy)
+    //
+    // HttpServer rewrites webSocketDebuggerUrl from port+1 to port+2 so that
+    // CDP clients connect through the authenticated proxy.
+    const auto httpPort  = static_cast<quint16>(config.port);
+    const auto debugPort = static_cast<quint16>(config.port + 1);
+    const auto wsPort    = static_cast<quint16>(config.port + 2);
+
+    HttpServer httpServer(httpPort, debugPort, wsPort, config.authToken, &app);
     httpServer.start();
 
-    CdpProxy cdpProxy(static_cast<quint16>(config.port),
-                      static_cast<quint16>(config.port + 1),
-                      config.authToken,
-                      &app);
+    CdpProxy cdpProxy(wsPort, debugPort, config.authToken, &app);
+    // Provide the initial page for commands handled locally (e.g. Page.printToPDF).
+    cdpProxy.setPage(browser.page());
     cdpProxy.start();
 
     return app.exec();

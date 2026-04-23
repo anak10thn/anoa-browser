@@ -20,6 +20,14 @@
 - `target_sources(target PRIVATE ...)` after `add_executable` is the correct CMake pattern for adding source files incrementally.
 - cmake was not installed on the dev machine; live build validation was skipped again — CI must verify.
 
+## 2026-04-23 — task-003: Phase 2 Browser Core
+
+- QT_QPA_PLATFORM must be set before QApplication construction, but parseArgs (QCommandLineParser) requires QApplication to exist — resolve by pre-scanning argv[] with std::strcmp for "--headless" before QApplication, then calling parseArgs after.
+- QTWEBENGINE_CHROMIUM_FLAGS is read when WebEngine initializes its profile/page, not necessarily at QApplication or QWebEngineView construction. Setting it in the AnoaBrowser constructor body before creating QWebEngineProfile and calling setPage() is sufficient.
+- target_include_directories(anoa-browser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src) is required for main.cpp to resolve "browser/anoa_browser.h" and "config/config.h" via relative paths.
+- QWebEngineProfile::defaultProfile() returns the global default profile (no heap allocation by us); use it when profileDir/profileName are empty so we don't leak a profile object.
+- Forward-declared stub comments for HttpServer/CdpProxy in main.cpp keep the entry-point wiring visible without requiring those modules to exist yet.
+
 ## 2026-04-23 — task-009: Phase 9 GitHub Actions Release Pipeline
 
 - arm64 cross-compilation toolchain is generated inline in the workflow (heredoc into /tmp/toolchain-aarch64-linux-gnu.cmake) since only release.yml is in scope — no separate cmake/toolchain file was created.
@@ -28,3 +36,95 @@
 - `actions/cache@v4` key for Qt includes both version and arch to prevent cache cross-contamination across matrix jobs.
 - `actions/download-artifact@v4` with `merge-multiple: true` flattens all platform artifact directories into a single flat directory, making `*.tar.gz` / `*.zip` globs work correctly in the release step.
 - `softprops/action-gh-release@v1` `generate_release_notes: true` automatically fills in the release body from merged PR titles since the last tag — no separate changelog step needed.
+
+## 2026-04-23 — task-004: Phase 3 HTTP Discovery Server
+
+- QTcpServer::newConnection slot may block the event loop if we use waitForReadyRead() + a nested QEventLoop for upstream requests; acceptable for a single-client CDP discovery server but would need async redesign for high-concurrency use.
+- QNetworkAccessManager created on the stack inside a slot with a nested QEventLoop works correctly in Qt — the inner loop pumps events (including the NAM reply) without interfering with the outer app.exec() loop.
+- Host header rewriting: strip the port suffix from the Host header (detect it by parsing the last ':' segment as a uint16) to get the bare hostname, then replace 127.0.0.1 in the upstream response body. This preserves the Chromium debug port in webSocketDebuggerUrl while making it reachable from remote hosts.
+- debuggingPort convention: the HttpServer receives port+1 as the Chromium DevTools port. Chromium starts its DevTools HTTP listener on the port passed via --remote-debugging-port (set in QTWEBENGINE_CHROMIUM_FLAGS), which must differ from the port HttpServer binds to.
+- cmake not installed on dev machine; live build validation skipped again — CI must verify.
+- `static` free function `sendResponse()` in the .cpp file avoids repetition of the HTTP framing for all response paths (200, 401, 404, 503).
+
+## 2026-04-23 — task-005: Phase 4 CDP WebSocket Proxy
+
+- `QWebSocketServer::nextPendingConnection()` returns a parentless socket; caller owns it and must call `deleteLater()` when done.
+- `QWebSocket::request()` returns a `QNetworkRequest` — use `rawHeader("Authorization")` to read the Bearer token header. Works only after the WebSocket handshake completes (i.e., inside `newConnection` slot).
+- `QWebSocket::requestUrl()` returns the full URL including query params; wrap with `QUrlQuery(socket->requestUrl())` to extract `?token=`.
+- Per-session isolation: use two maps (`clientToUpstream` + `upstreamToClient`) so each disconnect handler can find its paired socket via `qobject_cast<QWebSocket*>(sender())`.
+- Upstream socket created with `new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this)` — parenting to `this` means it's auto-deleted on CdpProxy destruction as a safety net; `deleteLater()` is still called explicitly on clean disconnect.
+- PORT CONFLICT: both `HttpServer` and `CdpProxy` are instantiated with `config.port` as their listen port. `QTcpServer` and `QWebSocketServer` cannot share a port — the second `start()` will log a warning and return false. This is a design issue to be resolved in a future task (likely by combining them into a single multiplexed listener or placing CdpProxy on a separate port with URL rewriting).
+- cmake not installed on dev machine; live build validation skipped — CI must verify.
+
+## 2026-04-23 — task-007: Phase 6 Extension and Profile Management
+
+- Constructor refactored to always start with QWebEngineProfile::defaultProfile(); setupNamedProfile() is the single place where named profiles are created with ForcePersistentCookies. This avoids double-creation when both constructor and main.cpp would otherwise set up profiles.
+- main.cpp must call setupNamedProfile BEFORE loadExtensions so content-script QWebEngineScripts are inserted into the correct (named) profile's script collection. Inserting into defaultProfile then replacing it loses the scripts.
+- getCookies() uses QWebEngineCookieStore::loadAllCookies() + cookieAdded signal + QEventLoop + QTimer::singleShot(500ms) to bridge the async cookie store to a synchronous return. Qt provides no "done loading" signal; a 500ms window is sufficient for local cookie stores.
+- Replacing the page after setupNamedProfile: QWebEngineView::setPage() does NOT delete the old page automatically ("This may be changed in future releases" per Qt docs) — always call oldPage->deleteLater() explicitly after setPage().
+- QWebEngineProfile::clearAllVisitedLinks() silently fails on the default profile — only works on named profiles; no error is thrown, making it safe to call unconditionally.
+- For clearStorage, use page()->triggerAction(QWebEnginePage::Stop) rather than page()->action(...)->trigger() — triggerAction is the correct one-call API for executing a web action.
+- Manifest v3 extension loading: log qWarning and skip silently; Qt6 WebEngine's QWebEngineProfile has no manifest v3 support as of Qt 6.4–6.6; content script injection via QWebEngineScript works only for manifest v1/v2.
+- cmake not installed on dev machine; live build validation skipped again — CI must verify.
+
+## 2026-04-23 — task-006: Phase 5 CDP Domain Extensions
+
+- CdpExtensions is a stateless adapter: all methods are `static`, so no instance is needed and no Q_OBJECT machinery fires at runtime.
+- `processCommand` returns `QString()` (empty) for passthrough — callers check `isEmpty()` to distinguish "handled" from "forward upstream".
+- A shared `stubResult()` free function in the .cpp (not exposed in the header) avoids per-domain repetition of the `{"id":<id>,"result":{}}` JSON build.
+- `Q_UNUSED(page)` in handleSecurity is required; without it `-Wunused-parameter` fires on non-MSVC builds.
+- `QJsonDocument::fromJson(message.toUtf8())` in onClientMessage: if the message is not valid JSON, `.object()` returns an empty QJsonObject and `processCommand` returns empty (passthrough) — safe by default, no extra null-check needed.
+- cmake not installed on dev machine; live build validation skipped — CI must verify.
+
+## 2026-04-23 — task-010: Phase 10 Integration Validation
+
+### Build
+- cmake is available via `brew install cmake` on macOS (4.3.2). Qt 6.10.2 with WebEngineWidgets is available from qtwebengine homebrew formula.
+- `#include <QJsonArray>` must be explicit in config.cpp (forward declarations in qmetatype.h are insufficient for `toArray()` in Qt 6.10).
+- `parseArgs` parameters `argc/argv` are unused after moving to `QCommandLineParser::process(*app)`; suppress with `int /*argc*/` style.
+- `-s` linker flag is GNU ld only; must guard with `if(UNIX AND NOT APPLE)` in CMakeLists.txt or macOS build fails at link time.
+
+### Architecture Bug Fixes Found During Validation
+- **Critical**: `AnoaBrowser` was setting `--remote-debugging-port=config.port` (e.g. 9222) but `HttpServer` was designed to proxy from `config.port` to `config.port+1`. Fixed: AnoaBrowser now uses `config.port + 1` for Chromium's DevTools, so the port layout is: HTTP=9222, Chromium=9223, CdpProxy=9224.
+- **Critical**: `HttpServer` and `CdpProxy` both tried to listen on the same `config.port`. Fixed by using port+2 for CdpProxy and adding `proxyPort` parameter to `HttpServer` so it rewrites `webSocketDebuggerUrl` from port+1 to port+2.
+- **Critical**: `HttpServer` URL rewriting only replaced `127.0.0.1` (hostname) but not the port number. The rewrite must replace `127.0.0.1:<debugPort>` → `hostname:<proxyPort>` first, then bare `127.0.0.1` remaining.
+- **Critical**: Playwright requests `/json/version/` (trailing slash). HttpServer must normalize trailing slashes before path matching.
+- **Critical**: `CdpExtensions::processCommand` was called with `nullptr` as the page pointer in `CdpProxy::onClientMessage`. For `Page.printToPDF` this caused a null pointer dereference (crash). Fixed: CdpProxy now stores `m_page` (set via `setPage()`) and passes it to processCommand.
+- **Page visibility**: `QWebEnginePage` does not appear in `/json/list` until it navigates. Added `load(QUrl("about:blank"))` in `AnoaBrowser::init()` to activate the renderer process.
+
+### CDP Protocol Gap Summary (Qt 6.10.2, Chrome 134)
+- `Target.createTarget` → NOT SUPPORTED (error -32000). Cannot create new tabs/pages via CDP. Workaround: use the page created at startup.
+- `Target.createBrowserContext` → NOT SUPPORTED (error -32000). Proxy now stubs it with synthetic ID `__anoa_default__` and strips the ID from `Target.createTarget` before forwarding (via `CdpExtensions::rewritePassthrough`).
+- `Browser.setDownloadBehavior` and other Browser context management commands → NOT SUPPORTED. Proxy stubs them with `{}`.
+- `Page.printToPDF` → not in Chromium DevTools for this build (error -32601). Handled by Qt's `QWebEnginePage::printToPdf` via PdfHandler; proxy must be initialized with `setPage()`.
+- `Profiler.*`, `HeapProfiler.*`, `Security.*` → all stubbed to `{}` (no Qt API equivalents).
+
+### Validation Results
+1. Build: PASS (cmake configure + build successful after fixing QJsonArray include and strip flag)
+2. HTTP /json/version with auth: PASS (correct JSON, wsUrl points to port+2)
+3. Playwright connectOverCDP: PASS (with workaround: use existing page, not newPage())
+4. Puppeteer connect: PASS (works out-of-the-box via wsUrl from /json/version)
+5. Profiler.enable: PASS (stub returns valid JSON)
+6. HeapProfiler.enable: PASS (stub returns valid JSON)
+7. Security.enable: PASS (stub returns valid JSON)
+8. Security.setIgnoreCertificateErrors: PASS (stub returns valid JSON)
+9. Page.printToPDF: PASS (returns valid PDF with %PDF- header)
+10. Extension load (manifest v2, no content_scripts): PASS (no crash)
+11. Profile isolation (profA, profB): PASS (separate storage dirs created)
+
+### New CdpExtensions API
+- `rewritePassthrough(cmd)` → returns modified command for upstream forwarding (e.g. strips synthetic browserContextId). Called by CdpProxy before sending to Chromium.
+- `handleBrowser(cmd)` → stubs unsupported Browser domain commands.
+- `handleTarget(cmd)` → stubs createBrowserContext/disposeBrowserContext.
+
+## 2026-04-23 — task-008: Phase 7 PDF Generation
+
+- `QWebEnginePage::pdfPrintingFinished(const QString &filePath, bool success)` is the signal to connect to after calling `printToPdf(filePath, layout)`. Match on the filePath to handle concurrent calls correctly.
+- `QPageLayout` and `QPageSize` are in `QtGui` (no extra CMake module needed) — `QWebEngineSettings` requires `<QWebEngineSettings>` from `QtWebEngineCore`.
+- `QPageSize` can be constructed from `QSizeF(widthMm, heightMm)` + `QPageSize::Millimeter` — no need to map to a named paper size.
+- `QPageLayout` constructor: `(QPageSize, Orientation, QMarginsF, Unit)` — margins and unit must be consistent (all Millimeter here).
+- `QWebEngineSettings::PrintElementBackgrounds` attribute controls printBackground — set it on `m_page->settings()` before calling `printToPdf`.
+- `scale` parameter has no corresponding Qt API in `printToPdf`; extract and `Q_UNUSED` it to satisfy `-Wunused-variable` cleanly.
+- Interception in `processCommand`: check the full `method` string (`"Page.printToPDF"`) after domain-level checks — the "Page" domain is otherwise not handled and falls through to passthrough correctly.
+- `QTemporaryFile::fileName()` returns empty until `open()` is called; open it, grab the name, set `setAutoRemove(false)`, close it, then pass the path to `printToPdf` so Qt can overwrite it.
+- cmake not installed on dev machine; live build validation skipped — CI must verify.

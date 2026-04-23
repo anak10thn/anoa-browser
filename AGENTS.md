@@ -74,6 +74,33 @@ src/
 - **Bearer token in URL**: The `?token=` query param may appear in proxy logs. Also support `Authorization: Bearer <token>` header for clients that allow custom WebSocket headers.
 - **Extension manifest versions**: `QWebEngineProfile` supports loading unpacked extensions but has limited manifest v3 support in Qt 6.x. Test with manifest v2 extensions; document gaps for v3.
 - **Software rasterizer for headless**: On CI runners without a GPU, pass `--disable-gpu` and `--no-sandbox` via `QTWEBENGINE_CHROMIUM_FLAGS` to avoid crashes in offscreen mode.
+- **Port layout (3 ports)**: The binary requires 3 consecutive ports: HTTP discovery (port, e.g. 9222), Chromium DevTools internal (port+1, e.g. 9223), and WebSocket CDP proxy (port+2, e.g. 9224). `QTWEBENGINE_CHROMIUM_FLAGS=--remote-debugging-port=<port+1>` must use port+1, not port.
+- **`Target.createTarget` not supported**: QtWebEngine's Chromium build does NOT support `Target.createTarget` via CDP. Calling `browser.newPage()` in Playwright will fail. Workaround: use `browser.contexts()[0].pages()[0]` to reuse the existing page created at startup. Document this as a protocol gap for users.
+- **Browser context management not supported**: `Target.createBrowserContext`, `Browser.setDownloadBehavior`, `Browser.getWindowForTarget`, etc. are all unsupported by QtWebEngine. The proxy stubs these with `{}` responses so clients like Playwright don't abort connection setup. Playwright works in read/reuse-page mode.
+- **`Page.printToPDF` not in Chromium DevTools for QtWebEngine**: The native `Page.printToPDF` CDP command returns `Method not found` (-32601) from this Chromium build. The proxy intercepts it and handles it via `QWebEnginePage::printToPdf` instead. The proxy must be initialized with `setPage()` — without a page reference the call will crash.
+- **Page must navigate at startup to appear as CDP target**: `QWebEnginePage` does not register as a DevTools target in `/json/list` until it receives a navigation event. Call `load(QUrl("about:blank"))` in `AnoaBrowser::init()` to ensure the page appears immediately.
+- **Playwright trailing slash on `/json/version/`**: Playwright 1.40+ requests `/json/version/` with a trailing slash. HttpServer must normalize trailing slashes or the 404 response causes `connectOverCDP` to fail.
+- **`QJsonArray` include required**: `#include <QJsonArray>` must be explicit; forward declarations in `qmetatype.h` are not sufficient for calling `toArray()` in Qt 6.10.
+- **macOS strip flag**: `-s` is a GNU ld linker flag and is not valid on macOS (Apple clang). Use `if(UNIX AND NOT APPLE)` guard in CMakeLists.txt.
+
+### Protocol Gap Matrix (Phase 10 Validation, Qt 6.10.2, Chrome 134)
+
+| CDP Command | Status | Notes |
+|---|---|---|
+| `Target.createTarget` | FAIL — Not Supported | QtWebEngine does not support creating tabs via CDP |
+| `Target.createBrowserContext` | STUBBED → `{}` | Proxy returns synthetic context ID `__anoa_default__` |
+| `Target.disposeBrowserContext` | STUBBED → `{}` | No-op; proxy returns success |
+| `Browser.setDownloadBehavior` | STUBBED → `{}` | Context management not supported |
+| `Browser.getWindowForTarget` | STUBBED → `{}` | Not supported |
+| `Browser.getVersion` | PASS — passthrough | Chromium returns correct version info |
+| `Page.printToPDF` | PASS — Qt API | Not in Chromium DevTools; handled via `QWebEnginePage::printToPdf` |
+| `Profiler.enable` | PASS — stub | Returns `{}` (no V8 profiler exposure) |
+| `HeapProfiler.enable` | PASS — stub | Returns `{}` (no heap profiler exposure) |
+| `Security.enable` | PASS — stub | Returns `{}` |
+| `Security.setIgnoreCertificateErrors` | PASS — stub | Returns `{}` |
+| `Target.getTargets` | PASS — passthrough | Returns active pages after startup navigation |
+| `Playwright connectOverCDP` | PASS (with workaround) | Use existing page; `newPage()` fails |
+| `Puppeteer connect` | PASS | Works out-of-the-box |
 
 ---
 

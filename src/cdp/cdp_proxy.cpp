@@ -32,6 +32,11 @@ bool CdpProxy::start()
     return true;
 }
 
+void CdpProxy::setPage(QWebEnginePage *page)
+{
+    m_page = page;
+}
+
 void CdpProxy::stop()
 {
     m_server->close();
@@ -96,12 +101,19 @@ void CdpProxy::onClientMessage(const QString &message)
     if (!upstream)
         return;
     QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
-    const QString handled = CdpExtensions::processCommand(cmd, nullptr);
+    const QString handled = CdpExtensions::processCommand(cmd, m_page);
     if (!handled.isEmpty()) {
         client->sendTextMessage(handled);
         return;
     }
-    upstream->sendTextMessage(message);
+    // Optionally rewrite the command before forwarding (e.g. strip synthetic context IDs).
+    const QJsonObject rewritten = CdpExtensions::rewritePassthrough(cmd);
+    if (!rewritten.isEmpty()) {
+        upstream->sendTextMessage(
+            QString::fromUtf8(QJsonDocument(rewritten).toJson(QJsonDocument::Compact)));
+    } else {
+        upstream->sendTextMessage(message);
+    }
 }
 
 void CdpProxy::onClientDisconnected()

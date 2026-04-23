@@ -6,6 +6,8 @@
 #include <QWebSocket>
 #include <QWebSocketServer>
 
+class QWebEnginePage;
+
 class CdpProxy : public QObject {
     Q_OBJECT
 public:
@@ -14,6 +16,9 @@ public:
 
     bool start();
     void stop();
+    // Optional: provide a page for handling commands that require a local page
+    // reference (e.g. Page.printToPDF via Qt's QWebEnginePage::printToPdf).
+    void setPage(QWebEnginePage *page);
 
 private slots:
     void onNewConnection();
@@ -29,4 +34,5 @@ private:
     quint16 m_listenPort;
     quint16 m_debugPort;
     QString m_authToken;
+    QWebEnginePage *m_page = nullptr;
 };
