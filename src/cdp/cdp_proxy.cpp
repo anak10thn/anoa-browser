@@ -1,7 +1,10 @@
 #include "cdp/cdp_proxy.h"
+#include "cdp/cdp_extensions.h"
 
 #include <QDebug>
 #include <QHostAddress>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkRequest>
 #include <QUrlQuery>
 #include <QWebSocketProtocol>
@@ -92,7 +95,12 @@ void CdpProxy::onClientMessage(const QString &message)
     QWebSocket *upstream = m_clientToUpstream.value(client);
     if (!upstream)
         return;
-    // CdpExtensions::processCommand will be injected here in task-006.
+    QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
+    const QString handled = CdpExtensions::processCommand(cmd, nullptr);
+    if (!handled.isEmpty()) {
+        client->sendTextMessage(handled);
+        return;
+    }
     upstream->sendTextMessage(message);
 }
 
