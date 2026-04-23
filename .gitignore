@@ -1,0 +1,46 @@
+# ── Build directories ────────────────────────────────────────────────────────
+build/
+build-static/
+build-release/
+build-release-static/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+CTestTestfile.cmake
+
+# ── Qt / MOC generated ───────────────────────────────────────────────────────
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qm
+.qmake.stash
+
+# ── IDE / editors ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Jonggrang ephemeral state ────────────────────────────────────────────────
+.jonggrang/.ephemeral/
+.jonggrang/locks/
+.jonggrang/.output/
+.jonggrang/lib/
+
+# ── IDE / tooling ────────────────────────────────────────────────────────────
+.claude/
+.opencode/
+hooks/

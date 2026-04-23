@@ -1,0 +1,248 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master]
+
+env:
+  QT_VERSION: "6.7.0"
+  QPA_PLATFORM: offscreen
+  QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --no-sandbox"
+
+jobs:
+  # ── 1. Unit Tests (QTest, no binary needed) ────────────────────────────────
+  unit-tests:
+    name: Unit Tests (QTest)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
+
+      - name: Install Qt (with WebEngine)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          pip install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            -m qtwebengine
+
+      - name: Configure (BUILD_TESTS=ON)
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+
+      - name: Build test target
+        run: cmake --build build --target anoa-browser-test-config --parallel
+
+      - name: Run unit tests (CTest)
+        run: ctest --test-dir build -V --output-on-failure
+
+  # ── 2. Integration Tests (Node.js + running binary) ───────────────────────
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-22.04
+    needs: unit-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
+
+      - name: Install Qt (with WebEngine)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          pip install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            -m qtwebengine
+
+      - name: Build binary
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+          cmake --build build --parallel
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install integration test dependencies
+        working-directory: tests/integration
+        run: npm install
+
+      - name: Start anoa-browser
+        run: |
+          QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox" \
+            ./build/anoa-browser --headless --no-sandbox --port 9222 &
+          echo "BROWSER_PID=$!" >> $GITHUB_ENV
+          # Wait until HTTP port is up
+          timeout 30 bash -c 'until nc -z 127.0.0.1 9222; do sleep 0.5; done'
+
+      - name: Run integration tests (Vitest)
+        working-directory: tests/integration
+        run: npx vitest run
+
+      - name: Stop anoa-browser
+        if: always()
+        run: kill ${{ env.BROWSER_PID }} || true
+
+  # ── 3. Shell Integration Tests ─────────────────────────────────────────────
+  shell-tests:
+    name: Shell Integration Tests
+    runs-on: ubuntu-22.04
+    needs: unit-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
+
+      - name: Install Qt (with WebEngine)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          pip install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            -m qtwebengine
+
+      - name: Build binary
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+          cmake --build build --parallel
+
+      - name: Run port layout tests
+        run: bash tests/integration/port_layout.test.sh
+        env:
+          ANOA_BINARY: ./build/anoa-browser
+
+      - name: Run extension loading tests
+        run: bash tests/integration/extensions.test.sh
+        env:
+          ANOA_BINARY: ./build/anoa-browser
+
+  # ── 4. E2E Tests (Playwright + Puppeteer) ─────────────────────────────────
+  e2e-tests:
+    name: E2E Tests (Playwright / Puppeteer)
+    runs-on: ubuntu-22.04
+    needs: integration-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
+
+      - name: Install Qt (with WebEngine)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          pip install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            -m qtwebengine
+
+      - name: Build binary
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+          cmake --build build --parallel
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install e2e dependencies
+        working-directory: tests/e2e
+        run: npm install
+
+      - name: Install Playwright browser (for connectOverCDP — no full Chromium needed)
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Start anoa-browser
+        run: |
+          QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox" \
+            ./build/anoa-browser --headless --no-sandbox --port 9222 &
+          echo "BROWSER_PID=$!" >> $GITHUB_ENV
+          timeout 30 bash -c 'until nc -z 127.0.0.1 9222; do sleep 0.5; done'
+
+      - name: Run Playwright tests
+        working-directory: tests/e2e
+        run: npx playwright test
+
+      - name: Run Puppeteer tests
+        working-directory: tests/e2e
+        run: node --test puppeteer.test.js
+
+      - name: Stop anoa-browser
+        if: always()
+        run: kill ${{ env.BROWSER_PID }} || true
+
+  # ── 5. Regression Smoke Tests ─────────────────────────────────────────────
+  smoke-tests:
+    name: Regression Smoke Tests
+    runs-on: ubuntu-22.04
+    needs: e2e-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
+
+      - name: Install Qt (with WebEngine)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          pip install aqtinstall
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            -m qtwebengine
+
+      - name: Build binary
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+          cmake --build build --parallel
+
+      - name: Set up Node.js (for smoke.sh REG-03 / REG-04 ws calls)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install ws globally
+        run: npm install -g ws
+
+      - name: Run smoke tests
+        run: bash tests/regression/smoke.sh
+        env:
+          ANOA_BINARY: ./build/anoa-browser

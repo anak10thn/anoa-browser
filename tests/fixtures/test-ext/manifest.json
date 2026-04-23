@@ -1,0 +1,6 @@
+{
+  "manifest_version": 2,
+  "name": "Anoa Test Extension",
+  "version": "1.0",
+  "description": "Minimal manifest v2 extension for integration testing"
+}
