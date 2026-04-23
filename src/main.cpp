@@ -4,10 +4,7 @@
 
 #include "browser/anoa_browser.h"
 #include "config/config.h"
-
-// Forward declarations for future modules (wired up once implemented).
-// class HttpServer;
-// class CdpProxy;
+#include "http/http_server.h"
 
 int main(int argc, char *argv[])
 {
@@ -30,9 +27,16 @@ int main(int argc, char *argv[])
     AnoaBrowser browser(config);
     browser.init();
 
-    // HttpServer and CdpProxy are wired here once those modules are implemented:
-    // HttpServer httpServer(config, &app);
-    // CdpProxy cdpProxy(config, &app);
+    // debuggingPort = port+1: Qt/Chromium opens its DevTools HTTP endpoint on a
+    // separate port from the one we expose to clients. We listen on config.port
+    // and forward discovery requests to config.port+1 where Chromium runs.
+    HttpServer httpServer(static_cast<quint16>(config.port),
+                          static_cast<quint16>(config.port + 1),
+                          config.authToken,
+                          &app);
+    httpServer.start();
+
+    // CdpProxy will be wired here once implemented.
 
     return app.exec();
 }

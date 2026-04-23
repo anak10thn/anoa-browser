@@ -25,6 +25,7 @@ add_executable(anoa-browser ${SOURCES})
 target_sources(anoa-browser PRIVATE
     src/config/config.cpp
     src/browser/anoa_browser.cpp
+    src/http/http_server.cpp
 )
 
 target_include_directories(anoa-browser PRIVATE
