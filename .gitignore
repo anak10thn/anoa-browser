@@ -34,13 +34,3 @@ ui_*.h
 .DS_Store
 Thumbs.db
 
-# ── Jonggrang ephemeral state ────────────────────────────────────────────────
-.jonggrang/.ephemeral/
-.jonggrang/locks/
-.jonggrang/.output/
-.jonggrang/lib/
-
-# ── IDE / tooling ────────────────────────────────────────────────────────────
-.claude/
-.opencode/
-hooks/

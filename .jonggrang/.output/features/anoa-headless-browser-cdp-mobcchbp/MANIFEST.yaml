@@ -1,0 +1,152 @@
+feature_id: anoa-headless-browser-cdp-mobcchbp
+description: anoa-headless-browser-cdp
+work_type: LARGE
+created_at: '2026-04-23T10:35:00.451Z'
+updated_at: '2026-04-23T13:11:09.623Z'
+status: completed
+current_phase: null
+active_phases:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+phases:
+  '1':
+    name: setup
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.457Z'
+    agent_id: null
+    output:
+      source: approve
+  '2':
+    name: triage
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.458Z'
+    agent_id: null
+    output:
+      source: approve
+  '3':
+    name: codebase-discovery
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.459Z'
+    agent_id: null
+    output:
+      source: approve
+  '4':
+    name: skill-discovery
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.460Z'
+    agent_id: null
+    output:
+      source: approve
+  '5':
+    name: complexity
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.460Z'
+    agent_id: null
+    output:
+      source: approve
+  '6':
+    name: brainstorming
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.461Z'
+    agent_id: null
+    output:
+      source: approve
+  '7':
+    name: architecting
+    status: completed
+    started_at: null
+    completed_at: '2026-04-23T10:35:00.461Z'
+    agent_id: null
+    output:
+      source: approve
+  '8':
+    name: implementation
+    status: completed
+    started_at: '2026-04-23T12:35:42.339Z'
+    completed_at: '2026-04-23T12:35:42.342Z'
+    agent_id: null
+    output:
+      source: work-loop
+  '9':
+    name: design-verification
+    status: completed
+    started_at: '2026-04-23T12:35:42.343Z'
+    completed_at: '2026-04-23T12:37:44.283Z'
+    agent_id: null
+    output: null
+  '10':
+    name: domain-compliance
+    status: completed
+    started_at: '2026-04-23T12:37:44.285Z'
+    completed_at: '2026-04-23T12:39:19.696Z'
+    agent_id: null
+    output: null
+  '11':
+    name: code-quality
+    status: completed
+    started_at: '2026-04-23T12:39:19.697Z'
+    completed_at: '2026-04-23T12:41:49.169Z'
+    agent_id: null
+    output: null
+  '12':
+    name: test-planning
+    status: completed
+    started_at: '2026-04-23T12:41:49.170Z'
+    completed_at: '2026-04-23T12:46:54.114Z'
+    agent_id: null
+    output: null
+  '13':
+    name: testing
+    status: completed
+    started_at: '2026-04-23T12:46:54.150Z'
+    completed_at: '2026-04-23T12:58:15.647Z'
+    agent_id: null
+    output: null
+  '14':
+    name: coverage
+    status: completed
+    started_at: '2026-04-23T12:58:15.647Z'
+    completed_at: '2026-04-23T13:01:38.586Z'
+    agent_id: null
+    output: null
+  '15':
+    name: test-quality
+    status: completed
+    started_at: '2026-04-23T13:01:38.588Z'
+    completed_at: '2026-04-23T13:07:50.163Z'
+    agent_id: null
+    output: null
+  '16':
+    name: completion
+    status: completed
+    started_at: '2026-04-23T13:07:50.164Z'
+    completed_at: '2026-04-23T13:11:09.623Z'
+    agent_id: null
+    output: null
+agents: {}
+validation:
+  review_passed: false
+  tests_passed: false
+  coverage_met: false
+locks: []
+context_usage: null
