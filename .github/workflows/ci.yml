@@ -26,7 +26,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebchannel qtwebengine
+          modules: qtwebchannel qtpositioning qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -35,7 +35,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTS=ON \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+            -DCMAKE_PREFIX_PATH=$Qt6_DIR
 
       - name: Build test target
         run: cmake --build build --target anoa-browser-test-config --parallel
@@ -58,7 +58,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebchannel qtwebengine
+          modules: qtwebchannel qtpositioning qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -66,7 +66,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+            -DCMAKE_PREFIX_PATH=$Qt6_DIR
           cmake --build build --parallel
 
       - uses: actions/setup-node@v4
@@ -106,7 +106,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebchannel qtwebengine
+          modules: qtwebchannel qtpositioning qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -114,7 +114,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+            -DCMAKE_PREFIX_PATH=$Qt6_DIR
           cmake --build build --parallel
 
       - name: Run port layout tests
@@ -142,7 +142,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebchannel qtwebengine
+          modules: qtwebchannel qtpositioning qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -150,7 +150,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+            -DCMAKE_PREFIX_PATH=$Qt6_DIR
           cmake --build build --parallel
 
       - uses: actions/setup-node@v4
@@ -198,7 +198,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebchannel qtwebengine
+          modules: qtwebchannel qtpositioning qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -206,7 +206,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+            -DCMAKE_PREFIX_PATH=$Qt6_DIR
           cmake --build build --parallel
 
       - uses: actions/setup-node@v4
