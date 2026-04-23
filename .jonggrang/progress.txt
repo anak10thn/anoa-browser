@@ -1,0 +1,30 @@
+# Jonggrang Progress Log — anoa-browser
+# Created: 2026-04-23
+
+## 2026-04-23 — task-001: Phase 1 Bootstrap
+
+- CMakeLists.txt uses `Qt6 6.4` as minimum via `find_package(Qt6 6.4 REQUIRED ...)`.
+- `QtWebEngineWidgets` must be linked in addition to `QtWebEngineCore` — the view class lives in Widgets, not Core.
+- Release strip: `-s` for APPLE/UNIX, `/OPT:REF /OPT:ICF` for MSVC. Passed via `target_link_options` in a `Release`-guarded block.
+- `CMAKE_AUTOMOC ON` is required for any QObject subclass — missing it causes silent link failures with undefined vtable symbols.
+- CMake was not installed on the dev machine; live `cmake --build` validation was skipped. CI must verify this.
+- `QWebEngineView` requires `QApplication` (not `QCoreApplication`) even in headless/offscreen mode — documented in AGENTS.md Known Gotchas.
+- `qputenv("QPA_PLATFORM", "offscreen")` must be called before any Qt object construction for headless mode to take effect.
+
+## 2026-04-23 — task-002: Phase 8 Config Module
+
+- `QCommandLineParser::process(*QCoreApplication::instance())` requires a QApplication/QCoreApplication to already exist; callers must construct the app object before calling `parseArgs`.
+- `--extension` is made repeatable via `parser.values(optionObj)` (plural); single-value `parser.value()` only returns the last occurrence.
+- `QSettings(path, QSettings::IniFormat)` handles INI config files; no separate parser needed.
+- CLI values always override file config by checking `parser.isSet()` before overwriting the struct field loaded from the config file.
+- `target_sources(target PRIVATE ...)` after `add_executable` is the correct CMake pattern for adding source files incrementally.
+- cmake was not installed on the dev machine; live build validation was skipped again — CI must verify.
+
+## 2026-04-23 — task-009: Phase 9 GitHub Actions Release Pipeline
+
+- arm64 cross-compilation toolchain is generated inline in the workflow (heredoc into /tmp/toolchain-aarch64-linux-gnu.cmake) since only release.yml is in scope — no separate cmake/toolchain file was created.
+- aqtinstall target for Windows Qt6 is `win64_msvc2019_64` even when running on windows-2022; this is the stable aqtinstall identifier for MSVC-built Qt and is compatible with Visual Studio 17 2022 (`v143` toolset).
+- macOS aqtinstall target `clang_64` installs the Qt universal SDK; `-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"` then produces the universal binary in one build pass — no separate lipo step needed when Qt's clang_64 installer already ships universal libs.
+- `actions/cache@v4` key for Qt includes both version and arch to prevent cache cross-contamination across matrix jobs.
+- `actions/download-artifact@v4` with `merge-multiple: true` flattens all platform artifact directories into a single flat directory, making `*.tar.gz` / `*.zip` globs work correctly in the release step.
+- `softprops/action-gh-release@v1` `generate_release_notes: true` automatically fills in the release body from merged PR titles since the last tag — no separate changelog step needed.
