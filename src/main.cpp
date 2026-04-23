@@ -26,6 +26,9 @@ int main(int argc, char *argv[])
     Config config = parseArgs(argc, argv);
 
     AnoaBrowser browser(config);
+    if (!config.profileName.isEmpty())
+        browser.setupNamedProfile(config.profileName, config.profileDir);
+    browser.loadExtensions(config.extensionPaths);
     browser.init();
 
     // debuggingPort = port+1: Qt/Chromium opens its DevTools HTTP endpoint on a
