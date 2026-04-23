@@ -22,6 +22,10 @@ set(SOURCES
 
 add_executable(anoa-browser ${SOURCES})
 
+target_sources(anoa-browser PRIVATE
+    src/config/config.cpp
+)
+
 target_link_libraries(anoa-browser PRIVATE
     Qt6::WebEngineWidgets
     Qt6::WebEngineCore
