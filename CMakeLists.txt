@@ -28,6 +28,7 @@ target_sources(anoa-browser PRIVATE
     src/http/http_server.cpp
     src/cdp/cdp_proxy.cpp
     src/cdp/cdp_extensions.cpp
+    src/pdf/pdf_handler.cpp
 )
 
 target_include_directories(anoa-browser PRIVATE

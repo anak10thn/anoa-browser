@@ -1,4 +1,5 @@
 #include "cdp/cdp_extensions.h"
+#include "pdf/pdf_handler.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -26,6 +27,10 @@ QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *pa
         return handleHeapProfiler(cmd);
     if (domain == QLatin1String("Security"))
         return handleSecurity(cmd, page);
+    if (method == QLatin1String("Page.printToPDF")) {
+        PdfHandler handler(page);
+        return handler.handlePrintToPdf(cmd);
+    }
 
     return QString();
 }
