@@ -26,7 +26,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebengine
+          modules: qtwebchannel qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -58,7 +58,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebengine
+          modules: qtwebchannel qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -106,7 +106,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebengine
+          modules: qtwebchannel qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -142,7 +142,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebengine
+          modules: qtwebchannel qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
@@ -198,7 +198,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
-          modules: qtwebengine
+          modules: qtwebchannel qtwebengine
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
