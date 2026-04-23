@@ -6,153 +6,123 @@ on:
       - 'v*.*.*'
 
 env:
-  QT_VERSION: '6.6.0'
+  QT_VERSION: '6.7.3'
 
 jobs:
   build-linux:
-    runs-on: ubuntu-22.04
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+            qt_arch: linux_gcc_64
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            qt_arch: linux_gcc_arm64
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Cache Qt6
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-${{ matrix.arch }}
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ matrix.qt_arch }}
 
-      - name: Install aqtinstall
-        run: pip install aqtinstall
-
-      - name: Install Qt6
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 -m qtwebengine
-
-      - name: Install arm64 cross-compiler
-        if: matrix.arch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-      - name: Create arm64 toolchain file
-        if: matrix.arch == 'arm64'
-        run: |
-          cat > /tmp/toolchain-aarch64-linux-gnu.cmake << 'EOF'
-          set(CMAKE_SYSTEM_NAME Linux)
-          set(CMAKE_SYSTEM_PROCESSOR aarch64)
-          set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)
-          set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          EOF
-
-      - name: Configure CMake (x86_64)
-        if: matrix.arch == 'x86_64'
+      - name: Configure
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
-
-      - name: Configure CMake (arm64)
-        if: matrix.arch == 'arm64'
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64 \
-            -DCMAKE_TOOLCHAIN_FILE=/tmp/toolchain-aarch64-linux-gnu.cmake
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Strip binary
-        run: strip build/anoa-browser
+      - name: Strip & package
+        run: |
+          strip build/anoa-browser
+          tar czf anoa-browser-linux-${{ matrix.arch }}.tar.gz -C build anoa-browser
 
-      - name: Package
-        run: tar czf anoa-browser-linux-${{ matrix.arch }}.tar.gz -C build anoa-browser
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: anoa-browser-linux-${{ matrix.arch }}
           path: anoa-browser-linux-${{ matrix.arch }}.tar.gz
 
   build-macos:
-    runs-on: macos-13
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13
+            qt_arch: clang_64
+          - arch: arm64
+            runner: macos-14
+            qt_arch: macos
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Cache Qt6
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-macos-universal
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-${{ matrix.arch }}
 
-      - name: Install aqtinstall
-        run: pip3 install aqtinstall
-
-      - name: Install Qt6
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: aqt install-qt mac desktop ${{ env.QT_VERSION }} clang_64 -m qtwebengine
-
-      - name: Configure CMake
+      - name: Configure
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/macos \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Strip binary
-        run: strip build/anoa-browser
+      - name: Strip & package
+        run: |
+          strip build/anoa-browser
+          tar czf anoa-browser-macos-${{ matrix.arch }}.tar.gz -C build anoa-browser
 
-      - name: Package
-        run: tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-macos-universal
-          path: anoa-browser-macos-universal.tar.gz
+          name: anoa-browser-macos-${{ matrix.arch }}
+          path: anoa-browser-macos-${{ matrix.arch }}.tar.gz
 
   build-windows:
+    name: Windows x86_64
     runs-on: windows-2022
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Cache Qt6
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: C:\Qt
-          key: qt-${{ env.QT_VERSION }}-windows-x86_64
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-windows-msvc2022
 
-      - name: Install aqtinstall
-        run: pip install aqtinstall
-
-      - name: Install Qt6
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: aqt install-qt windows desktop ${{ env.QT_VERSION }} win64_msvc2019_64 -m qtwebengine --outputdir C:\Qt
-
-      - name: Configure CMake
+      - name: Configure
         run: |
           cmake -B build `
             -G "Visual Studio 17 2022" `
             -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="C:\Qt\${{ env.QT_VERSION }}\msvc2019_64"
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       - name: Build
         run: cmake --build build --config Release
@@ -160,8 +130,7 @@ jobs:
       - name: Package
         run: 7z a anoa-browser-windows-x86_64.zip build\Release\anoa-browser.exe
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: anoa-browser-windows-x86_64
           path: anoa-browser-windows-x86_64.zip
@@ -171,13 +140,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v1
         with:
           files: |
             *.tar.gz

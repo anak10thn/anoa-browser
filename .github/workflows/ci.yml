@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 env:
-  QT_VERSION: "6.7.0"
+  QT_VERSION: "6.7.3"
   QPA_PLATFORM: offscreen
   QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --no-sandbox"
 
@@ -20,26 +20,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
-
-      - name: Install Qt (with WebEngine)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          pip install aqtinstall
-          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -m qtwebengine
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Configure (BUILD_TESTS=ON)
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTS=ON \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
       - name: Build test target
         run: cmake --build build --target anoa-browser-test-config --parallel
@@ -56,29 +52,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
-
-      - name: Install Qt (with WebEngine)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          pip install aqtinstall
-          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -m qtwebengine
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Build binary
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
@@ -88,10 +79,8 @@ jobs:
 
       - name: Start anoa-browser
         run: |
-          QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox" \
-            ./build/anoa-browser --headless --no-sandbox --port 9222 &
+          ./build/anoa-browser --headless --port 9222 &
           echo "BROWSER_PID=$!" >> $GITHUB_ENV
-          # Wait until HTTP port is up
           timeout 30 bash -c 'until nc -z 127.0.0.1 9222; do sleep 0.5; done'
 
       - name: Run integration tests (Vitest)
@@ -111,25 +100,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
-
-      - name: Install Qt (with WebEngine)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          pip install aqtinstall
-          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -m qtwebengine
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Build binary
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
       - name: Run port layout tests
@@ -151,29 +136,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
-
-      - name: Install Qt (with WebEngine)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          pip install aqtinstall
-          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -m qtwebengine
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Build binary
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
@@ -181,14 +161,13 @@ jobs:
         working-directory: tests/e2e
         run: npm install
 
-      - name: Install Playwright browser (for connectOverCDP — no full Chromium needed)
+      - name: Install Playwright browser
         working-directory: tests/e2e
         run: npx playwright install --with-deps chromium
 
       - name: Start anoa-browser
         run: |
-          QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox" \
-            ./build/anoa-browser --headless --no-sandbox --port 9222 &
+          ./build/anoa-browser --headless --port 9222 &
           echo "BROWSER_PID=$!" >> $GITHUB_ENV
           timeout 30 bash -c 'until nc -z 127.0.0.1 9222; do sleep 0.5; done'
 
@@ -213,29 +192,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
+      - uses: jurplel/install-qt-action@v3
         with:
-          path: ~/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-x64-webengine
-
-      - name: Install Qt (with WebEngine)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          pip install aqtinstall
-          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -m qtwebengine
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebengine
+          cache: true
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Build binary
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=~/Qt/${{ env.QT_VERSION }}/gcc_64
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
-      - name: Set up Node.js (for smoke.sh REG-03 / REG-04 ws calls)
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
