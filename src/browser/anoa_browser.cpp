@@ -36,11 +36,12 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
 
 void AnoaBrowser::init()
 {
+    resize(m_config.width, m_config.height);
+    if (!m_config.headless)
+        show();
     // Navigating to about:blank ensures the renderer process is started and the
     // page registers as a DevTools target in /json/list so CDP clients can attach.
     load(QUrl(QStringLiteral("about:blank")));
-    if (!m_config.headless)
-        show();
 }
 
 void AnoaBrowser::loadExtensions(const QStringList &paths)
