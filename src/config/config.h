@@ -11,6 +11,8 @@ struct Config {
     QString profileName;
     QStringList extensionPaths;
     QString authToken;
+    int width = 1280;
+    int height = 720;
 };
 
 Config parseArgs(int argc, char *argv[]);

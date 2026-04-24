@@ -73,6 +73,10 @@ Config loadConfigFile(const QString &path)
             for (const auto &v : obj["extensionPaths"].toArray())
                 cfg.extensionPaths << v.toString();
         }
+        if (obj.contains("width"))
+            cfg.width = obj["width"].toInt(1280);
+        if (obj.contains("height"))
+            cfg.height = obj["height"].toInt(720);
     } else {
         // INI format via QSettings
         QSettings ini(path, QSettings::IniFormat);
@@ -84,6 +88,8 @@ Config loadConfigFile(const QString &path)
         cfg.authToken = ini.value("authToken").toString();
         cfg.extensionPaths = ini.value("extensionPaths").toStringList();
         cfg.extensionPaths.removeAll(QString());
+        cfg.width = ini.value("width", 1280).toInt();
+        cfg.height = ini.value("height", 720).toInt();
     }
     return cfg;
 }
@@ -105,6 +111,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     QCommandLineOption extensionOpt("extension", "Path to an unpacked extension directory (repeatable)", "path");
     QCommandLineOption authTokenOpt("auth-token", "Bearer token required for CDP WebSocket connections", "token");
     QCommandLineOption configOpt("config", "Path to JSON or INI config file", "file");
+    QCommandLineOption widthOpt({"width"}, "Browser viewport/window width in pixels (default 1280)", "width");
+    QCommandLineOption heightOpt({"height"}, "Browser viewport/window height in pixels (default 720)", "height");
 
     parser.addOption(portOpt);
     parser.addOption(headlessOpt);
@@ -114,6 +122,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     parser.addOption(extensionOpt);
     parser.addOption(authTokenOpt);
     parser.addOption(configOpt);
+    parser.addOption(widthOpt);
+    parser.addOption(heightOpt);
 
     parser.process(*QCoreApplication::instance());
 
@@ -135,6 +145,27 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
         cfg.profileName = parser.value(profileNameOpt);
     if (parser.isSet(authTokenOpt))
         cfg.authToken = parser.value(authTokenOpt);
+
+    if (parser.isSet(widthOpt)) {
+        bool ok = false;
+        int w = parser.value(widthOpt).toInt(&ok);
+        if (!ok || w <= 0) {
+            QTextStream err(stderr);
+            err << "Error: --width must be a positive integer, got " << parser.value(widthOpt) << "\n";
+            ::exit(1);
+        }
+        cfg.width = w;
+    }
+    if (parser.isSet(heightOpt)) {
+        bool ok = false;
+        int h = parser.value(heightOpt).toInt(&ok);
+        if (!ok || h <= 0) {
+            QTextStream err(stderr);
+            err << "Error: --height must be a positive integer, got " << parser.value(heightOpt) << "\n";
+            ::exit(1);
+        }
+        cfg.height = h;
+    }
 
     // --extension is repeatable; append CLI entries on top of file config entries.
     const QStringList cliExtensions = parser.values(extensionOpt);
