@@ -3,6 +3,7 @@
 #include <QMap>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QWebSocket>
 #include <QWebSocketServer>
 
@@ -26,11 +27,14 @@ private slots:
     void onClientDisconnected();
     void onUpstreamMessage(const QString &message);
     void onUpstreamDisconnected();
+    void onUpstreamConnected();
 
 private:
     QWebSocketServer *m_server;
     QMap<QWebSocket *, QWebSocket *> m_clientToUpstream;
     QMap<QWebSocket *, QWebSocket *> m_upstreamToClient;
+    // Messages queued while the upstream WS handshake is in progress
+    QMap<QWebSocket *, QStringList> m_pendingMessages;
     quint16 m_listenPort;
     quint16 m_debugPort;
     QString m_authToken;

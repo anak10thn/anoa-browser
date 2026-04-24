@@ -82,6 +82,25 @@ src/
 - **Playwright trailing slash on `/json/version/`**: Playwright 1.40+ requests `/json/version/` with a trailing slash. HttpServer must normalize trailing slashes or the 404 response causes `connectOverCDP` to fail.
 - **`QJsonArray` include required**: `#include <QJsonArray>` must be explicit; forward declarations in `qmetatype.h` are not sufficient for calling `toArray()` in Qt 6.10.
 - **macOS strip flag**: `-s` is a GNU ld linker flag and is not valid on macOS (Apple clang). Use `if(UNIX AND NOT APPLE)` guard in CMakeLists.txt.
+- **`QCommandLineOption` braced-init-list ambiguity on macOS Qt**: `QCommandLineOption opt({"name"}, ...)` is ambiguous between the `QString` and `QStringList` overloads on macOS/Qt 6.10. Always use `QStringList{"name"}` or `QStringLiteral("name")` explicitly to disambiguate.
+- **`resize()` must precede `load()` for correct viewport**: Call `resize(w, h)` before `load(QUrl("about:blank"))` in `AnoaBrowser::init()` so the initial render uses the configured surface size. Any resize after `load()` won't affect already-captured screenshots.
+- **`show()` required in headless mode for non-zero viewport**: `QWebEngineView::resize()` has no effect unless `show()` is called first — without it, the widget has no backing surface and the viewport is 0×0 even in offscreen mode. Call `show()` unconditionally in `init()`; with `QPA_PLATFORM=offscreen` it creates an invisible surface, not a visible window.
+- **`--disable-gpu` required for headless screenshot on GPU-less hosts**: Without GPU acceleration, Chromium's Skia rasterizer crashes on `Page.captureScreenshot`. Pass `--disable-gpu` via `QTWEBENGINE_CHROMIUM_FLAGS` whenever `--headless` is active. The binary now does this automatically.
+- **CdpProxy upstream handshake race**: When a CDP client connects and immediately sends a command, the proxy's upstream WebSocket connection to Chromium may not be established yet. Commands sent before `upstream->state() == ConnectedState` were silently dropped. Fix: queue client messages in `m_pendingMessages` and flush them in `onUpstreamConnected()`.
+
+### Resolution Feature Sub-section (task-013 Validation, 2026-04-24)
+
+| Scenario | Result | Notes |
+|---|---|---|
+| Build (cmake configure + build) | PASS | Fixed `QStringList{"width"}` for QCommandLineOption ambiguity |
+| Headed default 1280×720 | PASS (HTTP smoke) | Visual confirmation requires human; `show()` needed even in headless |
+| Headed override 800×600 | PASS (HTTP smoke) | HTTP endpoint up, version endpoint responds correctly |
+| Headless screenshot default 1280×720 | PASS | After fixing `show()` + `--disable-gpu` + proxy message queue |
+| Headless screenshot override 1920×1080 | PASS | Correct PNG dimensions confirmed via CDP |
+| Config file 640×480 | PASS | `--config` JSON file read and applied correctly |
+| CLI override beats config (width=1024, height=480 from file) | PASS | Correct split: CLI width overrides, file height used |
+| `--width 0` → exit 1 | PASS | Validation rejects non-positive values |
+| `--width abc` → exit 1 | PASS | Validation rejects non-integer values |
 
 ### Protocol Gap Matrix (Phase 10 Validation, Qt 6.10.2, Chrome 134)
 

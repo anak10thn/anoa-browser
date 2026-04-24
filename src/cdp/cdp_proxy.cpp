@@ -88,6 +88,7 @@ void CdpProxy::onNewConnection()
     connect(client, &QWebSocket::disconnected, this, &CdpProxy::onClientDisconnected);
     connect(upstream, &QWebSocket::textMessageReceived, this, &CdpProxy::onUpstreamMessage);
     connect(upstream, &QWebSocket::disconnected, this, &CdpProxy::onUpstreamDisconnected);
+    connect(upstream, &QWebSocket::connected, this, &CdpProxy::onUpstreamConnected);
 
     upstream->open(upstreamUrl);
 }
@@ -100,6 +101,14 @@ void CdpProxy::onClientMessage(const QString &message)
     QWebSocket *upstream = m_clientToUpstream.value(client);
     if (!upstream)
         return;
+
+    // If the upstream handshake is not yet complete, queue the message.
+    // onUpstreamConnected() will flush the queue when the connection is ready.
+    if (upstream->state() != QAbstractSocket::ConnectedState) {
+        m_pendingMessages[upstream].append(message);
+        return;
+    }
+
     QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
     const QString handled = CdpExtensions::processCommand(cmd, m_page);
     if (!handled.isEmpty()) {
@@ -116,6 +125,33 @@ void CdpProxy::onClientMessage(const QString &message)
     }
 }
 
+void CdpProxy::onUpstreamConnected()
+{
+    QWebSocket *upstream = qobject_cast<QWebSocket *>(sender());
+    if (!upstream)
+        return;
+    // Flush any messages that arrived before the upstream handshake completed.
+    const QStringList pending = m_pendingMessages.take(upstream);
+    for (const QString &message : pending) {
+        QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
+        const QString handled = CdpExtensions::processCommand(cmd, m_page);
+        QWebSocket *client = m_upstreamToClient.value(upstream);
+        if (!client)
+            continue;
+        if (!handled.isEmpty()) {
+            client->sendTextMessage(handled);
+            continue;
+        }
+        const QJsonObject rewritten = CdpExtensions::rewritePassthrough(cmd);
+        if (!rewritten.isEmpty()) {
+            upstream->sendTextMessage(
+                QString::fromUtf8(QJsonDocument(rewritten).toJson(QJsonDocument::Compact)));
+        } else {
+            upstream->sendTextMessage(message);
+        }
+    }
+}
+
 void CdpProxy::onClientDisconnected()
 {
     QWebSocket *client = qobject_cast<QWebSocket *>(sender());
@@ -124,6 +160,7 @@ void CdpProxy::onClientDisconnected()
     QWebSocket *upstream = m_clientToUpstream.take(client);
     if (upstream) {
         m_upstreamToClient.remove(upstream);
+        m_pendingMessages.remove(upstream);
         upstream->close();
         upstream->deleteLater();
     }

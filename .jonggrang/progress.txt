@@ -128,3 +128,51 @@
 - Interception in `processCommand`: check the full `method` string (`"Page.printToPDF"`) after domain-level checks — the "Page" domain is otherwise not handled and falls through to passthrough correctly.
 - `QTemporaryFile::fileName()` returns empty until `open()` is called; open it, grab the name, set `setAutoRemove(false)`, close it, then pass the path to `printToPdf` so Qt can overwrite it.
 - cmake not installed on dev machine; live build validation skipped — CI must verify.
+
+## 2026-04-24 — task-011: Phase 1 Config Extension (width/height)
+
+- `QCommandLineOption widthOpt({"width"}, ...)` uses an initializer-list constructor — single-char shortcuts not added here since "w" and "h" are not reserved by existing options, but were omitted to keep the interface explicit.
+- `QString::toInt(&ok)` is the correct pattern for validated integer conversion from CLI strings; always check the `ok` bool and validate the semantic range (> 0) separately from the parse success.
+- File-first, CLI-override pattern: load config file into `cfg` first, then overwrite only fields where `parser.isSet()` is true — same pattern as existing port/headless fields.
+- JSON: use `obj["width"].toInt(1280)` with a fallback default, guarded by `obj.contains("width")` — avoids silently resetting to 0 when the key is absent.
+- INI: `ini.value("width", 1280).toInt()` with a QVariant default is the correct pattern matching existing port/headless INI reads.
+
+## 2026-04-24 — task-012: Phase 2 Browser Core Wiring (width/height)
+
+- `resize(m_config.width, m_config.height)` must be called BEFORE `load(QUrl("about:blank"))` in `AnoaBrowser::init()` — the initial render (and all subsequent CDP `Page.captureScreenshot` calls) uses whichever surface size was set at load time.
+- The resize call is unconditional: `QWebEngineView::resize()` resizes the visible QWidget window in headed mode and sets the off-screen surface size in headless/offscreen mode — one call covers both.
+- Correct order in `init()`: `resize()` → `show()` (headed only) → `load()`.
+- Pre-existing build blocker found: `QCommandLineOption` braced-init-list `{"width"}` is ambiguous between `QString` and `QStringList` overloads on macOS Qt. Reported as bug-001 against feature resolution-option-mocx6uoo; fix is to use `QStringLiteral("width")` or `QStringList{"width"}` explicitly.
+
+## 2026-04-24 — task-013: Phase 3 Validation (resolution flags end-to-end)
+
+### Bugs Found and Fixed During Validation
+
+1. **Build blocker** (`src/config/config.cpp`): `QCommandLineOption({"width"}, ...)` is ambiguous on macOS Qt 6.10. Fixed to `QCommandLineOption(QStringList{"width"}, ...)`.
+
+2. **Headless viewport 0×0** (`src/browser/anoa_browser.cpp`): `QWebEngineView::resize()` has no effect unless `show()` is called first. With `QPA_PLATFORM=offscreen`, `show()` creates an invisible backing surface — the view has no surface otherwise and reports 0×0 viewport. Fixed by calling `show()` unconditionally in `init()` (removing the `if (!m_config.headless)` guard).
+
+3. **Headless screenshot crash** (`src/browser/anoa_browser.cpp`): Without `--disable-gpu`, Chromium's Skia rasterizer fails with "Unable to initialize SkSurface" on hosts without GPU and `Page.captureScreenshot` crashes the process. Fixed by auto-appending `--disable-gpu` to `QTWEBENGINE_CHROMIUM_FLAGS` when `m_config.headless` is true.
+
+4. **CdpProxy upstream handshake race** (`src/cdp/cdp_proxy.cpp`, `src/cdp/cdp_proxy.h`): When a client connects and immediately sends a CDP command, the upstream WS connection to Chromium may not be established yet. `QWebSocket::sendTextMessage` on a non-connected socket silently drops the message. Fixed by: queuing client messages in `m_pendingMessages[upstream]` when `upstream->state() != ConnectedState`, and flushing the queue in a new `onUpstreamConnected()` slot.
+
+### Validation Results (all 8 steps PASS)
+
+| Step | Description | Result |
+|------|-------------|--------|
+| 1 | Build (`cmake -B build && cmake --build build`) | PASS |
+| 2 | Headed default 1280×720 — HTTP smoke test | PASS (visual dim: human confirm) |
+| 3 | Headed override 800×600 — HTTP smoke test | PASS (visual dim: human confirm) |
+| 4 | Headless screenshot default 1280×720 via CDP | PASS |
+| 5 | Headless screenshot override 1920×1080 via CDP | PASS |
+| 6 | Config file `{"width":640,"height":480}` via `--config` | PASS |
+| 7 | CLI `--width 1024` overrides file width=640, file height=480 used | PASS |
+| 8a | `--width 0` → exit code 1 | PASS |
+| 8b | `--width abc` → exit code 1 | PASS |
+
+### Patterns Discovered
+
+- macOS QtWebEngine headless: `show()` is required even for offscreen mode — without it the Skia surface is never created and the viewport is 0×0.
+- Headless screenshot via CDP requires `--disable-gpu` on machines without a GPU (the default on CI/dev Mac headless).
+- CdpProxy upstream connection is asynchronous; any CDP client that sends immediately on WS open risks the race. The message queue fix is critical for reliable operation.
+- Validation scripts that launch multiple browser instances sequentially must kill the entire process group (Chromium spawns renderer/GPU sub-processes that outlive the main process on SIGTERM). Use `process.kill(-proc.pid)` after `detached: true`, or ensure long enough gap between instances.

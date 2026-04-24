@@ -25,6 +25,8 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     QByteArray flags = "--remote-debugging-port=" + QByteArray::number(m_config.port + 1);
     if (m_config.noSandbox)
         flags += " --no-sandbox";
+    if (m_config.headless)
+        flags += " --disable-gpu";
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", flags);
 
     if (m_config.headless)
@@ -37,8 +39,10 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
 void AnoaBrowser::init()
 {
     resize(m_config.width, m_config.height);
-    if (!m_config.headless)
-        show();
+    // show() is required in both headed and headless (offscreen) mode: without it
+    // the widget has no backing surface and QWebEngineView reports a 0×0 viewport.
+    // With QPA_PLATFORM=offscreen the call creates an invisible surface, not a window.
+    show();
     // Navigating to about:blank ensures the renderer process is started and the
     // page registers as a DevTools target in /json/list so CDP clients can attach.
     load(QUrl(QStringLiteral("about:blank")));

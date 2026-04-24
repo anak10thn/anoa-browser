@@ -111,8 +111,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     QCommandLineOption extensionOpt("extension", "Path to an unpacked extension directory (repeatable)", "path");
     QCommandLineOption authTokenOpt("auth-token", "Bearer token required for CDP WebSocket connections", "token");
     QCommandLineOption configOpt("config", "Path to JSON or INI config file", "file");
-    QCommandLineOption widthOpt({"width"}, "Browser viewport/window width in pixels (default 1280)", "width");
-    QCommandLineOption heightOpt({"height"}, "Browser viewport/window height in pixels (default 720)", "height");
+    QCommandLineOption widthOpt(QStringList{"width"}, "Browser viewport/window width in pixels (default 1280)", "width");
+    QCommandLineOption heightOpt(QStringList{"height"}, "Browser viewport/window height in pixels (default 720)", "height");
 
     parser.addOption(portOpt);
     parser.addOption(headlessOpt);
