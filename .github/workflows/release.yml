@@ -47,7 +47,20 @@ jobs:
       - name: Strip & package
         run: |
           strip build/anoa-browser
-          tar czf anoa-browser-linux-x86_64.tar.gz -C build anoa-browser
+          mkdir -p dist/lib
+          cp build/anoa-browser dist/
+          cd dist
+          ldd anoa-browser | grep "=> /" | awk '{print $3}' | grep -v "^$" | sort -u | while read lib; do
+            cp -v "$lib" lib/
+          done
+          # Copy Qt plugins needed for WebEngine
+          mkdir -p lib/qt6/plugins
+          for dir in platforminputcontexts platforms platformthemes xcbglintegrations imageformats iconengines; do
+            if [ -d "$QT_ROOT_DIR/plugins/$dir" ]; then
+              cp -r "$QT_ROOT_DIR/plugins/$dir" lib/qt6/plugins/
+            fi
+          done
+          tar czf ../anoa-browser-linux-x86_64.tar.gz anoa-browser lib
 
       - uses: actions/upload-artifact@v4
         with:

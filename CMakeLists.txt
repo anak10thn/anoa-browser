@@ -111,6 +111,15 @@ else()
     target_compile_options(anoa-browser PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# RPATH for portable Linux distribution (find .so in next to binary's lib/ dir)
+if(UNIX AND NOT APPLE)
+    set_target_properties(anoa-browser PROPERTIES
+        INSTALL_RPATH "$ORIGIN/lib"
+        BUILD_RPATH "$ORIGIN/lib"
+        INSTALL_RPATH_USE_LINK_RPATH FALSE
+    )
+endif()
+
 # Release strip flags
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     if(MSVC)
