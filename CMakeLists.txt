@@ -122,9 +122,16 @@ endif()
 
 # Install rule
 include(GNUInstallDirs)
-install(TARGETS anoa-browser
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+if(APPLE)
+    install(TARGETS anoa-browser
+        BUNDLE DESTINATION .
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+else()
+    install(TARGETS anoa-browser
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
 
 # Tests
 option(BUILD_TESTS "Build unit and integration test targets" OFF)

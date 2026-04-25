@@ -4,6 +4,7 @@
 #include <QWebEngineSettings>
 #include <QPageLayout>
 #include <QPageSize>
+#include <QSizeF>
 #include <QMarginsF>
 #include <QTemporaryFile>
 #include <QEventLoop>
