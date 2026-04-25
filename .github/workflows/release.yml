@@ -32,7 +32,7 @@ jobs:
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Install system dependencies
-        run: sudo apt-get install -y libcups2-dev file
+        run: sudo apt-get install -y libcups2-dev file desktop-file-utils
 
       - name: Configure
         run: |
@@ -44,53 +44,65 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Install to AppDir
+      - name: Build AppImage
         run: |
+          # Install into AppDir
           DESTDIR=AppDir cmake --install build
+
+          # Bundle Qt shared libraries
           mkdir -p AppDir/usr/lib
-          # Copy all Qt + system shared libs needed by the binary
-          ldd AppDir/usr/bin/anoa-browser | grep "=> /" | awk '{print $3}' | grep -v libc.so | grep -v libm.so | grep -v libpthread.so | grep -v libdl.so | grep -v librt.so | sort -u | while read lib; do
-            cp -v "$lib" AppDir/usr/lib/
+          ldd AppDir/usr/bin/anoa-browser | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
+            cp -vn "$lib" AppDir/usr/lib/
           done
+
           # Copy Qt plugins
           mkdir -p AppDir/usr/plugins
-          for dir in platforminputcontexts platforms platformthemes xcbglintegrations imageformats iconengues; do
+          for dir in platforminputcontexts platforms platformthemes xcbglintegrations imageformats iconengines tls; do
             if [ -d "$QT_ROOT_DIR/plugins/$dir" ]; then
               cp -r "$QT_ROOT_DIR/plugins/$dir" AppDir/usr/plugins/
             fi
           done
-          # Copy Qt WebEngine resources (v8 snapshots, locales, etc.)
-          if [ -d "$QT_ROOT_DIR/resources" ]; then
-            cp -r "$QT_ROOT_DIR/resources" AppDir/usr/resources
-          fi
-          # Copy Qt translations
-          if [ -d "$QT_ROOT_DIR/translations" ]; then
-            mkdir -p AppDir/usr/translations
-            cp -r "$QT_ROOT_DIR/translations/qtwebengine_*.qm" AppDir/usr/translations/ 2>/dev/null || true
-          fi
 
-      - name: Download linuxdeployqt
-        run: |
-          wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O linuxdeployqt
-          chmod +x linuxdeployqt
+          # Copy Qt WebEngine resources
+          mkdir -p AppDir/usr/resources
+          cp -r "$QT_ROOT_DIR/resources/"* AppDir/usr/resources/ 2>/dev/null || true
+          cp -r "$QT_ROOT_DIR/translations/" AppDir/usr/translations 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6WebEngineCore.so"* AppDir/usr/lib/ 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6WebEngineWidgets.so"* AppDir/usr/lib/ 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6WebEngineProcess"* AppDir/usr/lib/ 2>/dev/null || true
+          ls "$QT_ROOT_DIR/lib/" | grep -i webengine | while read f; do
+            cp -vn "$QT_ROOT_DIR/lib/$f" AppDir/usr/lib/
+          done
 
-      - name: Build AppImage
-        run: |
-          unset QTDIR; unset QT_PLUGIN_PATH; unset LD_LIBRARY_PATH
-          ./linuxdeployqt AppDir/usr/share/applications/anoa-browser.desktop \
-            -appimage \
-            -verbose=2 \
-            -extra-plugins=platforminputcontexts,platformthemes
+          # Fix RPATH in all bundled libs
+          for so in AppDir/usr/lib/*.so*; do
+            if [ -f "$so" ] && [ ! -L "$so" ]; then
+              patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
+            fi
+          done
 
-      - name: Rename AppImage
-        run: |
-          APPIMAGE=$(ls Anoa_Browser-*.AppImage 2>/dev/null || echo "")
-          if [ -z "$APPIMAGE" ]; then
-            # linuxdeployqt may produce different naming
-            APPIMAGE=$(ls *.AppImage 2>/dev/null | head -1)
-          fi
-          mv "$APPIMAGE" anoa-browser-linux-x86_64.AppImage
-          chmod +x anoa-browser-linux-x86_64.AppImage
+          # Set binary RPATH
+          patchelf --set-rpath '$ORIGIN/../lib' AppDir/usr/bin/anoa-browser
+
+          # Create AppRun
+          cat > AppDir/AppRun << 'APPSCRIPT'
+          #!/bin/sh
+          SELF=$(readlink -f "$0")
+          HERE=$(dirname "$SELF")
+          export QT_PLUGIN_PATH="${HERE}/usr/plugins:${QT_PLUGIN_PATH}"
+          export QTWEBENGINEPROCESS_PATH="${HERE}/usr/lib/QtWebEngineProcess"
+          export QTWEBENGINERESOURCEPATH="${HERE}/usr/resources"
+          export QTWEBENGINE_LOCALE="${HERE}/usr/translations/qtwebengine_locales"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/anoa-browser" "$@"
+          APPSCRIPT
+          chmod +x AppDir/AppRun
+
+          # Create AppImage using mksquashfs
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ./appimagetool AppDir anoa-browser-linux-x86_64.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
