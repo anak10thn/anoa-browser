@@ -8,6 +8,9 @@ on:
 env:
   QT_VERSION: '6.7.3'
 
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     name: Linux x86_64
