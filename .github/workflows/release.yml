@@ -6,23 +6,24 @@ on:
       - 'v*.*.*'
 
 env:
-  QT_VERSION: '6.7.3'
+  QT_VERSION: '6.10.2'
 
 jobs:
   build-linux:
     name: Linux x86_64
     runs-on: ubuntu-22.04
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
-          arch: linux_gcc_64
-          modules: qtwebchannel qtpositioning qtwebengine
+          arch: gcc_64
+          modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
@@ -34,15 +35,19 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DSTATIC_BUILD=ON \
             -DCMAKE_PREFIX_PATH=$Qt6_DIR
 
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Strip & package
+      - name: Create distribution package
         run: |
+          mkdir -p dist
           strip build/anoa-browser
-          tar czf anoa-browser-linux-x86_64.tar.gz -C build anoa-browser
+          cp build/anoa-browser dist/
+          cd build && ldd anoa-browser | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp -v '{}' ../dist/ 2>/dev/null || true
+          cd dist && tar czf ../anoa-browser-linux-x86_64.tar.gz anoa-browser
 
       - uses: actions/upload-artifact@v4
         with:
@@ -50,20 +55,20 @@ jobs:
           path: anoa-browser-linux-x86_64.tar.gz
 
   build-macos:
-    # Qt 6.x ships clang_64 as a universal binary (x86_64 + arm64)
     name: macOS universal
-    runs-on: macos-13
+    runs-on: macos-14
+    timeout-minutes: 180
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtwebchannel qtpositioning qtwebengine
+          modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-clang64
@@ -72,14 +77,20 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DSTATIC_BUILD=ON \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
             -DCMAKE_PREFIX_PATH=$Qt6_DIR
 
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Strip & package
+      - name: Deploy Qt frameworks
         run: |
-          strip build/anoa-browser
+          $Qt6_DIR/bin/macdeployqt build/anoa-browser -verbose=2 -always-overwrite
+
+      - name: Package
+        run: |
+          strip build/anoa-browser || true
           tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser
 
       - uses: actions/upload-artifact@v4
@@ -90,20 +101,21 @@ jobs:
   build-windows:
     name: Windows x86_64
     runs-on: windows-2022
+    timeout-minutes: 180
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jurplel/install-qt-action@v3
+      - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: windows
           target: desktop
-          arch: win64_msvc2019_64
-          modules: qtwebchannel qtpositioning qtwebengine
+          arch: win64_msvc2022_64
+          modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-windows-msvc2019
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-windows-msvc2022
 
       - name: Configure
         run: |
@@ -111,13 +123,18 @@ jobs:
             -G "Visual Studio 17 2022" `
             -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
+            -DSTATIC_BUILD=ON `
             -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
 
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Deploy Qt DLLs
+        run: |
+          & "$env:Qt6_DIR\bin\windeployqt.exe" build\Release\anoa-browser.exe --release --no-translations --no-opengl-sw
+
       - name: Package
-        run: 7z a anoa-browser-windows-x86_64.zip build\Release\anoa-browser.exe
+        run: 7z a anoa-browser-windows-x86_64.zip .\build\Release\*
 
       - uses: actions/upload-artifact@v4
         with:
