@@ -34,84 +34,91 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get install -y libcups2-dev file
 
-      - name: Configure
+      - name: Configure & Build
         run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
-
-      - name: Build
-        run: cmake --build build --parallel
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+          cmake --build build --parallel
 
       - name: Package portable bundle
         run: |
-          mkdir -p dist/anoa-browser/lib dist/anoa-browser/resources dist/anoa-browser/translations
+          bundle=dist/anoa-browser
+          mkdir -p "$bundle"/lib "$bundle"/resources "$bundle"/translations
 
-          # Binary — do NOT strip (removes symbol table needed by QtWebEngine)
-          cp build/anoa-browser dist/anoa-browser/anoa-browser
-          chmod +x dist/anoa-browser/anoa-browser
+          # Binary
+          cp build/anoa-browser "$bundle/anoa-browser"
+          chmod +x "$bundle/anoa-browser"
 
-          # Set RPATH so binary finds libs in ./lib
-          patchelf --set-rpath '$ORIGIN/lib' dist/anoa-browser/anoa-browser
+          # Set RPATH
+          patchelf --set-rpath '$ORIGIN/lib' "$bundle/anoa-browser"
 
-          # Copy direct + transitive shared library dependencies (iterative)
-          # ldd only shows direct deps — we repeat until no new libs are found
-          prev_count=0
-          cur_count=$(ls dist/anoa-browser/lib/*.so* 2>/dev/null | wc -l || echo 0)
-          ldd dist/anoa-browser/anoa-browser | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
-            cp -vn "$lib" dist/anoa-browser/lib/ 2>/dev/null || true
-          done
-          while true; do
-            prev_count=$cur_count
-            for f in dist/anoa-browser/lib/*.so*; do
-              [ -L "$f" ] && continue
-              [ ! -f "$f" ] && continue
-              ldd "$f" 2>/dev/null | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
-                cp -vn "$lib" dist/anoa-browser/lib/ 2>/dev/null || true
+          # Iteratively copy ALL shared lib dependencies (direct + transitive)
+          # Uses a temp file to avoid subshell variable scoping issues
+          cp_libs() {
+            shift 2
+            for f; do
+              [ -f "$f" ] || continue
+              ldd "$f" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read lib; do
+                base=$(basename "$lib")
+                [ -f "$bundle/lib/$base" ] && continue
+                cp -vn "$lib" "$bundle/lib/" 2>/dev/null || true
               done
             done
-            cur_count=$(ls dist/anoa-browser/lib/*.so* 2>/dev/null | wc -l)
-            [ "$cur_count" -eq "$prev_count" ] && break
+          }
+          # Pass 1: binary deps
+          ldd "$bundle/anoa-browser" | grep "=> /" | awk '{print $3}' | while read lib; do
+            cp -vn "$lib" "$bundle/lib/" 2>/dev/null || true
+          done
+          # Passes 2-5: transitive deps of everything in lib/
+          for pass in 2 3 4 5; do
+            count_before=$(ls "$bundle/lib/" | wc -l)
+            for f in "$bundle"/lib/*.so*; do
+              [ -L "$f" ] && continue
+              ldd "$f" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read lib; do
+                cp -vn "$lib" "$bundle/lib/" 2>/dev/null || true
+              done
+            done
+            count_after=$(ls "$bundle/lib/" | wc -l)
+            [ "$count_after" -eq "$count_before" ] && break
           done
 
           # Qt plugins
           for dir in platforminputcontexts platforms platformthemes xcbglintegrations imageformats iconengines tls; do
-            if [ -d "$QT_ROOT_DIR/plugins/$dir" ]; then
-              cp -r "$QT_ROOT_DIR/plugins/$dir" dist/anoa-browser/lib/
-            fi
+            [ -d "$QT_ROOT_DIR/plugins/$dir" ] && cp -r "$QT_ROOT_DIR/plugins/$dir" "$bundle/lib/"
           done
 
-          # Qt WebEngine resources & helper process
-          cp "$QT_ROOT_DIR/lib/libQt6WebEngineCore.so"* dist/anoa-browser/lib/ 2>/dev/null || true
-          cp "$QT_ROOT_DIR/lib/libQt6WebEngineWidgets.so"* dist/anoa-browser/lib/ 2>/dev/null || true
-          cp "$QT_ROOT_DIR/lib/libQt6WebEngineQuick.so"* dist/anoa-browser/lib/ 2>/dev/null || true
-          cp "$QT_ROOT_DIR/lib/libQt6WebEngineQuickDelegatesQml.so"* dist/anoa-browser/lib/ 2>/dev/null || true
-          cp "$QT_ROOT_DIR/lib/QtWebEngineProcess" dist/anoa-browser/lib/ 2>/dev/null || true
-          cp -r "$QT_ROOT_DIR/resources/"* dist/anoa-browser/resources/ 2>/dev/null || true
-          mkdir -p dist/anoa-browser/translations/qtwebengine_locales
-          cp "$QT_ROOT_DIR/translations/qtwebengine_"*.qm dist/anoa-browser/translations/ 2>/dev/null || true
-          cp -r "$QT_ROOT_DIR/translations/qtwebengine_locales/"* dist/anoa-browser/translations/qtwebengine_locales/ 2>/dev/null || true
+          # Qt WebEngine libs, process, resources, translations
+          cp "$QT_ROOT_DIR/lib/libQt6WebEngine"*so* "$bundle/lib/" 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/QtWebEngineProcess" "$bundle/lib/" 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6WebChannel"*so* "$bundle/lib/" 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6Qml"*so* "$bundle/lib/" 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6Quick"*so* "$bundle/lib/" 2>/dev/null || true
+          cp "$QT_ROOT_DIR/lib/libQt6Positioning"*so* "$bundle/lib/" 2>/dev/null || true
+          cp -r "$QT_ROOT_DIR/resources/"* "$bundle/resources/" 2>/dev/null || true
+          mkdir -p "$bundle/translations/qtwebengine_locales"
+          cp "$QT_ROOT_DIR/translations/qtwebengine_"*.qm "$bundle/translations/" 2>/dev/null || true
+          cp -r "$QT_ROOT_DIR/translations/qtwebengine_locales/"* "$bundle/translations/qtwebengine_locales/" 2>/dev/null || true
 
-          # Fix RPATH on all bundled libs
-          for so in dist/anoa-browser/lib/*.so*; do
-            if [ -f "$so" ] && [ ! -L "$so" ]; then
-              patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
-            fi
+          # Fix RPATH on all bundled .so files
+          for so in "$bundle"/lib/*.so*; do
+            [ -f "$so" ] && [ ! -L "$so" ] && patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null
           done
 
-          # Wrapper script
-          cat > dist/anoa-browser/anoa-browser.sh << 'EOF'
+          # Also fix RPATH on QtWebEngineProcess
+          [ -f "$bundle/lib/QtWebEngineProcess" ] && patchelf --set-rpath '$ORIGIN' "$bundle/lib/QtWebEngineProcess" 2>/dev/null || true
+
+          # Wrapper script (this is the entry point users should run)
+          cat > "$bundle/anoa-browser.sh" << 'WRAPPER'
           #!/bin/sh
-          SCRIPT="$(readlink -f "$0")"
-          DIR="$(dirname "$SCRIPT")"
-          export QT_PLUGIN_PATH="${DIR}/lib:${QT_PLUGIN_PATH}"
+          SELF="$(readlink -f "$0")"
+          DIR="$(dirname "$SELF")"
+          export LD_LIBRARY_PATH="${DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          export QT_PLUGIN_PATH="${DIR}/lib${QT_PLUGIN_PATH:+:${QT_PLUGIN_PATH}}"
           export QTWEBENGINEPROCESS_PATH="${DIR}/lib/QtWebEngineProcess"
           export QTWEBENGINERESOURCEPATH="${DIR}/resources"
           export QTWEBENGINE_LOCALE="${DIR}/translations/qtwebengine_locales"
-          export LD_LIBRARY_PATH="${DIR}/lib:${LD_LIBRARY_PATH}"
           exec "${DIR}/anoa-browser" "$@"
-          EOF
-          chmod +x dist/anoa-browser/anoa-browser.sh
+          WRAPPER
+          chmod +x "$bundle/anoa-browser.sh"
 
           tar czf anoa-browser-linux-x86_64.tar.gz -C dist anoa-browser
 
@@ -121,7 +128,7 @@ jobs:
           path: anoa-browser-linux-x86_64.tar.gz
 
   build-macos:
-    name: macOS universal
+    name: macOS
     runs-on: macos-14
     timeout-minutes: 180
 
@@ -139,27 +146,36 @@ jobs:
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-clang64
 
-      - name: Configure
+      - name: Configure & Build
         run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+          cmake --build build --parallel
 
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Deploy Qt frameworks
-        run: macdeployqt build/anoa-browser.app -verbose=2 -always-overwrite
+      - name: Deploy Qt frameworks into .app bundle
+        run: |
+          macdeployqt build/anoa-browser.app -verbose=2 -always-overwrite
+          # macdeployqt does NOT bundle QtWebEngineProcess — do it manually
+          QT_LIB="$QT_ROOT_DIR/lib"
+          FW_DIR="build/anoa-browser.app/Contents/Frameworks"
+          mkdir -p "$FW_DIR"
+          # Copy QtWebEngineProcess helper
+          cp "$QT_LIB/QtWebEngineProcess" "$FW_DIR/" 2>/dev/null || true
+          # Copy WebEngine resources
+          mkdir -p "build/anoa-browser.app/Contents/Resources"
+          cp -r "$QT_ROOT_DIR/resources/"* "build/anoa-browser.app/Contents/Resources/" 2>/dev/null || true
+          # Copy WebEngine locales
+          mkdir -p "build/anoa-browser.app/Contents/Resources/qtwebengine_locales"
+          cp -r "$QT_ROOT_DIR/translations/qtwebengine_locales/"* "build/anoa-browser.app/Contents/Resources/qtwebengine_locales/" 2>/dev/null || true
 
       - name: Package
         run: |
           strip build/anoa-browser.app/Contents/MacOS/anoa-browser || true
-          tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser.app
+          tar czf anoa-browser-macos.tar.gz -C build anoa-browser.app
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-macos-universal
-          path: anoa-browser-macos-universal.tar.gz
+          name: anoa-browser-macos
+          path: anoa-browser-macos.tar.gz
 
   build-windows:
     name: Windows x86_64
@@ -180,19 +196,20 @@ jobs:
           cache: true
           cache-key-prefix: qt-${{ env.QT_VERSION }}-windows-msvc2019
 
-      - name: Configure
+      - name: Configure & Build
         run: |
-          cmake -B build `
-            -G "Visual Studio 17 2022" `
-            -A x64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          cmake --build build --config Release
 
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Deploy Qt DLLs
-        run: windeployqt build\Release\anoa-browser.exe --release --no-translations --no-opengl-sw
+      - name: Deploy Qt DLLs & resources
+        shell: pwsh
+        run: |
+          windeployqt build\Release\anoa-browser.exe --release --no-translations --no-opengl-sw
+          # Copy WebEngine resources that windeployqt misses
+          $qtDir = $env:QT_ROOT_DIR
+          Copy-Item -Path "$qtDir\resources\*" -Destination "build\Release\resources\" -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path "build\Release\translations\qtwebengine_locales" -Force -ErrorAction SilentlyContinue | Out-Null
+          Copy-Item -Path "$qtDir\translations\qtwebengine_locales\*" -Destination "build\Release\translations\qtwebengine_locales\" -Force -ErrorAction SilentlyContinue
 
       - name: Package
         run: 7z a anoa-browser-windows-x86_64.zip .\build\Release\*
