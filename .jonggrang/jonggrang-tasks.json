@@ -226,6 +226,67 @@
       "started_at": "2026-04-23T11:15:24.280Z",
       "completed_at": "2026-04-23T11:56:18.319Z",
       "error_log": []
+    },
+    {
+      "id": "task-011",
+      "title": "Phase 1 – Config Extension: add width/height fields and --width/--height CLI flags",
+      "description": "Extend the Config struct with integer width and height fields (defaults 1280×720) and parse the corresponding CLI flags and config-file keys.\n\nFiles to modify:\n- src/config/config.h: Add two new fields to the Config struct: `int width = 1280;` and `int height = 720;` placed after the existing fields.\n- src/config/config.cpp: In parseArgs(), add two QCommandLineOption entries:\n  - `QCommandLineOption widthOpt({\"width\"}, \"Browser viewport/window width in pixels (default 1280)\", \"width\");`\n  - `QCommandLineOption heightOpt({\"height\"}, \"Browser viewport/window height in pixels (default 720)\", \"height\");`\n  Register both options with parser.addOption(). After parser.process(), read them: if parser.isSet(widthOpt), convert to int with QString::toInt() and validate > 0; if invalid, print error and exit(1). Same for height. In loadConfigFile(), read \"width\" and \"height\" integer keys from the JSON object (QJsonObject[\"width\"].toInt(1280)) and from the INI [QSettings] under keys \"width\" / \"height\". CLI values must always win over file values (apply file first, then overwrite with CLI values if parser.isSet()).\n\nAcceptance criteria:\n- `--width 1920 --height 1080` produces Config{width:1920, height:1080}\n- Omitting both flags produces Config{width:1280, height:720}\n- `--width 0` or `--width -1` exits with error code 1 and a descriptive message\n- JSON config file `{\"width\": 800, \"height\": 600}` is loaded; CLI flag overrides file value",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "resolution-option-mocx6uoo",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "src/config/config.h",
+        "src/config/config.cpp"
+      ],
+      "started_at": "2026-04-24T13:03:55.049Z",
+      "completed_at": "2026-04-24T13:05:12.504Z",
+      "error_log": []
+    },
+    {
+      "id": "task-012",
+      "title": "Phase 2 – Browser Core Wiring: apply width/height via resize() in AnoaBrowser",
+      "description": "Apply config.width and config.height to the QWebEngineView widget so both headed and headless modes render at the configured viewport dimensions.\n\nFile to modify:\n- src/browser/anoa_browser.cpp: In AnoaBrowser::init() (or the constructor body, after m_page is set and before load() is called), call `resize(m_config.width, m_config.height);` on the view. This single call covers both modes:\n  - Headed: resizes the visible QWidget window.\n  - Headless (offscreen): QWebEngineView::resize() sets the off-screen surface size, so screenshots and PDF output use the configured viewport.\n  The resize must happen BEFORE `load(QUrl(\"about:blank\"))` so the initial render (and any subsequent `Page.captureScreenshot`) uses the correct dimensions.\n  The call site should be just before or just after `show()` (which is only called in headed mode), but the resize itself is unconditional — apply it in both branches.\n\nAcceptance criteria:\n- In headed mode: the visible window opens at the configured width×height (default 1280×720, overridable via CLI)\n- In headless mode: a `Page.captureScreenshot` CDP command returns an image whose pixel dimensions match the configured width×height\n- `--width 800 --height 600` changes the viewport in both modes\n- No regression in existing headed/headless startup behavior",
+      "priority": 2,
+      "status": "completed",
+      "feature_id": "resolution-option-mocx6uoo",
+      "skill": null,
+      "blocked_by": [
+        "task-011"
+      ],
+      "passes": true,
+      "files": [
+        "src/browser/anoa_browser.cpp"
+      ],
+      "started_at": "2026-04-24T13:06:36.659Z",
+      "completed_at": "2026-04-24T13:07:42.016Z",
+      "error_log": []
+    },
+    {
+      "id": "task-013",
+      "title": "Phase 3 – Validation: verify resolution flags end-to-end and document findings",
+      "description": "Manually validate the resolution feature end-to-end and record all findings in AGENTS.md and .jonggrang/progress.txt.\n\nValidation steps:\n1. Build: `cmake -B build && cmake --build build --parallel`\n2. Headed default: `./build/anoa-browser --port 9223` — confirm window opens at 1280×720.\n3. Headed override: `./build/anoa-browser --port 9223 --width 800 --height 600` — confirm window is 800×600.\n4. Headless screenshot default: launch `./build/anoa-browser --headless --port 9224`, send CDP `Page.captureScreenshot` via websocket (use Node.js or wscat), decode base64 PNG, check image dimensions are 1280×720.\n5. Headless screenshot override: launch with `--headless --width 1920 --height 1080`, repeat step 4, confirm 1920×1080.\n6. Config file: write `{\"width\":640,\"height\":480}` to a JSON file, launch with `--config <file>`, verify dimensions are 640×480.\n7. CLI override beats config file: launch with `--config <file> --width 1024`, verify width is 1024, height is 480 from file.\n8. Invalid input: `--width 0` and `--width abc` — confirm exit code 1 with descriptive message.\n\nFiles to update:\n- AGENTS.md: Add a row to the Protocol Gap Matrix (or a new \"Resolution Feature\" sub-section under Known Gotchas) documenting that `resize()` must precede `load()`. Note any discovered quirks (e.g. macOS vs Linux behavior, offscreen DPI).\n- .jonggrang/progress.txt: Append a validation summary section with PASS/FAIL results for each step above.\n\nAcceptance criteria:\n- All 8 steps pass or failures are documented with workarounds\n- AGENTS.md reflects any new gotchas found during validation\n- .jonggrang/progress.txt contains a complete resolution-feature validation summary",
+      "priority": 3,
+      "status": "completed",
+      "feature_id": "resolution-option-mocx6uoo",
+      "skill": null,
+      "blocked_by": [
+        "task-012"
+      ],
+      "passes": true,
+      "files": [
+        "AGENTS.md",
+        ".jonggrang/progress.txt",
+        "src/config/config.cpp",
+        "src/browser/anoa_browser.cpp",
+        "src/cdp/cdp_proxy.cpp",
+        "src/cdp/cdp_proxy.h"
+      ],
+      "started_at": "2026-04-24T13:08:22.977Z",
+      "completed_at": "2026-04-24T13:58:40.053Z",
+      "error_log": []
     }
   ]
 }
