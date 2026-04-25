@@ -32,7 +32,7 @@ jobs:
           cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
 
       - name: Install system dependencies
-        run: sudo apt-get install -y libcups2-dev file desktop-file-utils
+        run: sudo apt-get install -y libcups2-dev file desktop-file-utils libfuse2 fuse
 
       - name: Configure
         run: |
