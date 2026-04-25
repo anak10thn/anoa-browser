@@ -47,16 +47,31 @@ jobs:
         run: |
           mkdir -p dist/anoa-browser/lib dist/anoa-browser/resources dist/anoa-browser/translations
 
-          # Binary
-          strip build/anoa-browser -o dist/anoa-browser/anoa-browser
+          # Binary — do NOT strip (removes symbol table needed by QtWebEngine)
+          cp build/anoa-browser dist/anoa-browser/anoa-browser
           chmod +x dist/anoa-browser/anoa-browser
 
           # Set RPATH so binary finds libs in ./lib
           patchelf --set-rpath '$ORIGIN/lib' dist/anoa-browser/anoa-browser
 
-          # Shared library dependencies
+          # Copy direct + transitive shared library dependencies (iterative)
+          # ldd only shows direct deps — we repeat until no new libs are found
+          prev_count=0
+          cur_count=$(ls dist/anoa-browser/lib/*.so* 2>/dev/null | wc -l || echo 0)
           ldd dist/anoa-browser/anoa-browser | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
-            cp -vn "$lib" dist/anoa-browser/lib/
+            cp -vn "$lib" dist/anoa-browser/lib/ 2>/dev/null || true
+          done
+          while true; do
+            prev_count=$cur_count
+            for f in dist/anoa-browser/lib/*.so*; do
+              [ -L "$f" ] && continue
+              [ ! -f "$f" ] && continue
+              ldd "$f" 2>/dev/null | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
+                cp -vn "$lib" dist/anoa-browser/lib/ 2>/dev/null || true
+              done
+            done
+            cur_count=$(ls dist/anoa-browser/lib/*.so* 2>/dev/null | wc -l)
+            [ "$cur_count" -eq "$prev_count" ] && break
           done
 
           # Qt plugins
