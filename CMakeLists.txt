@@ -111,11 +111,11 @@ else()
     target_compile_options(anoa-browser PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# RPATH for portable Linux distribution (AppImage: find .so alongside binary)
+# RPATH for portable Linux distribution (binary finds ./lib at runtime)
 if(UNIX AND NOT APPLE)
     set_target_properties(anoa-browser PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../lib"
-        BUILD_RPATH "$ORIGIN/../lib"
+        INSTALL_RPATH "$ORIGIN/lib"
+        BUILD_RPATH "$ORIGIN/lib"
         INSTALL_RPATH_USE_LINK_RPATH FALSE
     )
 endif()
