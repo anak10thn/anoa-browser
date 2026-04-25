@@ -6,7 +6,7 @@ on:
       - 'v*.*.*'
 
 env:
-  QT_VERSION: '6.10.2'
+  QT_VERSION: '6.8.3'
 
 jobs:
   build-linux:
@@ -36,18 +36,15 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DSTATIC_BUILD=ON \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Create distribution package
+      - name: Strip & package
         run: |
-          mkdir -p dist
           strip build/anoa-browser
-          cp build/anoa-browser dist/
-          cd build && ldd anoa-browser | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp -v '{}' ../dist/ 2>/dev/null || true
-          cd dist && tar czf ../anoa-browser-linux-x86_64.tar.gz anoa-browser
+          tar czf anoa-browser-linux-x86_64.tar.gz -C build anoa-browser
 
       - uses: actions/upload-artifact@v4
         with:
@@ -79,14 +76,13 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DSTATIC_BUILD=ON \
             -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
       - name: Build
         run: cmake --build build --parallel
 
       - name: Deploy Qt frameworks
-        run: |
-          $Qt6_DIR/bin/macdeployqt build/anoa-browser -verbose=2 -always-overwrite
+        run: macdeployqt build/anoa-browser -verbose=2 -always-overwrite
 
       - name: Package
         run: |
@@ -124,14 +120,13 @@ jobs:
             -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
             -DSTATIC_BUILD=ON `
-            -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Deploy Qt DLLs
-        run: |
-          & "$env:Qt6_DIR\bin\windeployqt.exe" build\Release\anoa-browser.exe --release --no-translations --no-opengl-sw
+        run: windeployqt build\Release\anoa-browser.exe --release --no-translations --no-opengl-sw
 
       - name: Package
         run: 7z a anoa-browser-windows-x86_64.zip .\build\Release\*

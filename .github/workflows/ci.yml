@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 env:
-  QT_VERSION: "6.10.2"
+  QT_VERSION: "6.8.3"
   QPA_PLATFORM: offscreen
   QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --no-sandbox"
 
@@ -40,7 +40,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTS=ON \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
       - name: Build test target
         run: cmake --build build --target anoa-browser-test-config --parallel
@@ -76,7 +76,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
       - uses: actions/setup-node@v4
@@ -129,7 +129,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
       - name: Run port layout tests
@@ -170,7 +170,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
       - uses: actions/setup-node@v4
@@ -231,7 +231,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$Qt6_DIR
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build --parallel
 
       - uses: actions/setup-node@v4
