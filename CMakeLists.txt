@@ -39,6 +39,10 @@ set(SOURCES
 
 add_executable(anoa-browser ${SOURCES})
 
+if(APPLE)
+    set_target_properties(anoa-browser PROPERTIES MACOSX_BUNDLE TRUE)
+endif()
+
 target_sources(anoa-browser PRIVATE
     src/config/config.cpp
     src/browser/anoa_browser.cpp

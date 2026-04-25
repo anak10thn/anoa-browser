@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 env:
-  QT_VERSION: "6.8.3"
+  QT_VERSION: "6.7.3"
   QPA_PLATFORM: offscreen
   QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --no-sandbox"
 
