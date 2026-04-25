@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Anoa Browser
+GenericName=Web Browser
+Comment=Headless browser with Chrome DevTools Protocol support
+Exec=anoa-browser
+Icon=anoa-browser
+Terminal=true
+Categories=Network;WebBrowser;
+StartupNotify=false

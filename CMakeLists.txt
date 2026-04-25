@@ -111,11 +111,11 @@ else()
     target_compile_options(anoa-browser PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# RPATH for portable Linux distribution (find .so in next to binary's lib/ dir)
+# RPATH for portable Linux distribution (AppImage: find .so alongside binary)
 if(UNIX AND NOT APPLE)
     set_target_properties(anoa-browser PROPERTIES
-        INSTALL_RPATH "$ORIGIN/lib"
-        BUILD_RPATH "$ORIGIN/lib"
+        INSTALL_RPATH "$ORIGIN/../lib"
+        BUILD_RPATH "$ORIGIN/../lib"
         INSTALL_RPATH_USE_LINK_RPATH FALSE
     )
 endif()
@@ -141,6 +141,13 @@ else()
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()
+
+install(FILES resources/anoa-browser.desktop
+    DESTINATION share/applications
+)
+install(FILES resources/anoa-browser.svg
+    DESTINATION share/icons/hicolor/scalable/apps
+)
 
 # Tests
 option(BUILD_TESTS "Build unit and integration test targets" OFF)
