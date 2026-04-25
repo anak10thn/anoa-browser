@@ -49,6 +49,10 @@ jobs:
           # Install into AppDir
           DESTDIR=AppDir cmake --install build
 
+          # appimagetool requires .desktop and icon at AppDir root
+          cp AppDir/usr/share/applications/anoa-browser.desktop AppDir/
+          cp AppDir/usr/share/icons/hicolor/scalable/apps/anoa-browser.svg AppDir/
+
           # Bundle Qt shared libraries
           mkdir -p AppDir/usr/lib
           ldd AppDir/usr/bin/anoa-browser | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
