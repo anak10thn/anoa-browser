@@ -146,12 +146,10 @@ jobs:
       - name: Deploy Qt frameworks into .app bundle
         run: |
           macdeployqt build/anoa-browser.app -verbose=2 -always-overwrite
-          QT_LIB="$QT_ROOT_DIR/lib"
-          FW="build/anoa-browser.app/Contents/Frameworks"
+          PLAT="build/anoa-browser.app/Contents/PlugIns/platforms"
+          cp "$QT_ROOT_DIR/plugins/platforms/libqoffscreen.dylib" "$PLAT/" 2>/dev/null || true
           RES="build/anoa-browser.app/Contents/Resources"
-          mkdir -p "$FW" "$RES/qtwebengine_locales"
-          cp "$QT_LIB/QtWebEngineProcess" "$FW/" 2>/dev/null || true
-          chmod +x "$FW/QtWebEngineProcess" 2>/dev/null || true
+          mkdir -p "$RES/qtwebengine_locales"
           cp -r "$QT_ROOT_DIR/resources/"* "$RES/" 2>/dev/null || true
           cp -r "$QT_ROOT_DIR/translations/qtwebengine_locales/"* "$RES/qtwebengine_locales/" 2>/dev/null || true
 
