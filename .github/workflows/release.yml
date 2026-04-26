@@ -221,3 +221,25 @@ jobs:
             *.tar.gz
             *.zip
           generate_release_notes: true
+
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          MACOS_SHA256=$(sha256sum anoa-browser-macos.tar.gz | awk '{print $1}')
+          LINUX_SHA256=$(sha256sum anoa-browser-linux-x86_64.tar.gz | awk '{print $1}')
+          git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/porcupine-md/homebrew-tap.git /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Casks /tmp/homebrew-tap/Formula
+
+          # macOS Cask
+          sed -e "s/{{VERSION}}/${VERSION}/" \
+              -e "s/{{MACOS_SHA256}}/${MACOS_SHA256}/" \
+              .github/homebrew/anoa-browser.rb.tpl > /tmp/homebrew-tap/Casks/anoa-browser.rb
+
+          # Linux Formula
+          sed -e "s/{{VERSION}}/${VERSION}/" \
+              -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
+              .github/homebrew/anoa-browser-linux.rb.tpl > /tmp/homebrew-tap/Formula/anoa-browser-linux.rb
+
+          cd /tmp/homebrew-tap && git add -A && git commit -m "anoa-browser v${VERSION}" && git push
