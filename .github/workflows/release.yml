@@ -231,6 +231,10 @@ jobs:
           MACOS_SHA256=$(sha256sum anoa-browser-macos.tar.gz | awk '{print $1}')
           LINUX_SHA256=$(sha256sum anoa-browser-linux-x86_64.tar.gz | awk '{print $1}')
           git clone --depth=1 https://x-access-token:${GH_TOKEN}@github.com/porcupine-md/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          cd -
           mkdir -p /tmp/homebrew-tap/Casks /tmp/homebrew-tap/Formula
 
           # macOS Cask
