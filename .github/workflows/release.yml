@@ -111,17 +111,15 @@ jobs:
           patchelf --set-rpath '$ORIGIN/..' "$bundle/lib/qt6/libexec/QtWebEngineProcess" 2>/dev/null || true
 
           # Wrapper script (primary entry point)
-          cat > "$bundle/anoa-browser.sh" << 'WRAPPER'
-#!/bin/sh
-SELF="$(readlink -f "$0")"
-DIR="$(dirname "$SELF")"
-export LD_LIBRARY_PATH="${DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export QT_PLUGIN_PATH="${DIR}/lib${QT_PLUGIN_PATH:+:${QT_PLUGIN_PATH}}"
-export QTWEBENGINEPROCESS_PATH="${DIR}/lib/qt6/libexec/QtWebEngineProcess"
-export QTWEBENGINERESOURCEPATH="${DIR}/resources"
-export QTWEBENGINE_LOCALE="${DIR}/translations/qtwebengine_locales"
-exec "${DIR}/anoa-browser" "$@"
-WRAPPER
+          printf '#!/bin/sh\n' > "$bundle/anoa-browser.sh"
+          printf 'SELF="$(readlink -f "$0")"\n' >> "$bundle/anoa-browser.sh"
+          printf 'DIR="$(dirname "$SELF")"\n' >> "$bundle/anoa-browser.sh"
+          printf 'export LD_LIBRARY_PATH="${DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"\n' >> "$bundle/anoa-browser.sh"
+          printf 'export QT_PLUGIN_PATH="${DIR}/lib${QT_PLUGIN_PATH:+:${QT_PLUGIN_PATH}}"\n' >> "$bundle/anoa-browser.sh"
+          printf 'export QTWEBENGINEPROCESS_PATH="${DIR}/lib/qt6/libexec/QtWebEngineProcess"\n' >> "$bundle/anoa-browser.sh"
+          printf 'export QTWEBENGINERESOURCEPATH="${DIR}/resources"\n' >> "$bundle/anoa-browser.sh"
+          printf 'export QTWEBENGINE_LOCALE="${DIR}/translations/qtwebengine_locales"\n' >> "$bundle/anoa-browser.sh"
+          printf 'exec "${DIR}/anoa-browser" "$@"\n' >> "$bundle/anoa-browser.sh"
           chmod +x "$bundle/anoa-browser.sh"
 
           tar czf anoa-browser-linux-x86_64.tar.gz -C dist anoa-browser
