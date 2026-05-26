@@ -12,13 +12,14 @@
 #include <QUrlQuery>
 
 HttpServer::HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
-                       const QString &authToken, QObject *parent)
+                       const QString &authToken, AnoaBrowser *browser, QObject *parent)
     : QObject(parent)
     , m_server(new QTcpServer(this))
     , m_port(port)
     , m_debugPort(debuggingPort)
     , m_proxyPort(proxyPort)
     , m_authToken(authToken)
+    , m_browser(browser)
 {
     connect(m_server, &QTcpServer::newConnection, this, &HttpServer::handleNewConnection);
 }

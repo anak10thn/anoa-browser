@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     const auto debugPort = static_cast<quint16>(config.port + 1);
     const auto wsPort    = static_cast<quint16>(config.port + 2);
 
-    HttpServer httpServer(httpPort, debugPort, wsPort, config.authToken, &app);
+    HttpServer httpServer(httpPort, debugPort, wsPort, config.authToken, &browser, &app);
     httpServer.start();
 
     CdpProxy cdpProxy(wsPort, debugPort, config.authToken, &app);
