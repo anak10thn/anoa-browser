@@ -120,6 +120,25 @@ void HttpServer::handleNewConnection()
         }
     }
 
+    // Redirect /render/ (trailing slash) to /render, preserving query string.
+    if (method == QLatin1String("GET") && path == QLatin1String("/render/")) {
+        QString location = QStringLiteral("/render");
+        QString origQuery = url.query();
+        if (!origQuery.isEmpty())
+            location += QStringLiteral("?") + origQuery;
+        QByteArray response =
+            "HTTP/1.1 301 Moved Permanently\r\n"
+            "Location: " + location.toUtf8() + "\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        socket->write(response);
+        socket->flush();
+        socket->disconnectFromHost();
+        socket->deleteLater();
+        return;
+    }
+
     // Route CDP discovery paths to the internal Chromium debugging port.
     // Normalize trailing slash: Playwright requests /json/version/ with a slash.
     if (path.endsWith('/') && path.size() > 1)
@@ -314,6 +333,47 @@ void HttpServer::handleNewConnection()
             "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
             "Connection: close\r\n"
             "\r\n" + body;
+        socket->write(response);
+        socket->flush();
+        socket->disconnectFromHost();
+        socket->deleteLater();
+    } else if (method == QLatin1String("GET") && path == QLatin1String("/render")) {
+        QString screenshotUrl = QStringLiteral("/render/screenshot.png");
+        if (!m_authToken.isEmpty())
+            screenshotUrl += QStringLiteral("?token=") + m_authToken;
+
+        static const char htmlTmpl[] = R"(<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Anoa Live View</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+#frame{display:block;width:100%;height:100%;object-fit:contain}
+</style>
+</head>
+<body>
+<img id="frame">
+<script>
+var src="%1";
+var img=document.getElementById("frame");
+function refresh(){img.src=src+(src.indexOf("?")>=0?"&":"?")+"_t="+Date.now();}
+refresh();
+setInterval(refresh,500);
+</script>
+</body>
+</html>)";
+
+        QByteArray htmlBytes = QString::fromUtf8(htmlTmpl).arg(screenshotUrl).toUtf8();
+        QByteArray response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Content-Length: " + QByteArray::number(htmlBytes.size()) + "\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        response += htmlBytes;
         socket->write(response);
         socket->flush();
         socket->disconnectFromHost();
