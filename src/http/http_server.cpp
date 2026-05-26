@@ -1,11 +1,15 @@
 #include "http/http_server.h"
 
+#include "browser/anoa_browser.h"
+
+#include <QBuffer>
 #include <QEventLoop>
 #include <QHostAddress>
 #include <QMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPixmap>
 #include <QTcpSocket>
 #include <QTimer>
 #include <QUrl>
@@ -167,6 +171,44 @@ void HttpServer::handleNewConnection()
 
         QByteArray statusText = (statusCode == 200) ? "OK" : "Service Unavailable";
         sendResponse(socket, statusCode, statusText, body);
+    } else if (method == QLatin1String("GET")
+               && path == QLatin1String("/render/screenshot.png")) {
+        QByteArray pngBytes;
+        bool ok = false;
+        if (m_browser) {
+            QPixmap pixmap = m_browser->grab();
+            if (!pixmap.isNull()) {
+                QBuffer buf(&pngBytes);
+                buf.open(QIODevice::WriteOnly);
+                ok = pixmap.save(&buf, "PNG");
+            }
+        }
+        if (!ok) {
+            QByteArray body = "capture failed";
+            QByteArray response =
+                "HTTP/1.1 503 Service Unavailable\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n" + body;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        } else {
+            QByteArray response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: image/png\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Content-Length: " + QByteArray::number(pngBytes.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            response += pngBytes;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        }
     } else {
         sendResponse(socket, 404, "Not Found", R"({"error":"not found"})");
     }
