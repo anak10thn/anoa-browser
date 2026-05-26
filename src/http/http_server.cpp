@@ -209,6 +209,51 @@ void HttpServer::handleNewConnection()
             socket->disconnectFromHost();
             socket->deleteLater();
         }
+    } else if (method == QLatin1String("GET") && path == QLatin1String("/render/html")) {
+        QString htmlResult;
+        bool timedOut = true;
+
+        if (m_browser && m_browser->page()) {
+            QEventLoop loop;
+            QTimer timer;
+            timer.setSingleShot(true);
+            connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+            timer.start(5000);
+            m_browser->page()->toHtml([&](const QString &html) {
+                htmlResult = html;
+                timedOut = false;
+                loop.quit();
+            });
+            loop.exec();
+        }
+
+        if (timedOut) {
+            QByteArray body = "html capture timeout";
+            QByteArray response =
+                "HTTP/1.1 504 Gateway Timeout\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n" + body;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        } else {
+            QByteArray htmlBytes = htmlResult.toUtf8();
+            QByteArray response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html; charset=utf-8\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Content-Length: " + QByteArray::number(htmlBytes.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            response += htmlBytes;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        }
     } else {
         sendResponse(socket, 404, "Not Found", R"({"error":"not found"})");
     }
