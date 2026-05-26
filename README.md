@@ -147,6 +147,45 @@ The binary uses 3 consecutive ports:
 
 ---
 
+## Web Render Endpoints
+
+The HTTP server exposes a `/render/*` family for inspecting the live browser view from any web browser or CLI tool — no CDP client required.
+
+All endpoints share the same `--token` auth as the CDP endpoints: pass the secret as a `Bearer` header or `?token=` query parameter.
+
+### Endpoints
+
+| Method | Path | Response | Description |
+|---|---|---|---|
+| `GET` | `/render` | `text/html` | Live viewer page — auto-refreshing screenshot in the browser |
+| `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot |
+| `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
+| `POST` | `/render/navigate?url=<url>` | `application/json` | Load a URL into the embedded browser |
+| `GET` | `/render/stream.mjpeg` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) |
+
+### Usage example
+
+```bash
+# 1. Start anoa with a token and navigate to a page
+./anoa-browser --headless --port 9222 --token mysecret --url https://example.com
+
+# 2. Open the live viewer in any browser
+open "http://localhost:9222/render?token=mysecret"
+
+# 3. Fetch a PNG screenshot with curl
+curl -H "Authorization: Bearer mysecret" \
+     http://localhost:9222/render/screenshot.png \
+     -o screenshot.png
+
+# 4. Navigate the browser to a new URL
+curl -X POST "http://localhost:9222/render/navigate?url=https://news.ycombinator.com&token=mysecret"
+
+# 5. Stream live MJPEG (e.g. in VLC or ffplay)
+ffplay "http://localhost:9222/render/stream.mjpeg?token=mysecret"
+```
+
+---
+
 ## CDP Protocol Support
 
 ### Supported / Passing
