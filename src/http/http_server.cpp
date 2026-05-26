@@ -254,6 +254,70 @@ void HttpServer::handleNewConnection()
             socket->disconnectFromHost();
             socket->deleteLater();
         }
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/navigate")) {
+        // Prefer url from query string; fall back to plain-text request body.
+        QString navUrl = query.queryItemValue(QStringLiteral("url"), QUrl::FullyDecoded);
+        if (navUrl.isEmpty()) {
+            QByteArray bodyBytes = requestData.mid(headerEnd + 4);
+            bool lengthOk = false;
+            int contentLength = headers.value(QStringLiteral("content-length")).toInt(&lengthOk);
+            if (lengthOk && contentLength > bodyBytes.size()) {
+                while (bodyBytes.size() < contentLength) {
+                    if (!socket->waitForReadyRead(5000))
+                        break;
+                    bodyBytes += socket->readAll();
+                }
+            }
+            navUrl = QString::fromUtf8(bodyBytes.trimmed());
+        }
+
+        QUrl parsedUrl(navUrl);
+        if (navUrl.isEmpty() || !parsedUrl.isValid() || parsedUrl.isRelative()) {
+            QByteArray body = "invalid url";
+            QByteArray response =
+                "HTTP/1.1 400 Bad Request\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n" + body;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+            return;
+        }
+
+        QString scheme = parsedUrl.scheme().toLower();
+        if (scheme != QLatin1String("http") && scheme != QLatin1String("https")
+            && scheme != QLatin1String("file")) {
+            QByteArray body = "scheme not allowed";
+            QByteArray response =
+                "HTTP/1.1 400 Bad Request\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n" + body;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+            return;
+        }
+
+        if (m_browser)
+            m_browser->load(parsedUrl);
+
+        QByteArray body = "navigating";
+        QByteArray response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+            "Connection: close\r\n"
+            "\r\n" + body;
+        socket->write(response);
+        socket->flush();
+        socket->disconnectFromHost();
+        socket->deleteLater();
     } else {
         sendResponse(socket, 404, "Not Found", R"({"error":"not found"})");
     }
