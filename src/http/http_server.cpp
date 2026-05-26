@@ -378,6 +378,61 @@ setInterval(refresh,500);
         socket->flush();
         socket->disconnectFromHost();
         socket->deleteLater();
+    } else if (method == QLatin1String("GET")
+               && path == QLatin1String("/render/stream.mjpeg")) {
+        // Send MJPEG stream headers — keep socket open, no Content-Length.
+        QByteArray streamHeader =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n";
+        socket->write(streamHeader);
+        socket->flush();
+
+        // Timer fires every 100 ms (~10 fps). Parented to socket so it is
+        // cleaned up automatically if socket is deleted before disconnected fires.
+        QTimer *frameTimer = new QTimer(socket);
+        frameTimer->setInterval(100);
+
+        AnoaBrowser *browser = m_browser;
+        connect(frameTimer, &QTimer::timeout, socket, [browser, socket]() {
+            // Skip this frame if the write buffer is backed up beyond 512 KB.
+            if (socket->bytesToWrite() > 512 * 1024)
+                return;
+            if (!browser)
+                return;
+
+            QPixmap pixmap = browser->grab();
+            if (pixmap.isNull())
+                return;
+
+            QByteArray jpegBytes;
+            QBuffer buf(&jpegBytes);
+            buf.open(QIODevice::WriteOnly);
+            if (!pixmap.save(&buf, "JPEG", 70))
+                return;
+            buf.close();
+
+            QByteArray part;
+            part += "--frame\r\n";
+            part += "Content-Type: image/jpeg\r\n";
+            part += "Content-Length: " + QByteArray::number(jpegBytes.size()) + "\r\n";
+            part += "\r\n";
+            part += jpegBytes;
+            part += "\r\n";
+
+            socket->write(part);
+            socket->flush();
+        });
+
+        connect(socket, &QTcpSocket::disconnected, socket, [socket, frameTimer]() {
+            frameTimer->stop();
+            socket->deleteLater();
+        });
+
+        frameTimer->start();
+        // Do not close socket — stream runs until client disconnects.
     } else {
         sendResponse(socket, 404, "Not Found", R"({"error":"not found"})");
     }
