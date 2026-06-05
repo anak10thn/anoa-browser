@@ -1,5 +1,6 @@
 ---
 feature: anoa-headless-browser-cdp
+feature_id: anoa-headless-browser-cdp-mobcchbp
 branch: feat/anoa-headless-browser-cdp
 work_type: LARGE
 description: Headless browser built on Qt6/QWebEngine with full CDP support via remote debugging passthrough and a Node.js/TypeScript process manager

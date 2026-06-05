@@ -13,14 +13,14 @@ const path = require('path');
 // ============================================================
 
 const EVENT_MAP = {
-  // Universal event          Claude Code hook type     OpenCode event name
-  pre_tool:     { claude: 'PreToolUse',               opencode: 'tool.execute.before' },
-  post_tool:    { claude: 'PostToolUse',              opencode: 'tool.execute.after'  },
-  stop:         { claude: 'Stop',                     opencode: 'session.idle'        },
-  agent_stop:   { claude: 'SubagentStop',             opencode: 'session.updated'     },
-  session_start:{ claude: 'UserPromptSubmit',         opencode: 'session.created'     },
-  file_edit:    { claude: 'PostToolUse',              opencode: 'file.edited'         },
-  compaction:   { claude: 'PreToolUse',               opencode: 'session.compacted'   },
+  // Universal event          Claude Code hook type     OpenCode event name             Pi extension event
+  pre_tool:     { claude: 'PreToolUse',               opencode: 'tool.execute.before', jonggrang: 'tool_call'               },
+  post_tool:    { claude: 'PostToolUse',              opencode: 'tool.execute.after',  jonggrang: 'tool_result'             },
+  stop:         { claude: 'Stop',                     opencode: 'session.idle',        jonggrang: 'agent_stop'              },
+  agent_stop:   { claude: 'SubagentStop',             opencode: 'session.updated',     jonggrang: 'agent_stop'              },
+  session_start:{ claude: 'UserPromptSubmit',         opencode: 'session.created',     jonggrang: 'session_start'           },
+  file_edit:    { claude: 'PostToolUse',              opencode: 'file.edited',         jonggrang: 'tool_result'             },
+  compaction:   { claude: 'PreToolUse',               opencode: 'session.compacted',   jonggrang: 'before_provider_request' },
 };
 
 // ============================================================
@@ -36,6 +36,8 @@ const HOOK_DEFINITIONS = {
     description: 'Block direct file edits — force delegation to specialized agents',
     claude_script: 'hooks/claude/agent-first.sh',
     opencode_handler: 'agentFirst',
+    jonggrang_handler: 'agentFirst',
+    codex_handler: 'agentFirst',
     match_tools: ['Edit', 'Write'],   // only intercept these tools
     blocking: true,
   },
@@ -47,6 +49,8 @@ const HOOK_DEFINITIONS = {
     description: 'Block new agent spawning when context budget exceeded',
     claude_script: 'hooks/claude/compaction-gate.sh',
     opencode_handler: 'compactionGate',
+    jonggrang_handler: 'compactionGate',
+    codex_handler: 'compactionGate',
     match_tools: ['Task'],
     blocking: true,
   },
@@ -58,6 +62,8 @@ const HOOK_DEFINITIONS = {
     description: 'Track file modifications and set domain dirty bit',
     claude_script: 'hooks/claude/track-modifications.sh',
     opencode_handler: 'trackModifications',
+    jonggrang_handler: 'trackModifications',
+    codex_handler: 'trackModifications',
     match_tools: ['Edit', 'Write'],
     blocking: false,
   },
@@ -69,6 +75,8 @@ const HOOK_DEFINITIONS = {
     description: 'Block exit until all modified domains pass review and testing',
     claude_script: 'hooks/claude/feedback-loop.sh',
     opencode_handler: 'feedbackLoop',
+    jonggrang_handler: 'feedbackLoop',
+    codex_handler: 'feedbackLoop',
     blocking: true,
   },
 
@@ -78,6 +86,8 @@ const HOOK_DEFINITIONS = {
     description: 'Final quality gate — defense in depth backup check',
     claude_script: 'hooks/claude/quality-gate.sh',
     opencode_handler: 'qualityGate',
+    jonggrang_handler: 'qualityGate',
+    codex_handler: 'qualityGate',
     blocking: true,
   },
 
@@ -88,6 +98,8 @@ const HOOK_DEFINITIONS = {
     description: 'Enforce output files are in .jonggrang/.output/ not scattered',
     claude_script: 'hooks/claude/output-enforcement.sh',
     opencode_handler: 'outputEnforcement',
+    jonggrang_handler: 'outputEnforcement',
+    codex_handler: 'outputEnforcement',
     blocking: true,
   },
 
@@ -98,6 +110,8 @@ const HOOK_DEFINITIONS = {
     description: 'Warn if agent output lacks persisting-agent-outputs compliance marker',
     claude_script: 'hooks/claude/task-skill-enforcement.sh',
     opencode_handler: 'taskSkillEnforcement',
+    jonggrang_handler: 'taskSkillEnforcement',
+    codex_handler: 'taskSkillEnforcement',
     match_tools: ['Task'],
     blocking: false,
   },
@@ -109,6 +123,8 @@ const HOOK_DEFINITIONS = {
     description: 'Queue the expected role before spawning a sub-agent via Task',
     claude_script: 'hooks/claude/task-role-claim.sh',
     opencode_handler: 'taskRoleClaim',
+    jonggrang_handler: 'taskRoleClaim',
+    codex_handler: 'taskRoleClaim',
     match_tools: ['Task'],
     blocking: false,
   },
@@ -120,7 +136,52 @@ const HOOK_DEFINITIONS = {
     description: 'Register session role so agent-first enforcement can identify developers/testers',
     claude_script: 'hooks/claude/session-init.sh',
     opencode_handler: 'sessionInit',
+    jonggrang_handler: 'sessionInit',
+    codex_handler: 'sessionInit',
     blocking: false,
+  },
+
+  // Sensitive File Protection
+  // Blocks AI agent from reading/writing .pem, .key, id_rsa, credentials, etc.
+  // .env / orcinus files allowed only if already in .gitignore
+  block_sensitive_files: {
+    event: 'pre_tool',
+    description: 'Block AI access to sensitive files — certs, keys, credentials, unprotected .env',
+    claude_script: 'hooks/claude/block-sensitive-files.sh',
+    opencode_handler: 'blockSensitiveFiles',
+    match_tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'],
+    blocking: true,
+  },
+
+  // Secret Command Block
+  // Blocks Bash commands that would dump secrets into LLM context
+  block_secret_commands: {
+    event: 'pre_tool',
+    description: 'Block Bash commands that expose secrets (env, aws creds, gh token, etc.)',
+    claude_script: 'hooks/claude/block-secret-commands.sh',
+    opencode_handler: 'blockSecretCommands',
+    match_tools: ['Bash'],
+    blocking: true,
+  },
+
+  // Output Sanitization
+  // Redacts secrets from tool output before it enters LLM context
+  sanitize_output: {
+    event: 'post_tool',
+    description: 'Redact AWS keys, JWTs, DB passwords from tool output before LLM sees it',
+    claude_script: 'hooks/claude/sanitize-output.sh',
+    opencode_handler: 'sanitizeOutput',
+    blocking: false,
+  },
+
+  // Secret Final Check (SubagentStop)
+  // Scans modified files for leaked secrets via trufflehog before agent completes
+  secret_final_check: {
+    event: 'agent_stop',
+    description: 'Trufflehog scan on modified files — block agent completion if secrets found',
+    claude_script: 'hooks/claude/secret-final-check.sh',
+    opencode_handler: 'secretFinalCheck',
+    blocking: true,
   },
 };
 
@@ -269,6 +330,7 @@ function installOpenCodePlugin(projectRoot, jonggrangInstallDir) {
     `} catch(e) {`,
     `  createPlugin = require(${JSON.stringify(handlerAbsPath)}).createPlugin;`,
     `}`,
+    `// createPlugin returns { id, server, stub } — OpenCode calls server() when id is present`,
     `module.exports = createPlugin(projectRoot);`,
   ].join('\n'));
 
@@ -277,11 +339,35 @@ function installOpenCodePlugin(projectRoot, jonggrangInstallDir) {
 }
 
 // ============================================================
+// PI (JONGGRANG) EXTENSION INSTALLER
+// Installs the TypeScript Pi extension into .jonggrang/extensions/
+// The extension is loaded on-the-fly via --extension flag in `jonggrang agent`,
+// so no registration in ~/.jonggrang/agent/settings.json is needed.
+// ============================================================
+
+/**
+ * Install Jonggrang Pi extension in project.
+ * Copies hooks/pi/jonggrang-extension.ts → .jonggrang/extensions/jonggrang.ts
+ */
+function installPiExtension(projectRoot, jonggrangInstallDir) {
+  const extensionsDir = path.join(projectRoot, '.jonggrang', 'extensions');
+  fs.mkdirSync(extensionsDir, { recursive: true });
+
+  const src = path.join(jonggrangInstallDir, 'hooks', 'pi', 'jonggrang-extension.ts');
+  const dest = path.join(extensionsDir, 'jonggrang.ts');
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, dest);
+  }
+
+  return dest;
+}
+
+// ============================================================
 // AUTO-DETECT AND INSTALL
 // ============================================================
 
 /**
- * Install hooks for the appropriate tool (claude or opencode).
+ * Install hooks for the appropriate tool (claude, opencode, or jonggrang).
  * Called during `jonggrang init`.
  */
 function installHooksForTool(projectRoot, tool, jonggrangInstallDir) {
@@ -301,6 +387,9 @@ function installHooksForTool(projectRoot, tool, jonggrangInstallDir) {
 
   const pluginPath = installOpenCodePlugin(projectRoot, jonggrangInstallDir);
   results.opencode = { installed: true, path: pluginPath };
+
+  const piExtPath = installPiExtension(projectRoot, jonggrangInstallDir);
+  results.jonggrang = { installed: true, path: piExtPath };
 
   return results;
 }
@@ -333,5 +422,6 @@ module.exports = {
   buildClaudeSettingsHooks,
   generateOpenCodePlugin,
   installOpenCodePlugin,
+  installPiExtension,
   installHooksForTool,
 };

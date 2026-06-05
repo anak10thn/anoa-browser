@@ -15,6 +15,8 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <memory>
+
 HttpServer::HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
                        const QString &authToken, AnoaBrowser *browser, QObject *parent)
     : QObject(parent)
@@ -39,11 +41,12 @@ void HttpServer::stop()
 }
 
 static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &statusText,
-                         const QByteArray &body)
+                         const QByteArray &body,
+                         const QByteArray &contentType = "application/json")
 {
     QByteArray response =
         "HTTP/1.1 " + QByteArray::number(statusCode) + " " + statusText + "\r\n"
-        "Content-Type: application/json\r\n"
+        "Content-Type: " + contentType + "\r\n"
         "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
         "Connection: close\r\n"
         "\r\n" + body;
@@ -53,13 +56,19 @@ static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &s
     socket->deleteLater();
 }
 
+struct HtmlCaptureState {
+    QString html;
+    bool timedOut = true;
+    bool waiting = true;
+    QEventLoop *loop = nullptr;
+};
+
 void HttpServer::handleNewConnection()
 {
     QTcpSocket *socket = m_server->nextPendingConnection();
     if (!socket)
         return;
 
-    // Accumulate data until the end of HTTP headers (\r\n\r\n).
     QByteArray requestData;
     while (!requestData.contains("\r\n\r\n")) {
         if (!socket->waitForReadyRead(5000)) {
@@ -70,7 +79,6 @@ void HttpServer::handleNewConnection()
         requestData += socket->readAll();
     }
 
-    // Parse request line.
     int firstLineEnd = requestData.indexOf("\r\n");
     QList<QByteArray> requestLineParts = requestData.left(firstLineEnd).split(' ');
     if (requestLineParts.size() < 2) {
@@ -82,7 +90,6 @@ void HttpServer::handleNewConnection()
     QString method = QString::fromUtf8(requestLineParts[0]);
     QString rawPath = QString::fromUtf8(requestLineParts[1]);
 
-    // Parse headers into a lowercased map.
     QMap<QString, QString> headers;
     int headerEnd = requestData.indexOf("\r\n\r\n");
     QByteArray headerSection = requestData.mid(firstLineEnd + 2, headerEnd - firstLineEnd - 2);
@@ -96,25 +103,18 @@ void HttpServer::handleNewConnection()
         }
     }
 
-    // Decompose path and query string.
     QUrl url(rawPath);
     QString path = url.path();
     QUrlQuery query(url.query());
     QString hostHeader = headers.value(QStringLiteral("host"),
                                        QStringLiteral("127.0.0.1:%1").arg(m_port));
 
-    // Auth check.
     if (!m_authToken.isEmpty()) {
-        bool authorized = false;
         QString authHeader = headers.value(QStringLiteral("authorization"));
-        if (authHeader.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive)
-            && authHeader.mid(7) == m_authToken) {
-            authorized = true;
-        }
-        if (!authorized && query.queryItemValue(QStringLiteral("token")) == m_authToken) {
-            authorized = true;
-        }
-        if (!authorized) {
+        bool viaBearer = authHeader.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive)
+                         && authHeader.mid(7) == m_authToken;
+        bool viaQuery = query.queryItemValue(QStringLiteral("token")) == m_authToken;
+        if (!viaBearer && !viaQuery) {
             sendResponse(socket, 401, "Unauthorized", R"({"error":"unauthorized"})");
             return;
         }
@@ -203,17 +203,7 @@ void HttpServer::handleNewConnection()
             }
         }
         if (!ok) {
-            QByteArray body = "capture failed";
-            QByteArray response =
-                "HTTP/1.1 503 Service Unavailable\r\n"
-                "Content-Type: text/plain\r\n"
-                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
-                "Connection: close\r\n"
-                "\r\n" + body;
-            socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+            sendResponse(socket, 503, "Service Unavailable", "capture failed", "text/plain");
         } else {
             QByteArray response =
                 "HTTP/1.1 200 OK\r\n"
@@ -229,37 +219,32 @@ void HttpServer::handleNewConnection()
             socket->deleteLater();
         }
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render/html")) {
-        QString htmlResult;
-        bool timedOut = true;
+        auto state = std::make_shared<HtmlCaptureState>();
 
         if (m_browser && m_browser->page()) {
             QEventLoop loop;
             QTimer timer;
+            state->loop = &loop;
             timer.setSingleShot(true);
             connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
             timer.start(5000);
-            m_browser->page()->toHtml([&](const QString &html) {
-                htmlResult = html;
-                timedOut = false;
-                loop.quit();
+            m_browser->page()->toHtml([state](const QString &html) {
+                if (!state->waiting)
+                    return;
+                state->html = html;
+                state->timedOut = false;
+                if (state->loop)
+                    state->loop->quit();
             });
             loop.exec();
+            state->waiting = false;
+            state->loop = nullptr;
         }
 
-        if (timedOut) {
-            QByteArray body = "html capture timeout";
-            QByteArray response =
-                "HTTP/1.1 504 Gateway Timeout\r\n"
-                "Content-Type: text/plain\r\n"
-                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
-                "Connection: close\r\n"
-                "\r\n" + body;
-            socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+        if (state->timedOut) {
+            sendResponse(socket, 504, "Gateway Timeout", "html capture timeout", "text/plain");
         } else {
-            QByteArray htmlBytes = htmlResult.toUtf8();
+            QByteArray htmlBytes = state->html.toUtf8();
             QByteArray response =
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: text/html; charset=utf-8\r\n"
@@ -292,55 +277,28 @@ void HttpServer::handleNewConnection()
 
         QUrl parsedUrl(navUrl);
         if (navUrl.isEmpty() || !parsedUrl.isValid() || parsedUrl.isRelative()) {
-            QByteArray body = "invalid url";
-            QByteArray response =
-                "HTTP/1.1 400 Bad Request\r\n"
-                "Content-Type: text/plain\r\n"
-                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
-                "Connection: close\r\n"
-                "\r\n" + body;
-            socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+            sendResponse(socket, 400, "Bad Request", "invalid url", "text/plain");
             return;
         }
 
         QString scheme = parsedUrl.scheme().toLower();
         if (scheme != QLatin1String("http") && scheme != QLatin1String("https")
             && scheme != QLatin1String("file")) {
-            QByteArray body = "scheme not allowed";
-            QByteArray response =
-                "HTTP/1.1 400 Bad Request\r\n"
-                "Content-Type: text/plain\r\n"
-                "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
-                "Connection: close\r\n"
-                "\r\n" + body;
-            socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+            sendResponse(socket, 400, "Bad Request", "scheme not allowed", "text/plain");
             return;
         }
 
         if (m_browser)
             m_browser->load(parsedUrl);
 
-        QByteArray body = "navigating";
-        QByteArray response =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
-            "Connection: close\r\n"
-            "\r\n" + body;
-        socket->write(response);
-        socket->flush();
-        socket->disconnectFromHost();
-        socket->deleteLater();
+        sendResponse(socket, 200, "OK", "navigating", "text/plain");
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render")) {
         QString screenshotUrl = QStringLiteral("/render/screenshot.png");
-        if (!m_authToken.isEmpty())
-            screenshotUrl += QStringLiteral("?token=") + m_authToken;
+        if (!m_authToken.isEmpty()) {
+            QUrlQuery screenshotQuery;
+            screenshotQuery.addQueryItem(QStringLiteral("token"), m_authToken);
+            screenshotUrl += QStringLiteral("?") + screenshotQuery.toString(QUrl::FullyEncoded);
+        }
 
         static const char htmlTmpl[] = R"(<!DOCTYPE html>
 <html>

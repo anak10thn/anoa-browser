@@ -1,3 +1,13 @@
+---
+feature: anoa-headless-browser-cdp
+branch: feat/anoa-headless-browser-cdp
+work_type: LARGE
+description: Headless browser built on Qt6/QWebEngine with full CDP support via remote debugging passthrough and a Node.js/TypeScript process manager
+created_at: 2026-04-23T10:21:22.832Z
+depth: deep
+phase: 12
+---
+
 # Test Plan — anoa-browser (anoa-headless-browser-cdp)
 
 **Feature**: anoa-headless-browser-cdp  

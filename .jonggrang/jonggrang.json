@@ -1,9 +1,9 @@
 {
-  "name": "anoa-browser",
+  "name": "anoa",
   "version": "1.0.0",
   "tool": "claude",
   "project": {
-    "type": "api",
+    "type": "library",
     "stack": "node-typescript",
     "template": "node-typescript"
   },
@@ -35,8 +35,8 @@
     "coverage_threshold": 80
   },
   "ci": {
-    "provider": "none",
-    "auto_setup": false
+    "provider": "github-actions",
+    "auto_setup": true
   },
   "skills": {
     "directory": "./.claude/skills",

@@ -151,7 +151,7 @@ The binary uses 3 consecutive ports:
 
 The HTTP server exposes a `/render/*` family for inspecting the live browser view from any web browser or CLI tool — no CDP client required.
 
-All endpoints share the same `--token` auth as the CDP endpoints: pass the secret as a `Bearer` header or `?token=` query parameter.
+All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the secret as a `Bearer` header or `?token=` query parameter.
 
 ### Endpoints
 
@@ -160,27 +160,30 @@ All endpoints share the same `--token` auth as the CDP endpoints: pass the secre
 | `GET` | `/render` | `text/html` | Live viewer page — auto-refreshing screenshot in the browser |
 | `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot |
 | `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
-| `POST` | `/render/navigate?url=<url>` | `application/json` | Load a URL into the embedded browser |
+| `POST` | `/render/navigate?url=<url>` | `text/plain` | Load a URL into the embedded browser |
 | `GET` | `/render/stream.mjpeg` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) |
 
 ### Usage example
 
 ```bash
-# 1. Start anoa with a token and navigate to a page
-./anoa-browser --headless --port 9222 --token mysecret --url https://example.com
+# 1. Start anoa with a token
+./anoa-browser --headless --port 9222 --auth-token mysecret
 
-# 2. Open the live viewer in any browser
+# 2. Navigate the browser to a page
+curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fexample.com&token=mysecret"
+
+# 3. Open the live viewer in any browser
 open "http://localhost:9222/render?token=mysecret"
 
-# 3. Fetch a PNG screenshot with curl
+# 4. Fetch a PNG screenshot with curl
 curl -H "Authorization: Bearer mysecret" \
      http://localhost:9222/render/screenshot.png \
      -o screenshot.png
 
-# 4. Navigate the browser to a new URL
-curl -X POST "http://localhost:9222/render/navigate?url=https://news.ycombinator.com&token=mysecret"
+# 5. Navigate the browser to a new URL
+curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycombinator.com&token=mysecret"
 
-# 5. Stream live MJPEG (e.g. in VLC or ffplay)
+# 6. Stream live MJPEG (e.g. in VLC or ffplay)
 ffplay "http://localhost:9222/render/stream.mjpeg?token=mysecret"
 ```
 

@@ -1,3 +1,11 @@
+---
+feature: resolution-option
+branch: feat/resolution-option
+work_type: SMALL
+description: Add --width/--height CLI flags (default 1280x720) and apply window/viewport size in browser core
+created_at: 2026-04-24T12:59:55.744Z
+---
+
 # Phase 12 – Test Planning: resolution-option
 
 ## Feature Summary

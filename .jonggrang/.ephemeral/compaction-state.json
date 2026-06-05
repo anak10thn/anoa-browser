@@ -1,7 +1,6 @@
 {
   "status": "ok",
-  "ratio": 0.15885,
-  "tokens": 31770,
-  "message": "Context healthy at 16% (31,770 tokens).",
-  "updated_at": "2026-04-25T08:33:03.084Z"
+  "ratio": 0,
+  "message": "Context usage unknown (no session file). Proceeding.",
+  "updated_at": "2026-05-27T11:58:50.501Z"
 }
