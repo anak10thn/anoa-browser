@@ -12,6 +12,8 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 - **Headless and headed modes** from the same binary
 - **HTTP discovery endpoints** — `/json`, `/json/version`, `/json/list` (Chrome-compatible)
 - **WebSocket CDP proxy** with session multiplexing and optional bearer token auth
+- **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation over plain HTTP (`/render/*`)
+- **Remote CDP friendly** — Chromium started with `--remote-allow-origins=*`, so clients behind tunnels/reverse proxies connect without Origin rejections (access control via `--auth-token`)
 - **`Page.printToPDF`** — intercepted and handled via `QWebEnginePage::printToPdf`
 - **Named browser profiles** — isolated cookie jars and localStorage per profile
 - **Extension loading** — unpacked Chromium extensions (manifest v2)
@@ -90,12 +92,16 @@ make release-static QT_PREFIX=/path/to/qt JOBS=8 INSTALL_PREFIX=/opt/anoa
 anoa-browser [options]
 
 Options:
-  --port <N>           CDP HTTP/WebSocket port (default: 9222)
-  --headless           Run in offscreen/headless mode (no display required)
-  --profile <name>     Named browser profile (isolated cookies/storage)
-  --token <secret>     Require Bearer token for WebSocket connections
-  --load-extension <path>  Load unpacked Chromium extension from directory
-  --url <url>          Navigate to URL at startup (default: about:blank)
+  -p, --port <N>        CDP HTTP/WebSocket port (default: 9222)
+  --headless            Run in offscreen/headless mode (no display required)
+  --no-sandbox          Disable Chromium sandbox
+  --profile <name>      Named browser profile (isolated cookies/storage)
+  --profile-dir <dir>   Base directory for browser profiles
+  --auth-token <secret> Require Bearer token for CDP WebSocket connections
+  --extension <path>    Load unpacked Chromium extension directory (repeatable)
+  --config <file>       Path to JSON or INI config file
+  --width <px>          Browser viewport/window width (default: 1280)
+  --height <px>         Browser viewport/window height (default: 720)
 ```
 
 ### Examples
@@ -108,7 +114,7 @@ Options:
 ./anoa-browser --port 9222 --profile myprofile
 
 # With bearer token auth
-./anoa-browser --headless --port 9222 --token mysecret
+./anoa-browser --headless --port 9222 --auth-token mysecret
 
 # Connect Playwright
 node -e "
@@ -144,6 +150,10 @@ The binary uses 3 consecutive ports:
 | `N` (e.g. 9222) | HTTP discovery + WebSocket CDP proxy |
 | `N+1` (e.g. 9223) | Chromium internal DevTools (set via `QTWEBENGINE_CHROMIUM_FLAGS`) |
 | `N+2` (e.g. 9224) | Internal WebSocket proxy upstream |
+
+### Remote CDP access
+
+Chromium 111+ rejects DevTools WebSocket connections whose `Origin` header is not allowlisted. anoa-browser starts Chromium with `--remote-allow-origins=*` so remote CDP clients (tunnels, reverse proxies, browser-based frontends) can connect from arbitrary origins. Access control is enforced by the proxy layer via `--auth-token` instead.
 
 ---
 
