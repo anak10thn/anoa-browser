@@ -26,8 +26,8 @@ Then run `jonggrang task next` to find your task assignment — do NOT read `.jo
 
 ## Project Info
 
-- **Name**: anoa-browser
-- **Type**: api
+- **Name**: anoa
+- **Type**: library
 - **Stack**: node-typescript
 - **Test command**: echo 'no test command configured'
 

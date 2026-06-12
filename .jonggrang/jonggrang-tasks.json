@@ -4,288 +4,140 @@
   "tasks": [
     {
       "id": "task-001",
-      "title": "Phase 1 – Project Bootstrap: CMakeLists.txt and AGENTS.md",
-      "description": "Initialize the C++ build system and fill AGENTS.md with all architecture decisions.\n\nFiles:\n- CMakeLists.txt (new): find_package Qt6 (WebEngine WebEngineCore Network WebSockets), cmake_minimum_required(3.16), set(CMAKE_CXX_STANDARD 17), add_executable(anoa-browser), target_link_libraries with all Qt6 modules. Set Qt6 minimum to 6.4. Add Release strip flags (-s on Linux/macOS, /OPT:REF /OPT:ICF on Windows). Multi-arch: MSVC x64 /W4, GCC/Clang -Wall -Wextra. Define install(TARGETS) rule.\n- AGENTS.md (update): Replace every TODO placeholder. File structure: src/browser/ src/http/ src/cdp/ src/pdf/ src/config/. Architecture decisions: Qt6/QWebEngine chosen, single binary, no Node.js, CDP via --remote-debugging-port passthrough (QTWEBENGINE_CHROMIUM_FLAGS), default port 9222. Naming: PascalCase for Qt QObject subclasses, camelCase methods, UPPER_SNAKE_CASE constants. Known gotchas: QPA_PLATFORM=offscreen for headless, Qt 6.4+ required, printToPdf is async (needs QEventLoop). Dependencies: Qt6>=6.4 with WebEngine/Network/WebSockets, CMake>=3.16, MSVC 2022 + Win SDK 10.0.22000 for Windows.\n\nAcceptance criteria:\n- CMakeLists.txt compiles a stub main.cpp that creates QApplication\n- AGENTS.md has zero TODO placeholders remaining\n- cmake --build succeeds on the target platform",
+      "title": "Wire AnoaBrowser pointer into HttpServer",
+      "description": "Extend HttpServer so it holds a non-owning pointer to AnoaBrowser and can call capture APIs from request handlers.\n\nAcceptance criteria:\n- Add `AnoaBrowser *m_browser` private member to HttpServer (src/http/http_server.h)\n- Change HttpServer constructor signature to accept `AnoaBrowser *browser` as a new parameter (after authToken)\n- Store the pointer in m_browser inside the constructor body (src/http/http_server.cpp)\n- Update main.cpp to pass `&browser` when constructing HttpServer\n- Project must still compile cleanly with no new warnings",
       "priority": 1,
       "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
       "skill": null,
       "blocked_by": [],
       "passes": true,
       "files": [
-        "CMakeLists.txt",
-        "AGENTS.md",
+        "src/http/http_server.h",
+        "src/http/http_server.cpp",
         "src/main.cpp"
       ],
-      "started_at": "2026-04-23T10:36:00.328Z",
-      "completed_at": "2026-04-23T10:38:47.744Z",
+      "started_at": "2026-05-26T17:20:32.929Z",
+      "completed_at": "2026-05-26T17:22:23.712Z",
       "error_log": []
     },
     {
       "id": "task-002",
-      "title": "Phase 8 – Config Module: CLI flag parsing and config file support",
-      "description": "Implement src/config/config.h and src/config/config.cpp for full CLI argument parsing and optional JSON/INI config file loading.\n\nFiles:\n- src/config/config.h: Define struct Config { int port=9222; bool headless=false; bool noSandbox=false; QString profileDir; QString profileName; QStringList extensionPaths; QString authToken; }. Declare Config parseArgs(int argc, char* argv[]); Config loadConfigFile(const QString& path);\n- src/config/config.cpp: Use QCommandLineParser. Flags: --port <port>, --headless, --no-sandbox, --profile-dir <dir>, --profile <name>, --extension <path> (addable multiple times), --auth-token <token>, --config <file>. If --config provided, load JSON (QJsonDocument) or INI (QSettings) and merge; CLI values always override file values. Validation: port must be 1-65535, exit(1) with message on error; warn to stderr if authToken is empty; each extensionPath must be an existing directory else exit(1).\n- CMakeLists.txt: add src/config/config.cpp to target_sources.\n\nAcceptance criteria:\n- parseArgs correctly parses all documented flags including repeated --extension\n- JSON config file is loaded and merged with defaults\n- Port out of range exits with descriptive message and code 1",
+      "title": "Implement GET /render/screenshot.png endpoint",
+      "description": "Add a synchronous PNG screenshot endpoint that captures the current QWebEngineView frame.\n\nAcceptance criteria:\n- Route: GET /render/screenshot.png\n- Auth: must validate Bearer token or ?token= query param (same as existing CDP endpoints)\n- Implementation: call m_browser->grab() on the Qt main thread, convert resulting QPixmap to PNG bytes via QBuffer+QPixmap::save()\n- Response: HTTP 200 with Content-Type: image/png, Cache-Control: no-cache, and the raw PNG bytes\n- If m_browser is null or grab fails, return HTTP 503 with plain-text body \"capture failed\"\n- All routing and auth logic goes in src/http/http_server.cpp inside the existing handleNewConnection / request dispatch block",
       "priority": 2,
       "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
       "skill": null,
       "blocked_by": [
         "task-001"
       ],
       "passes": true,
       "files": [
-        "src/config/config.h",
-        "src/config/config.cpp",
-        "CMakeLists.txt"
+        "src/http/http_server.cpp"
       ],
-      "started_at": "2026-04-23T10:40:08.030Z",
-      "completed_at": "2026-04-23T10:41:38.079Z",
+      "started_at": "2026-05-26T17:23:57.558Z",
+      "completed_at": "2026-05-26T17:24:47.782Z",
       "error_log": []
     },
     {
       "id": "task-003",
-      "title": "Phase 2 – Browser Core: QWebEngineView headless/headed mode with remote debugging",
-      "description": "Implement src/main.cpp (Qt entry point) and src/browser/anoa_browser.cpp/.h (QWebEngineView subclass) with headless/headed switching and remote debugging port activation.\n\nFiles:\n- src/browser/anoa_browser.h: class AnoaBrowser : public QWebEngineView. Public: explicit AnoaBrowser(const Config& config, QWidget* parent=nullptr); void init(); Private: Config m_config; QWebEngineProfile* m_profile;\n- src/browser/anoa_browser.cpp: In constructor body (before QWebEngine is initialized): set QTWEBENGINE_CHROMIUM_FLAGS env var to \"--remote-debugging-port=<port>\" + optional \"--no-sandbox\". If headless: set QT_QPA_PLATFORM=offscreen. Create QWebEngineProfile: if profileDir+profileName set, use QWebEngineProfile(profileName, this) with storageName path under profileDir, otherwise use default profile. Set page to QWebEnginePage(m_profile, this). In init(): call show() only if not headless.\n- src/main.cpp: int main(int argc, char* argv[]). Parse config first via parseArgs. Then QApplication app(argc, argv). Create AnoaBrowser browser(config). Call browser.init(). Start HttpServer and CdpProxy stubs (use forward declarations, wire up once those modules exist). Return app.exec().\n- CMakeLists.txt: add src/browser/anoa_browser.cpp and src/main.cpp.\n\nKey detail: QTWEBENGINE_CHROMIUM_FLAGS must be set via qputenv BEFORE QWebEngineView or QApplication is constructed with WebEngine initialization.\n\nAcceptance criteria:\n- Binary launches without crash in both --headless and visible modes\n- Qt debug output shows remote debugging is active on the specified port\n- profileDir creates isolated QWebEngineProfile storage",
-      "priority": 3,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-001",
-        "task-002"
-      ],
-      "passes": true,
-      "files": [
-        "src/main.cpp",
-        "src/browser/anoa_browser.h",
-        "src/browser/anoa_browser.cpp",
-        "CMakeLists.txt"
-      ],
-      "started_at": "2026-04-23T10:48:27.605Z",
-      "completed_at": "2026-04-23T10:49:47.943Z",
-      "error_log": []
-    },
-    {
-      "id": "task-004",
-      "title": "Phase 3 – HTTP Discovery Server: /json /json/version /json/list endpoints",
-      "description": "Implement src/http/http_server.cpp/.h as a QTcpServer-based HTTP server proxying Chromium-compatible CDP discovery endpoints.\n\nFiles:\n- src/http/http_server.h: class HttpServer : public QObject. Constructor(quint16 port, quint16 debuggingPort, const QString& authToken, QObject* parent). bool start(); void stop(); private slot handleNewConnection(); private: QTcpServer* m_server; quint16 m_debugPort; QString m_authToken;\n- src/http/http_server.cpp: On new connection, read HTTP request (until \\r\\n\\r\\n). Parse method, path, headers. Auth check: if m_authToken non-empty, require Authorization: Bearer <token> header or ?token= query param; return 401 JSON on failure. Routing: GET /json or /json/list or /json/version: create QNetworkAccessManager, GET http://127.0.0.1:<m_debugPort><path>, wait synchronously with QEventLoop, return proxied response body with Content-Type: application/json. Replace 127.0.0.1 in webSocketDebuggerUrl with the actual request Host header value. All other paths: 404 {\"error\":\"not found\"}. Cleanup socket after response.\n- src/main.cpp: Instantiate HttpServer(config.port, config.port+1, config.authToken) and call start() after AnoaBrowser::init(). (debuggingPort = port+1 since Qt uses a separate internal debugging port; document this assumption.)\n- CMakeLists.txt: add src/http/http_server.cpp.\n\nAcceptance criteria:\n- curl http://localhost:9222/json returns JSON array\n- curl http://localhost:9222/json/version returns object with Browser, Protocol-Version, webSocketDebuggerUrl\n- Unauthorized request returns 401 when auth token configured",
-      "priority": 4,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-003"
-      ],
-      "passes": true,
-      "files": [
-        "src/http/http_server.h",
-        "src/http/http_server.cpp",
-        "src/main.cpp",
-        "CMakeLists.txt"
-      ],
-      "started_at": "2026-04-23T10:50:58.482Z",
-      "completed_at": "2026-04-23T10:53:51.385Z",
-      "error_log": []
-    },
-    {
-      "id": "task-005",
-      "title": "Phase 4 – WebSocket CDP Proxy: session multiplexing and bearer token auth",
-      "description": "Implement src/cdp/cdp_proxy.cpp/.h as a QWebSocketServer-based proxy bridging external CDP clients to Qt's native DevTools WebSocket with per-session multiplexing and authentication.\n\nFiles:\n- src/cdp/cdp_proxy.h: class CdpProxy : public QObject. Constructor(quint16 listenPort, quint16 debuggingPort, const QString& authToken, QObject* parent). bool start(); void stop(); Private slots: onNewConnection(), onClientMessage(const QString&), onClientDisconnected(), onUpstreamMessage(const QString&), onUpstreamDisconnected(). Private: QWebSocketServer* m_server; QMap<QWebSocket*, QWebSocket*> m_clientToUpstream; QMap<QWebSocket*, QWebSocket*> m_upstreamToClient; quint16 m_debugPort; QString m_authToken;\n- src/cdp/cdp_proxy.cpp: In onNewConnection(): get pending connection, check auth (query param token= or header Authorization: Bearer). If invalid, send HTTP 401 close. Extract target path from socket->requestUrl().path() (e.g. /devtools/page/<id>). Open upstream QWebSocket to ws://127.0.0.1:<m_debugPort><path>. Store in both maps. Connect textMessageReceived on both sides. In onClientMessage(): call CdpExtensions::processCommand (inject after task-006; stub passthrough for now), forward to upstream if not handled. In onUpstreamMessage(): forward to client. On disconnect: close paired socket, remove from maps.\n- src/main.cpp: Instantiate CdpProxy(config.port, config.port+1, config.authToken) and start().\n- CMakeLists.txt: add src/cdp/cdp_proxy.cpp.\n\nAcceptance criteria:\n- WebSocket client connecting to ws://localhost:9222/devtools/page/<id> receives forwarded CDP messages\n- Each connection creates exactly one upstream socket\n- Connection with invalid token is rejected",
-      "priority": 4,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-003"
-      ],
-      "passes": true,
-      "files": [
-        "src/cdp/cdp_proxy.h",
-        "src/cdp/cdp_proxy.cpp",
-        "src/main.cpp",
-        "CMakeLists.txt"
-      ],
-      "started_at": "2026-04-23T10:57:49.252Z",
-      "completed_at": "2026-04-23T11:00:29.222Z",
-      "error_log": []
-    },
-    {
-      "id": "task-006",
-      "title": "Phase 5 – CDP Domain Extensions: Profiler, HeapProfiler, Security adapters",
-      "description": "Implement src/cdp/cdp_extensions.cpp/.h as a C++ adapter intercepting CDP messages for Profiler, HeapProfiler, and Security domains before they reach the upstream proxy.\n\nFiles:\n- src/cdp/cdp_extensions.h: class CdpExtensions : public QObject. Static method: static QString processCommand(const QJsonObject& cmd, QWebEnginePage* page). Private static helpers: handleProfiler, handleHeapProfiler, handleSecurity.\n- src/cdp/cdp_extensions.cpp: Parse method field (e.g. \"Profiler.enable\"). For domain \"Profiler\": enable/disable/start/stop/setSamplingInterval all return {\"id\":<id>,\"result\":{}}. For domain \"HeapProfiler\": enable/disable/startTrackingHeapObjects/stopTrackingHeapObjects/takeHeapSnapshot return {\"id\":<id>,\"result\":{}}. For domain \"Security\": enable/disable return {\"id\":<id>,\"result\":{}}; setIgnoreCertificateErrors: attempt QWebEngineProfile::setHttpAcceptLanguage (no direct API) and return stub result. For any unrecognized method in these three domains: return {\"id\":<id>,\"result\":{}} stub. For all other domains: return QString() (empty) to signal passthrough.\n- src/cdp/cdp_proxy.cpp (modify): In onClientMessage, parse JSON, call CdpExtensions::processCommand; if non-empty result returned, send it back to client and return without forwarding upstream.\n- CMakeLists.txt: add src/cdp/cdp_extensions.cpp.\n\nAcceptance criteria:\n- Profiler.enable returns {result:{}} without upstream forwarding\n- Page.navigate passes through to upstream unmodified\n- No crash on any Profiler/HeapProfiler/Security command",
-      "priority": 5,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-005"
-      ],
-      "passes": true,
-      "files": [
-        "src/cdp/cdp_extensions.h",
-        "src/cdp/cdp_extensions.cpp",
-        "src/cdp/cdp_proxy.cpp",
-        "CMakeLists.txt"
-      ],
-      "started_at": "2026-04-23T11:07:55.472Z",
-      "completed_at": "2026-04-23T11:09:12.786Z",
-      "error_log": []
-    },
-    {
-      "id": "task-007",
-      "title": "Phase 6 – Extension and Profile Management: loading, named profiles, cookie/storage CRUD",
-      "description": "Add CLI-driven browser extension loading, named profile isolation, and cookie/storage management to AnoaBrowser.\n\nFiles to modify:\n- src/browser/anoa_browser.h: Add public methods: void loadExtensions(const QStringList& paths); void setupNamedProfile(const QString& name, const QString& baseDir); QList<QNetworkCookie> getCookies(const QUrl& origin); void setCookie(const QNetworkCookie& cookie, const QUrl& origin); void clearStorage(const QUrl& origin);\n- src/browser/anoa_browser.cpp: loadExtensions(): for each path verify QDir(path).exists() and QFile(path+\"/manifest.json\").exists(); load via QWebEngineScript for content script injection or QWebEngineProfile extension loader if available in Qt6; log warning and skip manifest_version 3 entries (check manifest.json). setupNamedProfile(): create QWebEngineProfile(name) with setPersistentStoragePath(baseDir+\"/\"+name) and setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies). getCookies(): use m_profile->cookieStore() and connect to cookieAdded signal with QEventLoop to collect then disconnect. setCookie(): call m_profile->cookieStore()->setCookie(cookie, origin). clearStorage(): m_profile->cookieStore()->deleteAllCookies(); m_profile->clearAllVisitedLinks(); m_page->action(QWebEnginePage::Stop);\n- src/main.cpp: After AnoaBrowser construction call loadExtensions(config.extensionPaths) and if profileName non-empty call setupNamedProfile(config.profileName, config.profileDir).\n\nAcceptance criteria:\n- --extension /path/to/ext loads extension without crash\n- --profile myprofile creates storage under profileDir/myprofile\n- Cookies in profileA are absent in profileB",
-      "priority": 4,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-003"
-      ],
-      "passes": true,
-      "files": [
-        "src/browser/anoa_browser.h",
-        "src/browser/anoa_browser.cpp",
-        "src/main.cpp"
-      ],
-      "started_at": "2026-04-23T11:04:15.749Z",
-      "completed_at": "2026-04-23T11:06:19.454Z",
-      "error_log": []
-    },
-    {
-      "id": "task-008",
-      "title": "Phase 7 – PDF Generation: Page.printToPDF CDP command via QWebEnginePage::printToPdf",
-      "description": "Implement src/pdf/pdf_handler.cpp/.h to handle the Page.printToPDF CDP command using Qt's async printToPdf API bridged via QEventLoop.\n\nFiles:\n- src/pdf/pdf_handler.h: class PdfHandler : public QObject. Constructor(QWebEnginePage* page, QObject* parent). QString handlePrintToPdf(const QJsonObject& cmd); Private: QWebEnginePage* m_page;\n- src/pdf/pdf_handler.cpp: Extract params: landscape (bool), paperWidth/Height (double, inches, default letter 8.5x11), marginTop/Bottom/Left/Right (double, default 0.4in), printBackground (bool), scale (double). Build QPageLayout from paperWidth/Height (convert inches to mm via *25.4) and margins. Create QTemporaryFile and get filePath. Connect QWebEnginePage::pdfPrintingFinished(filePath, success) signal. Call m_page->printToPdf(filePath, layout). Run QEventLoop with QTimer::singleShot(30000) timeout that quits loop. After loop: if success, read file bytes, return {\"id\":<id>,\"result\":{\"data\":\"<base64>\"}}. If timeout or !success, return {\"id\":<id>,\"error\":{\"code\":-32000,\"message\":\"PDF generation timed out or failed\"}}.\n- src/cdp/cdp_extensions.cpp (modify): Intercept method \"Page.printToPDF\": instantiate PdfHandler(page) and call handlePrintToPdf(cmd), return result. Add PdfHandler include.\n- src/cdp/cdp_extensions.h: Add QWebEnginePage* parameter to processCommand or add setPdfPage(QWebEnginePage*) setter.\n- CMakeLists.txt: add src/pdf/pdf_handler.cpp.\n\nAcceptance criteria:\n- Page.printToPDF returns {result:{data:\"<base64>\"}} with valid PDF (starts with %PDF-)\n- Timeout after 30s returns error response without hanging\n- landscape:true produces landscape-oriented PDF",
-      "priority": 5,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-005"
-      ],
-      "passes": true,
-      "files": [
-        "src/pdf/pdf_handler.h",
-        "src/pdf/pdf_handler.cpp",
-        "src/cdp/cdp_extensions.h",
-        "src/cdp/cdp_extensions.cpp",
-        "CMakeLists.txt"
-      ],
-      "started_at": "2026-04-23T11:11:38.504Z",
-      "completed_at": "2026-04-23T11:14:08.184Z",
-      "error_log": []
-    },
-    {
-      "id": "task-009",
-      "title": "Phase 9 – GitHub Actions Release Pipeline: multi-platform matrix build and GitHub Releases",
-      "description": "Create .github/workflows/release.yml for automated multi-platform binary builds triggered on version tag push.\n\nFile to create:\n- .github/workflows/release.yml: Trigger: on.push.tags: ['v*.*.*']. Jobs:\n  1. build-linux (runs-on: ubuntu-22.04, strategy.matrix.arch: [x86_64, arm64]): steps: checkout; cache Qt6 via actions/cache keyed by Qt version + arch; install Qt6 via aqtinstall (pip install aqtinstall && aqt install-qt linux desktop 6.6.0 gcc_64 -m qtwebengine); for arm64 install gcc-aarch64-linux-gnu and use toolchain file. cmake -DCMAKE_BUILD_TYPE=Release; cmake --build; strip anoa-browser; tar czf anoa-browser-linux-${{matrix.arch}}.tar.gz anoa-browser; upload-artifact.\n  2. build-macos (runs-on: macos-13): cache + install Qt6 universal; build with -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\"; strip; tar czf anoa-browser-macos-universal.tar.gz; upload-artifact.\n  3. build-windows (runs-on: windows-2022): cache + install Qt6 MSVC 2022 x64 via aqtinstall; cmake -G \"Visual Studio 17 2022\" -A x64; cmake --build --config Release; 7z a anoa-browser-windows-x86_64.zip anoa-browser.exe; upload-artifact.\n  4. release (needs: [build-linux, build-macos, build-windows]): download all artifacts; use softprops/action-gh-release@v1 with files: *.tar.gz, *.zip, generate_release_notes: true.\n\nAcceptance criteria:\n- YAML file is syntactically valid (no parse errors)\n- Matrix covers all four platform/arch combinations\n- Qt6 installation uses actions/cache to avoid re-downloading on every run\n- Release job creates GitHub Release with all binary artifacts",
+      "title": "Implement GET /render/html endpoint",
+      "description": "Add an async HTML source endpoint that returns the current rendered DOM via QWebEnginePage::toHtml().\n\nAcceptance criteria:\n- Route: GET /render/html\n- Auth: same Bearer/query-param token validation as other endpoints\n- Implementation: call m_browser->page()->toHtml([callback]{...}) and bridge the async callback to the synchronous HTTP response using a local QEventLoop (spin the loop inside the callback lambda, capture result into a QString, exit loop) — matches the existing pattern used in src/pdf/pdf_handler.cpp\n- Response: HTTP 200 with Content-Type: text/html; charset=utf-8, Cache-Control: no-cache, and the HTML bytes\n- Timeout: if toHtml callback does not fire within 5 seconds, return HTTP 504 with body \"html capture timeout\"\n- All logic in src/http/http_server.cpp",
       "priority": 2,
       "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": "core/scaffold-deploy",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
+      "skill": null,
       "blocked_by": [
         "task-001"
       ],
       "passes": true,
       "files": [
-        ".github/workflows/release.yml"
-      ],
-      "started_at": "2026-04-23T10:42:22.573Z",
-      "completed_at": "2026-04-23T10:45:20.912Z",
-      "error_log": []
-    },
-    {
-      "id": "task-010",
-      "title": "Phase 10 – Integration Validation: Playwright/Puppeteer compatibility and protocol gap documentation",
-      "description": "Build the binary and validate end-to-end CDP compatibility against Playwright and Puppeteer. Document all findings.\n\nValidation steps to execute:\n1. cmake --build build --config Release (or cmake -B build && cmake --build build)\n2. Launch: ./build/anoa-browser --headless --port 9222 --auth-token testtoken123\n3. Playwright test: write a Node.js script (no package.json needed, use node --input-type=module): import {chromium} from '@playwright/test'; const browser = await chromium.connectOverCDP('http://localhost:9222', {headers:{Authorization:'Bearer testtoken123'}}); const page = await browser.newPage(); await page.goto('about:blank'); const title = await page.title(); console.log('Playwright OK:', title === ''); await browser.close();\n4. Puppeteer test: fetch ws URL from /json/version, connect via puppeteer.connect({browserWSEndpoint: wsUrl}).\n5. CDP domain tests via raw ws (use wscat or Node.js): Profiler.enable, HeapProfiler.enable, Security.enable, Security.setIgnoreCertificateErrors — verify no error codes in responses.\n6. Page.printToPDF: send command, decode base64, verify first 4 bytes are 25 50 44 46 (%PDF).\n7. Extension load: launch with --extension ./test-ext (create minimal manifest.json with manifest_version:2, name, version), verify no crash.\n8. Profile isolation: two sequential launches with --profile profA and --profile profB, verify storage directories created.\n\nFor each step: document PASS/FAIL, error message if FAIL, and workaround.\nUpdate AGENTS.md Known Gotchas with any new discoveries.\nUpdate .jonggrang/progress.txt with full validation summary including CDP command coverage matrix.\n\nAcceptance criteria:\n- Playwright connectOverCDP succeeds without error\n- All CDP domain stubs return valid JSON\n- PDF has valid %PDF- header\n- AGENTS.md documents known protocol gaps",
-      "priority": 6,
-      "status": "completed",
-      "feature_id": "anoa-headless-browser-cdp-mobcchbp",
-      "skill": null,
-      "blocked_by": [
-        "task-004",
-        "task-006",
-        "task-007",
-        "task-008"
-      ],
-      "passes": true,
-      "files": [
-        "AGENTS.md",
-        ".jonggrang/progress.txt",
-        "src/browser/anoa_browser.cpp",
         "src/http/http_server.h",
-        "src/http/http_server.cpp",
-        "src/cdp/cdp_proxy.h",
-        "src/cdp/cdp_proxy.cpp",
-        "src/cdp/cdp_extensions.h",
-        "src/cdp/cdp_extensions.cpp",
-        "src/main.cpp",
-        "src/config/config.cpp",
-        "CMakeLists.txt"
+        "src/http/http_server.cpp"
       ],
-      "started_at": "2026-04-23T11:15:24.280Z",
-      "completed_at": "2026-04-23T11:56:18.319Z",
+      "started_at": "2026-05-26T17:26:39.132Z",
+      "completed_at": "2026-05-26T17:27:24.755Z",
       "error_log": []
     },
     {
-      "id": "task-011",
-      "title": "Phase 1 – Config Extension: add width/height fields and --width/--height CLI flags",
-      "description": "Extend the Config struct with integer width and height fields (defaults 1280×720) and parse the corresponding CLI flags and config-file keys.\n\nFiles to modify:\n- src/config/config.h: Add two new fields to the Config struct: `int width = 1280;` and `int height = 720;` placed after the existing fields.\n- src/config/config.cpp: In parseArgs(), add two QCommandLineOption entries:\n  - `QCommandLineOption widthOpt({\"width\"}, \"Browser viewport/window width in pixels (default 1280)\", \"width\");`\n  - `QCommandLineOption heightOpt({\"height\"}, \"Browser viewport/window height in pixels (default 720)\", \"height\");`\n  Register both options with parser.addOption(). After parser.process(), read them: if parser.isSet(widthOpt), convert to int with QString::toInt() and validate > 0; if invalid, print error and exit(1). Same for height. In loadConfigFile(), read \"width\" and \"height\" integer keys from the JSON object (QJsonObject[\"width\"].toInt(1280)) and from the INI [QSettings] under keys \"width\" / \"height\". CLI values must always win over file values (apply file first, then overwrite with CLI values if parser.isSet()).\n\nAcceptance criteria:\n- `--width 1920 --height 1080` produces Config{width:1920, height:1080}\n- Omitting both flags produces Config{width:1280, height:720}\n- `--width 0` or `--width -1` exits with error code 1 and a descriptive message\n- JSON config file `{\"width\": 800, \"height\": 600}` is loaded; CLI flag overrides file value",
-      "priority": 1,
-      "status": "completed",
-      "feature_id": "resolution-option-mocx6uoo",
-      "skill": null,
-      "blocked_by": [],
-      "passes": true,
-      "files": [
-        "src/config/config.h",
-        "src/config/config.cpp"
-      ],
-      "started_at": "2026-04-24T13:03:55.049Z",
-      "completed_at": "2026-04-24T13:05:12.504Z",
-      "error_log": []
-    },
-    {
-      "id": "task-012",
-      "title": "Phase 2 – Browser Core Wiring: apply width/height via resize() in AnoaBrowser",
-      "description": "Apply config.width and config.height to the QWebEngineView widget so both headed and headless modes render at the configured viewport dimensions.\n\nFile to modify:\n- src/browser/anoa_browser.cpp: In AnoaBrowser::init() (or the constructor body, after m_page is set and before load() is called), call `resize(m_config.width, m_config.height);` on the view. This single call covers both modes:\n  - Headed: resizes the visible QWidget window.\n  - Headless (offscreen): QWebEngineView::resize() sets the off-screen surface size, so screenshots and PDF output use the configured viewport.\n  The resize must happen BEFORE `load(QUrl(\"about:blank\"))` so the initial render (and any subsequent `Page.captureScreenshot`) uses the correct dimensions.\n  The call site should be just before or just after `show()` (which is only called in headed mode), but the resize itself is unconditional — apply it in both branches.\n\nAcceptance criteria:\n- In headed mode: the visible window opens at the configured width×height (default 1280×720, overridable via CLI)\n- In headless mode: a `Page.captureScreenshot` CDP command returns an image whose pixel dimensions match the configured width×height\n- `--width 800 --height 600` changes the viewport in both modes\n- No regression in existing headed/headless startup behavior",
+      "id": "task-004",
+      "title": "Implement POST /render/navigate endpoint",
+      "description": "Add a navigation control endpoint that loads a URL into the embedded QWebEngineView.\n\nAcceptance criteria:\n- Route: POST /render/navigate?url=<encoded-url> (also accept url in request body as plain text)\n- Auth: same Bearer/query-param token validation\n- Implementation: parse the url parameter, validate it is a non-empty absolute URL with QUrl::isValid() + scheme check (http/https/file only), then call m_browser->load(QUrl(url))\n- Response on success: HTTP 200 with body \"navigating\"\n- Response on missing/invalid url: HTTP 400 with body \"invalid url\"\n- Response on disallowed scheme: HTTP 400 with body \"scheme not allowed\"\n- All logic in src/http/http_server.cpp",
       "priority": 2,
       "status": "completed",
-      "feature_id": "resolution-option-mocx6uoo",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
       "skill": null,
       "blocked_by": [
-        "task-011"
+        "task-001"
       ],
       "passes": true,
       "files": [
-        "src/browser/anoa_browser.cpp"
+        "src/http/http_server.cpp"
       ],
-      "started_at": "2026-04-24T13:06:36.659Z",
-      "completed_at": "2026-04-24T13:07:42.016Z",
+      "started_at": "2026-05-26T17:28:03.861Z",
+      "completed_at": "2026-05-26T17:29:34.254Z",
       "error_log": []
     },
     {
-      "id": "task-013",
-      "title": "Phase 3 – Validation: verify resolution flags end-to-end and document findings",
-      "description": "Manually validate the resolution feature end-to-end and record all findings in AGENTS.md and .jonggrang/progress.txt.\n\nValidation steps:\n1. Build: `cmake -B build && cmake --build build --parallel`\n2. Headed default: `./build/anoa-browser --port 9223` — confirm window opens at 1280×720.\n3. Headed override: `./build/anoa-browser --port 9223 --width 800 --height 600` — confirm window is 800×600.\n4. Headless screenshot default: launch `./build/anoa-browser --headless --port 9224`, send CDP `Page.captureScreenshot` via websocket (use Node.js or wscat), decode base64 PNG, check image dimensions are 1280×720.\n5. Headless screenshot override: launch with `--headless --width 1920 --height 1080`, repeat step 4, confirm 1920×1080.\n6. Config file: write `{\"width\":640,\"height\":480}` to a JSON file, launch with `--config <file>`, verify dimensions are 640×480.\n7. CLI override beats config file: launch with `--config <file> --width 1024`, verify width is 1024, height is 480 from file.\n8. Invalid input: `--width 0` and `--width abc` — confirm exit code 1 with descriptive message.\n\nFiles to update:\n- AGENTS.md: Add a row to the Protocol Gap Matrix (or a new \"Resolution Feature\" sub-section under Known Gotchas) documenting that `resize()` must precede `load()`. Note any discovered quirks (e.g. macOS vs Linux behavior, offscreen DPI).\n- .jonggrang/progress.txt: Append a validation summary section with PASS/FAIL results for each step above.\n\nAcceptance criteria:\n- All 8 steps pass or failures are documented with workarounds\n- AGENTS.md reflects any new gotchas found during validation\n- .jonggrang/progress.txt contains a complete resolution-feature validation summary",
+      "id": "task-005",
+      "title": "Implement GET /render live viewer HTML page",
+      "description": "Serve a self-contained HTML viewer page at GET /render that auto-refreshes the screenshot in any browser.\n\nAcceptance criteria:\n- Route: GET /render (exact path, no trailing slash; redirect /render/ to /render)\n- Auth: same token validation; if token is present as query param forward it to screenshot src URL\n- Response: HTTP 200 with Content-Type: text/html; charset=utf-8\n- Page content: minimal HTML with a full-viewport <img id=frame> whose src points to /render/screenshot.png (appending ?token=... if auth is required), a <script> that refreshes img.src every 500ms by appending a cache-buster timestamp, and a small CSS reset so the image fills the window\n- The HTML can be embedded as a raw string literal in src/http/http_server.cpp — no separate asset file needed\n- No JavaScript frameworks; plain vanilla JS only",
       "priority": 3,
       "status": "completed",
-      "feature_id": "resolution-option-mocx6uoo",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
       "skill": null,
       "blocked_by": [
-        "task-012"
+        "task-002"
       ],
       "passes": true,
       "files": [
-        "AGENTS.md",
-        ".jonggrang/progress.txt",
-        "src/config/config.cpp",
-        "src/browser/anoa_browser.cpp",
-        "src/cdp/cdp_proxy.cpp",
-        "src/cdp/cdp_proxy.h"
+        "src/http/http_server.cpp"
       ],
-      "started_at": "2026-04-24T13:08:22.977Z",
-      "completed_at": "2026-04-24T13:58:40.053Z",
+      "started_at": "2026-05-26T17:32:05.958Z",
+      "completed_at": "2026-05-26T17:33:08.487Z",
+      "error_log": []
+    },
+    {
+      "id": "task-006",
+      "title": "Implement GET /render/stream.mjpeg MJPEG stream endpoint",
+      "description": "Add an optional multipart MJPEG stream endpoint for smoother live view without polling.\n\nAcceptance criteria:\n- Route: GET /render/stream.mjpeg\n- Auth: same Bearer/query-param token validation\n- Response headers: HTTP 200, Content-Type: multipart/x-mixed-replace; boundary=frame, Connection: keep-alive\n- Streaming: use a QTimer (interval 100ms = ~10 fps) to periodically call m_browser->grab(), encode to JPEG (quality 70) via QBuffer, and write each part as multipart boundary + Content-Type: image/jpeg + Content-Length + blank line + JPEG bytes to the open QTcpSocket\n- Lifecycle: stop and clean up the timer when the socket disconnects (connect QTcpSocket::disconnected signal)\n- Memory: do not accumulate frames; write and discard each frame immediately\n- If the socket write buffer is full (bytesToWrite > 512KB) skip the frame rather than queuing it\n- All logic in src/http/http_server.cpp; add any needed private helpers to src/http/http_server.h",
+      "priority": 4,
+      "status": "completed",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
+      "skill": null,
+      "blocked_by": [
+        "task-002"
+      ],
+      "passes": true,
+      "files": [
+        "src/http/http_server.cpp"
+      ],
+      "started_at": "2026-05-26T17:34:49.796Z",
+      "completed_at": "2026-05-26T17:35:41.090Z",
+      "error_log": []
+    },
+    {
+      "id": "task-007",
+      "title": "Document web render endpoints in README",
+      "description": "Update the project README with documentation for all new /render/* endpoints.\n\nAcceptance criteria:\n- Add a new ## Web Render Endpoints section to README.md\n- Document each endpoint in a Markdown table or definition list: path, method, description, response type\n  - GET /render — live viewer HTML page (auto-refreshing screenshot)\n  - GET /render/screenshot.png — current frame as PNG\n  - GET /render/html — rendered DOM as HTML\n  - POST /render/navigate?url= — load a URL into the browser\n  - GET /render/stream.mjpeg — MJPEG live stream (~10 fps)\n- Add a Usage example section showing: starting anoa, opening /render in a browser, and using curl to fetch a screenshot\n- Note that all endpoints require the same --token auth (Bearer header or ?token= query param)\n- Keep the section concise (under 60 lines)",
+      "priority": 5,
+      "status": "completed",
+      "feature_id": "web-render-endpoint-mpmwa0hx",
+      "skill": null,
+      "blocked_by": [
+        "task-002",
+        "task-003",
+        "task-004",
+        "task-005",
+        "task-006"
+      ],
+      "passes": true,
+      "files": [
+        "README.md"
+      ],
+      "started_at": "2026-05-26T17:36:44.100Z",
+      "completed_at": "2026-05-26T17:37:32.102Z",
       "error_log": []
     }
   ]

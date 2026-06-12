@@ -1,0 +1,160 @@
+feature_id: web-render-endpoint-mpmwa0hx
+description: web-render-endpoint
+work_type: MEDIUM
+created_at: '2026-05-26T17:15:24.843Z'
+updated_at: '2026-05-27T00:25:36.208Z'
+status: completed
+current_phase: null
+active_phases:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+phases:
+  '1':
+    name: setup
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.851Z'
+    agent_id: null
+    output:
+      source: approve
+  '2':
+    name: triage
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.852Z'
+    agent_id: null
+    output:
+      source: approve
+  '3':
+    name: codebase-discovery
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.853Z'
+    agent_id: null
+    output:
+      source: approve
+  '4':
+    name: skill-discovery
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.855Z'
+    agent_id: null
+    output:
+      source: approve
+  '5':
+    name: complexity
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.856Z'
+    agent_id: null
+    output:
+      source: approve
+  '6':
+    name: brainstorming
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.857Z'
+    agent_id: null
+    output:
+      source: approve
+  '7':
+    name: architecting
+    status: completed
+    started_at: null
+    completed_at: '2026-05-26T17:15:24.857Z'
+    agent_id: null
+    output:
+      source: approve
+  '8':
+    name: implementation
+    status: completed
+    started_at: '2026-05-26T17:20:06.563Z'
+    completed_at: '2026-05-26T17:37:52.414Z'
+    agent_id: null
+    output:
+      source: work-loop
+  '9':
+    name: simplification
+    status: completed
+    started_at: '2026-05-26T17:37:52.433Z'
+    completed_at: '2026-05-26T17:38:29.606Z'
+    agent_id: null
+    output: null
+  '10':
+    name: design-verification
+    status: completed
+    started_at: '2026-05-26T22:22:08.675Z'
+    completed_at: '2026-05-26T22:22:47.910Z'
+    agent_id: null
+    output: null
+  '11':
+    name: domain-compliance
+    status: completed
+    started_at: '2026-05-26T23:57:53.129Z'
+    completed_at: '2026-05-27T00:03:23.528Z'
+    agent_id: null
+    output: null
+  '12':
+    name: code-quality
+    status: completed
+    started_at: '2026-05-27T00:03:23.531Z'
+    completed_at: '2026-05-27T00:10:48.907Z'
+    agent_id: null
+    output: null
+  '13':
+    name: test-planning
+    status: completed
+    started_at: '2026-05-27T00:10:48.909Z'
+    completed_at: '2026-05-27T00:14:50.860Z'
+    agent_id: null
+    output: null
+  '14':
+    name: testing
+    status: completed
+    started_at: '2026-05-27T00:14:50.895Z'
+    completed_at: '2026-05-27T00:20:36.527Z'
+    agent_id: null
+    output: null
+  '15':
+    name: coverage
+    status: completed
+    started_at: '2026-05-27T00:20:36.529Z'
+    completed_at: '2026-05-27T00:22:22.879Z'
+    agent_id: null
+    output: null
+  '16':
+    name: test-quality
+    status: completed
+    started_at: '2026-05-27T00:22:22.880Z'
+    completed_at: '2026-05-27T00:24:59.805Z'
+    agent_id: null
+    output: null
+  '17':
+    name: completion
+    status: completed
+    started_at: '2026-05-27T00:24:59.807Z'
+    completed_at: '2026-05-27T00:25:36.208Z'
+    agent_id: null
+    output: null
+agents: {}
+validation:
+  review_passed: false
+  tests_passed: false
+  coverage_met: false
+locks: []
+context_usage: null

@@ -4,11 +4,14 @@
 #include <QString>
 #include <QTcpServer>
 
+class AnoaBrowser;
+
 class HttpServer : public QObject {
     Q_OBJECT
 public:
     explicit HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
-                       const QString &authToken, QObject *parent = nullptr);
+                       const QString &authToken, AnoaBrowser *browser,
+                       QObject *parent = nullptr);
 
     bool start();
     void stop();
@@ -22,4 +25,5 @@ private:
     quint16 m_debugPort;
     quint16 m_proxyPort;
     QString m_authToken;
+    AnoaBrowser *m_browser;
 };

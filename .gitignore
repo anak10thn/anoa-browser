@@ -34,3 +34,7 @@ ui_*.h
 .DS_Store
 Thumbs.db
 node_modules
+
+# Jonggrang ephemeral state
+.jonggrang/.ephemeral/
+.jonggrang/locks/

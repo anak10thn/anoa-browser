@@ -27,6 +27,24 @@
             "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/task-role-claim.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Read|Edit|Write|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/block-sensitive-files.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/block-secret-commands.sh\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -45,6 +63,15 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/task-skill-enforcement.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/sanitize-output.sh\""
           }
         ]
       }
@@ -76,6 +103,15 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/output-enforcement.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/hooks/claude/secret-final-check.sh\""
           }
         ]
       }

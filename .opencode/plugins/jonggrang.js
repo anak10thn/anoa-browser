@@ -7,4 +7,5 @@ try {
 } catch(e) {
   createPlugin = require("/Users/anak10thn/Office/KOKO/jonggrang/hooks/opencode/plugin.js").createPlugin;
 }
+// createPlugin returns { id, server, stub } — OpenCode calls server() when id is present
 module.exports = createPlugin(projectRoot);

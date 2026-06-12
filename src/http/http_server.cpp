@@ -1,24 +1,31 @@
 #include "http/http_server.h"
 
+#include "browser/anoa_browser.h"
+
+#include <QBuffer>
 #include <QEventLoop>
 #include <QHostAddress>
 #include <QMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPixmap>
 #include <QTcpSocket>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <memory>
+
 HttpServer::HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
-                       const QString &authToken, QObject *parent)
+                       const QString &authToken, AnoaBrowser *browser, QObject *parent)
     : QObject(parent)
     , m_server(new QTcpServer(this))
     , m_port(port)
     , m_debugPort(debuggingPort)
     , m_proxyPort(proxyPort)
     , m_authToken(authToken)
+    , m_browser(browser)
 {
     connect(m_server, &QTcpServer::newConnection, this, &HttpServer::handleNewConnection);
 }
@@ -34,11 +41,12 @@ void HttpServer::stop()
 }
 
 static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &statusText,
-                         const QByteArray &body)
+                         const QByteArray &body,
+                         const QByteArray &contentType = "application/json")
 {
     QByteArray response =
         "HTTP/1.1 " + QByteArray::number(statusCode) + " " + statusText + "\r\n"
-        "Content-Type: application/json\r\n"
+        "Content-Type: " + contentType + "\r\n"
         "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
         "Connection: close\r\n"
         "\r\n" + body;
@@ -48,13 +56,19 @@ static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &s
     socket->deleteLater();
 }
 
+struct HtmlCaptureState {
+    QString html;
+    bool timedOut = true;
+    bool waiting = true;
+    QEventLoop *loop = nullptr;
+};
+
 void HttpServer::handleNewConnection()
 {
     QTcpSocket *socket = m_server->nextPendingConnection();
     if (!socket)
         return;
 
-    // Accumulate data until the end of HTTP headers (\r\n\r\n).
     QByteArray requestData;
     while (!requestData.contains("\r\n\r\n")) {
         if (!socket->waitForReadyRead(5000)) {
@@ -65,7 +79,6 @@ void HttpServer::handleNewConnection()
         requestData += socket->readAll();
     }
 
-    // Parse request line.
     int firstLineEnd = requestData.indexOf("\r\n");
     QList<QByteArray> requestLineParts = requestData.left(firstLineEnd).split(' ');
     if (requestLineParts.size() < 2) {
@@ -77,7 +90,6 @@ void HttpServer::handleNewConnection()
     QString method = QString::fromUtf8(requestLineParts[0]);
     QString rawPath = QString::fromUtf8(requestLineParts[1]);
 
-    // Parse headers into a lowercased map.
     QMap<QString, QString> headers;
     int headerEnd = requestData.indexOf("\r\n\r\n");
     QByteArray headerSection = requestData.mid(firstLineEnd + 2, headerEnd - firstLineEnd - 2);
@@ -91,28 +103,40 @@ void HttpServer::handleNewConnection()
         }
     }
 
-    // Decompose path and query string.
     QUrl url(rawPath);
     QString path = url.path();
     QUrlQuery query(url.query());
     QString hostHeader = headers.value(QStringLiteral("host"),
                                        QStringLiteral("127.0.0.1:%1").arg(m_port));
 
-    // Auth check.
     if (!m_authToken.isEmpty()) {
-        bool authorized = false;
         QString authHeader = headers.value(QStringLiteral("authorization"));
-        if (authHeader.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive)
-            && authHeader.mid(7) == m_authToken) {
-            authorized = true;
-        }
-        if (!authorized && query.queryItemValue(QStringLiteral("token")) == m_authToken) {
-            authorized = true;
-        }
-        if (!authorized) {
+        bool viaBearer = authHeader.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive)
+                         && authHeader.mid(7) == m_authToken;
+        bool viaQuery = query.queryItemValue(QStringLiteral("token")) == m_authToken;
+        if (!viaBearer && !viaQuery) {
             sendResponse(socket, 401, "Unauthorized", R"({"error":"unauthorized"})");
             return;
         }
+    }
+
+    // Redirect /render/ (trailing slash) to /render, preserving query string.
+    if (method == QLatin1String("GET") && path == QLatin1String("/render/")) {
+        QString location = QStringLiteral("/render");
+        QString origQuery = url.query();
+        if (!origQuery.isEmpty())
+            location += QStringLiteral("?") + origQuery;
+        QByteArray response =
+            "HTTP/1.1 301 Moved Permanently\r\n"
+            "Location: " + location.toUtf8() + "\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        socket->write(response);
+        socket->flush();
+        socket->disconnectFromHost();
+        socket->deleteLater();
+        return;
     }
 
     // Route CDP discovery paths to the internal Chromium debugging port.
@@ -166,6 +190,207 @@ void HttpServer::handleNewConnection()
 
         QByteArray statusText = (statusCode == 200) ? "OK" : "Service Unavailable";
         sendResponse(socket, statusCode, statusText, body);
+    } else if (method == QLatin1String("GET")
+               && path == QLatin1String("/render/screenshot.png")) {
+        QByteArray pngBytes;
+        bool ok = false;
+        if (m_browser) {
+            QPixmap pixmap = m_browser->grab();
+            if (!pixmap.isNull()) {
+                QBuffer buf(&pngBytes);
+                buf.open(QIODevice::WriteOnly);
+                ok = pixmap.save(&buf, "PNG");
+            }
+        }
+        if (!ok) {
+            sendResponse(socket, 503, "Service Unavailable", "capture failed", "text/plain");
+        } else {
+            QByteArray response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: image/png\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Content-Length: " + QByteArray::number(pngBytes.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            response += pngBytes;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        }
+    } else if (method == QLatin1String("GET") && path == QLatin1String("/render/html")) {
+        auto state = std::make_shared<HtmlCaptureState>();
+
+        if (m_browser && m_browser->page()) {
+            QEventLoop loop;
+            QTimer timer;
+            state->loop = &loop;
+            timer.setSingleShot(true);
+            connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+            timer.start(5000);
+            m_browser->page()->toHtml([state](const QString &html) {
+                if (!state->waiting)
+                    return;
+                state->html = html;
+                state->timedOut = false;
+                if (state->loop)
+                    state->loop->quit();
+            });
+            loop.exec();
+            state->waiting = false;
+            state->loop = nullptr;
+        }
+
+        if (state->timedOut) {
+            sendResponse(socket, 504, "Gateway Timeout", "html capture timeout", "text/plain");
+        } else {
+            QByteArray htmlBytes = state->html.toUtf8();
+            QByteArray response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html; charset=utf-8\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Content-Length: " + QByteArray::number(htmlBytes.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            response += htmlBytes;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        }
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/navigate")) {
+        // Prefer url from query string; fall back to plain-text request body.
+        QString navUrl = query.queryItemValue(QStringLiteral("url"), QUrl::FullyDecoded);
+        if (navUrl.isEmpty()) {
+            QByteArray bodyBytes = requestData.mid(headerEnd + 4);
+            bool lengthOk = false;
+            int contentLength = headers.value(QStringLiteral("content-length")).toInt(&lengthOk);
+            if (lengthOk && contentLength > bodyBytes.size()) {
+                while (bodyBytes.size() < contentLength) {
+                    if (!socket->waitForReadyRead(5000))
+                        break;
+                    bodyBytes += socket->readAll();
+                }
+            }
+            navUrl = QString::fromUtf8(bodyBytes.trimmed());
+        }
+
+        QUrl parsedUrl(navUrl);
+        if (navUrl.isEmpty() || !parsedUrl.isValid() || parsedUrl.isRelative()) {
+            sendResponse(socket, 400, "Bad Request", "invalid url", "text/plain");
+            return;
+        }
+
+        QString scheme = parsedUrl.scheme().toLower();
+        if (scheme != QLatin1String("http") && scheme != QLatin1String("https")
+            && scheme != QLatin1String("file")) {
+            sendResponse(socket, 400, "Bad Request", "scheme not allowed", "text/plain");
+            return;
+        }
+
+        if (m_browser)
+            m_browser->load(parsedUrl);
+
+        sendResponse(socket, 200, "OK", "navigating", "text/plain");
+    } else if (method == QLatin1String("GET") && path == QLatin1String("/render")) {
+        QString screenshotUrl = QStringLiteral("/render/screenshot.png");
+        if (!m_authToken.isEmpty()) {
+            QUrlQuery screenshotQuery;
+            screenshotQuery.addQueryItem(QStringLiteral("token"), m_authToken);
+            screenshotUrl += QStringLiteral("?") + screenshotQuery.toString(QUrl::FullyEncoded);
+        }
+
+        static const char htmlTmpl[] = R"(<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Anoa Live View</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+#frame{display:block;width:100%;height:100%;object-fit:contain}
+</style>
+</head>
+<body>
+<img id="frame">
+<script>
+var src="%1";
+var img=document.getElementById("frame");
+function refresh(){img.src=src+(src.indexOf("?")>=0?"&":"?")+"_t="+Date.now();}
+refresh();
+setInterval(refresh,500);
+</script>
+</body>
+</html>)";
+
+        QByteArray htmlBytes = QString::fromUtf8(htmlTmpl).arg(screenshotUrl).toUtf8();
+        QByteArray response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Content-Length: " + QByteArray::number(htmlBytes.size()) + "\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        response += htmlBytes;
+        socket->write(response);
+        socket->flush();
+        socket->disconnectFromHost();
+        socket->deleteLater();
+    } else if (method == QLatin1String("GET")
+               && path == QLatin1String("/render/stream.mjpeg")) {
+        // Send MJPEG stream headers — keep socket open, no Content-Length.
+        QByteArray streamHeader =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n";
+        socket->write(streamHeader);
+        socket->flush();
+
+        // Timer fires every 100 ms (~10 fps). Parented to socket so it is
+        // cleaned up automatically if socket is deleted before disconnected fires.
+        QTimer *frameTimer = new QTimer(socket);
+        frameTimer->setInterval(100);
+
+        AnoaBrowser *browser = m_browser;
+        connect(frameTimer, &QTimer::timeout, socket, [browser, socket]() {
+            // Skip this frame if the write buffer is backed up beyond 512 KB.
+            if (socket->bytesToWrite() > 512 * 1024)
+                return;
+            if (!browser)
+                return;
+
+            QPixmap pixmap = browser->grab();
+            if (pixmap.isNull())
+                return;
+
+            QByteArray jpegBytes;
+            QBuffer buf(&jpegBytes);
+            buf.open(QIODevice::WriteOnly);
+            if (!pixmap.save(&buf, "JPEG", 70))
+                return;
+            buf.close();
+
+            QByteArray part;
+            part += "--frame\r\n";
+            part += "Content-Type: image/jpeg\r\n";
+            part += "Content-Length: " + QByteArray::number(jpegBytes.size()) + "\r\n";
+            part += "\r\n";
+            part += jpegBytes;
+            part += "\r\n";
+
+            socket->write(part);
+            socket->flush();
+        });
+
+        connect(socket, &QTcpSocket::disconnected, socket, [socket, frameTimer]() {
+            frameTimer->stop();
+            socket->deleteLater();
+        });
+
+        frameTimer->start();
+        // Do not close socket — stream runs until client disconnects.
     } else {
         sendResponse(socket, 404, "Not Found", R"({"error":"not found"})");
     }

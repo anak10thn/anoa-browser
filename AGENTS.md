@@ -1,4 +1,4 @@
-# AGENTS.md — anoa-browser
+# AGENTS.md — anoa
 
 > This file is human-curated project knowledge for AI agents.
 > Agents may propose updates, but humans approve them.
@@ -8,10 +8,10 @@
 
 ## Project Overview
 
-- **Name**: anoa-browser
-- **Type**: C++ application
-- **Stack**: Qt6/QWebEngine (C++17), CMake ≥ 3.16
-- **Description**: Headless browser built on Qt6/QWebEngine with full Chrome DevTools Protocol (CDP) support via `--remote-debugging-port` passthrough. Distributed as a single self-contained binary — no Node.js or npm required. Supports both headless (offscreen) and visible window modes.
+- **Name**: anoa
+- **Type**: library
+- **Stack**: node-typescript
+- **Description**: TODO - describe what this project does
 
 ---
 
@@ -19,158 +19,77 @@
 
 ### File Structure
 ```
+TODO - document your project's file structure pattern
+Example:
 src/
-├── main.cpp              # Qt application entry point; CLI parsing bootstrap
-├── browser/              # QWebEngineView subclass, profile & extension management
-│   ├── anoa_browser.cpp
-│   └── anoa_browser.h
-├── http/                 # QTcpServer-based HTTP discovery endpoints (/json, /json/version, /json/list)
-│   ├── http_server.cpp
-│   └── http_server.h
-├── cdp/                  # WebSocket CDP proxy + domain extensions
-│   ├── cdp_proxy.cpp     # QWebSocketServer bridge; session multiplexing; bearer token auth
-│   ├── cdp_proxy.h
-│   ├── cdp_extensions.cpp  # Profiler, HeapProfiler, Security domain adapter
-│   └── cdp_extensions.h
-├── pdf/                  # Page.printToPDF CDP command handler
-│   ├── pdf_handler.cpp
-│   └── pdf_handler.h
-└── config/               # CLI flag parsing and config file support
-    ├── config.cpp
-    └── config.h
+├── routes/       # API route handlers
+├── services/     # Business logic
+├── models/       # Database models/schemas
+├── middleware/    # Express/framework middleware
+├── utils/        # Shared utilities
+└── types/        # TypeScript type definitions
 ```
 
 ### Naming Conventions
-- Files: `snake_case.cpp` / `snake_case.h`
-- Qt QObject subclasses: `PascalCase` (e.g., `AnoaBrowser`, `HttpServer`, `CdpProxy`)
-- Methods: `camelCase`
-- Constants / `#define` macros: `UPPER_SNAKE_CASE`
-- Local variables: `camelCase`
-- CMake targets: `kebab-case` (matches the binary name: `anoa-browser`)
+- Files: `kebab-case.ts`
+- Components: `PascalCase.tsx`
+- Functions: `camelCase`
+- Constants: `UPPER_SNAKE_CASE`
+- Database tables: `snake_case`
+- API endpoints: `kebab-case`
 
 ### Code Patterns
-- All QObject subclasses declare `Q_OBJECT` and live in their own `.h`/`.cpp` pair
-- Async Qt operations (signals/slots) are bridged to synchronous callers using `QEventLoop` with a timeout — see PDF generation and CDP response patterns
-- CDP commands arrive as JSON; use `QJsonDocument::fromJson` + `QJsonObject` for parsing; never use a third-party JSON library
-- CLI flags are parsed in `src/config/config.cpp` and passed as a `Config` struct to all subsystems; no global state
-- Bearer token authentication is checked in `CdpProxy` before upgrading the WebSocket connection — reject with HTTP 401 if the token mismatches
+- TODO - document patterns used in this project
+- Example: "All route handlers follow: validate input -> call service -> format response"
+- Example: "Use Zod for all runtime validation"
+- Example: "Error responses always use format: { error: string, code: string }"
 
 ### Testing Conventions
-- Framework: none configured
-- Command: `echo 'no test command configured'`
-- Integration validation is manual (Phase 10): connect Playwright/Puppeteer to the running binary and exercise CDP domains
+- Framework: none
+- Command: echo 'no test command configured'
+- Pattern: TODO - describe your test patterns
+- Example: "Integration tests use a real test database, not mocks"
+- Example: "Each test file has its own setup/teardown"
 
 ---
 
 ## Known Gotchas
 
-- **Headless mode**: Set `QPA_PLATFORM=offscreen` *before* constructing `QApplication`. When `--headless` is passed, the binary sets this env var programmatically via `qputenv("QPA_PLATFORM", "offscreen")` at the very top of `main()`, before any Qt object is created.
-- **Qt 6.4+ required**: `--remote-debugging-port` passthrough via `QTWEBENGINE_CHROMIUM_FLAGS` is stable only from Qt 6.4 onward. Earlier versions may silently ignore the flag.
-- **`printToPdf` is asynchronous**: `QWebEnginePage::printToPdf` does not return the PDF bytes directly — it emits a callback. Wrap with `QEventLoop` and a `QTimer` timeout (default 30 s) to bridge to a synchronous CDP response.
-- **`QWebEngineView` requires `QApplication`**: Do not use `QCoreApplication` — WebEngine requires the full GUI application even in headless/offscreen mode.
-- **Windows MSVC build**: Requires MSVC 2022 toolset (`v143`) and Windows SDK 10.0.22000. Set `CMAKE_GENERATOR_PLATFORM=x64` explicitly in the CI pipeline.
-- **macOS universal binary**: Build separately for `x86_64` and `arm64`, then combine with `lipo`. The Qt6 macOS installer provides a universal SDK but individual builds must target one arch at a time for GitHub Actions matrix.
-- **CDP session multiplexing**: `targetId` in CDP messages must be tracked per WebSocket connection — do not share a single upstream DevTools connection across multiple client sockets.
-- **Bearer token in URL**: The `?token=` query param may appear in proxy logs. Also support `Authorization: Bearer <token>` header for clients that allow custom WebSocket headers.
-- **Extension manifest versions**: `QWebEngineProfile` supports loading unpacked extensions but has limited manifest v3 support in Qt 6.x. Test with manifest v2 extensions; document gaps for v3.
-- **Software rasterizer for headless**: On CI runners without a GPU, pass `--disable-gpu` and `--no-sandbox` via `QTWEBENGINE_CHROMIUM_FLAGS` to avoid crashes in offscreen mode.
-- **Port layout (3 ports)**: The binary requires 3 consecutive ports: HTTP discovery (port, e.g. 9222), Chromium DevTools internal (port+1, e.g. 9223), and WebSocket CDP proxy (port+2, e.g. 9224). `QTWEBENGINE_CHROMIUM_FLAGS=--remote-debugging-port=<port+1>` must use port+1, not port.
-- **`Target.createTarget` not supported**: QtWebEngine's Chromium build does NOT support `Target.createTarget` via CDP. Calling `browser.newPage()` in Playwright will fail. Workaround: use `browser.contexts()[0].pages()[0]` to reuse the existing page created at startup. Document this as a protocol gap for users.
-- **Browser context management not supported**: `Target.createBrowserContext`, `Browser.setDownloadBehavior`, `Browser.getWindowForTarget`, etc. are all unsupported by QtWebEngine. The proxy stubs these with `{}` responses so clients like Playwright don't abort connection setup. Playwright works in read/reuse-page mode.
-- **`Page.printToPDF` not in Chromium DevTools for QtWebEngine**: The native `Page.printToPDF` CDP command returns `Method not found` (-32601) from this Chromium build. The proxy intercepts it and handles it via `QWebEnginePage::printToPdf` instead. The proxy must be initialized with `setPage()` — without a page reference the call will crash.
-- **Page must navigate at startup to appear as CDP target**: `QWebEnginePage` does not register as a DevTools target in `/json/list` until it receives a navigation event. Call `load(QUrl("about:blank"))` in `AnoaBrowser::init()` to ensure the page appears immediately.
-- **Playwright trailing slash on `/json/version/`**: Playwright 1.40+ requests `/json/version/` with a trailing slash. HttpServer must normalize trailing slashes or the 404 response causes `connectOverCDP` to fail.
-- **`QJsonArray` include required**: `#include <QJsonArray>` must be explicit; forward declarations in `qmetatype.h` are not sufficient for calling `toArray()` in Qt 6.10.
-- **macOS strip flag**: `-s` is a GNU ld linker flag and is not valid on macOS (Apple clang). Use `if(UNIX AND NOT APPLE)` guard in CMakeLists.txt.
-- **`QCommandLineOption` braced-init-list ambiguity on macOS Qt**: `QCommandLineOption opt({"name"}, ...)` is ambiguous between the `QString` and `QStringList` overloads on macOS/Qt 6.10. Always use `QStringList{"name"}` or `QStringLiteral("name")` explicitly to disambiguate.
-- **`resize()` must precede `load()` for correct viewport**: Call `resize(w, h)` before `load(QUrl("about:blank"))` in `AnoaBrowser::init()` so the initial render uses the configured surface size. Any resize after `load()` won't affect already-captured screenshots.
-- **`show()` required in headless mode for non-zero viewport**: `QWebEngineView::resize()` has no effect unless `show()` is called first — without it, the widget has no backing surface and the viewport is 0×0 even in offscreen mode. Call `show()` unconditionally in `init()`; with `QPA_PLATFORM=offscreen` it creates an invisible surface, not a visible window.
-- **`--disable-gpu` required for headless screenshot on GPU-less hosts**: Without GPU acceleration, Chromium's Skia rasterizer crashes on `Page.captureScreenshot`. Pass `--disable-gpu` via `QTWEBENGINE_CHROMIUM_FLAGS` whenever `--headless` is active. The binary now does this automatically.
-- **CdpProxy upstream handshake race**: When a CDP client connects and immediately sends a command, the proxy's upstream WebSocket connection to Chromium may not be established yet. Commands sent before `upstream->state() == ConnectedState` were silently dropped. Fix: queue client messages in `m_pendingMessages` and flush them in `onUpstreamConnected()`.
-
-### Resolution Feature Sub-section (task-013 Validation, 2026-04-24)
-
-| Scenario | Result | Notes |
-|---|---|---|
-| Build (cmake configure + build) | PASS | Fixed `QStringList{"width"}` for QCommandLineOption ambiguity |
-| Headed default 1280×720 | PASS (HTTP smoke) | Visual confirmation requires human; `show()` needed even in headless |
-| Headed override 800×600 | PASS (HTTP smoke) | HTTP endpoint up, version endpoint responds correctly |
-| Headless screenshot default 1280×720 | PASS | After fixing `show()` + `--disable-gpu` + proxy message queue |
-| Headless screenshot override 1920×1080 | PASS | Correct PNG dimensions confirmed via CDP |
-| Config file 640×480 | PASS | `--config` JSON file read and applied correctly |
-| CLI override beats config (width=1024, height=480 from file) | PASS | Correct split: CLI width overrides, file height used |
-| `--width 0` → exit 1 | PASS | Validation rejects non-positive values |
-| `--width abc` → exit 1 | PASS | Validation rejects non-integer values |
-
-### Protocol Gap Matrix (Phase 10 Validation, Qt 6.10.2, Chrome 134)
-
-| CDP Command | Status | Notes |
-|---|---|---|
-| `Target.createTarget` | FAIL — Not Supported | QtWebEngine does not support creating tabs via CDP |
-| `Target.createBrowserContext` | STUBBED → `{}` | Proxy returns synthetic context ID `__anoa_default__` |
-| `Target.disposeBrowserContext` | STUBBED → `{}` | No-op; proxy returns success |
-| `Browser.setDownloadBehavior` | STUBBED → `{}` | Context management not supported |
-| `Browser.getWindowForTarget` | STUBBED → `{}` | Not supported |
-| `Browser.getVersion` | PASS — passthrough | Chromium returns correct version info |
-| `Page.printToPDF` | PASS — Qt API | Not in Chromium DevTools; handled via `QWebEnginePage::printToPdf` |
-| `Profiler.enable` | PASS — stub | Returns `{}` (no V8 profiler exposure) |
-| `HeapProfiler.enable` | PASS — stub | Returns `{}` (no heap profiler exposure) |
-| `Security.enable` | PASS — stub | Returns `{}` |
-| `Security.setIgnoreCertificateErrors` | PASS — stub | Returns `{}` |
-| `Target.getTargets` | PASS — passthrough | Returns active pages after startup navigation |
-| `Playwright connectOverCDP` | PASS (with workaround) | Use existing page; `newPage()` fails |
-| `Puppeteer connect` | PASS | Works out-of-the-box |
+- TODO - document things that are surprising or non-obvious
+- Example: "Prisma unique constraint errors throw P2002, need explicit handling"
+- Example: "Test database needs cleanup between runs — use beforeEach, not beforeAll"
+- Example: "The auth middleware reads from both cookie and Authorization header"
 
 ---
 
 ## Architecture Decisions
 
-- **Qt6/QWebEngine chosen over Electron/Playwright server**: Qt6 ships a bundled Chromium (via QtWebEngine) and exposes `--remote-debugging-port`, giving full native CDP support without maintaining a protocol implementation. Playwright/Puppeteer connect to it as they would to any Chrome instance.
-- **Single self-contained C++ binary, no Node.js**: Users download one file per platform. No npm install, no Node.js version conflicts. All subsystems (HTTP, WebSocket proxy, CDP extensions, PDF) are implemented with Qt's built-in classes.
-- **CDP via `--remote-debugging-port` passthrough**: QtWebEngine forwards Chromium's DevTools port transparently. Set via `QTWEBENGINE_CHROMIUM_FLAGS=--remote-debugging-port=<N>`. This provides full protocol compliance for free — no custom CDP implementation needed.
-- **Default port 9222**: Matches Chrome's default, so all CDP clients that auto-detect Chrome work out of the box with zero configuration.
-- **Both headless and headed modes**: `--headless` triggers `QPA_PLATFORM=offscreen`; without it the binary opens a visible window. Driven by user requirement to support both use cases from one binary.
-- **CDP domain extensions as a C++ adapter**: Profiler, HeapProfiler, Security domains are layered on top of the passthrough in `src/cdp/cdp_extensions.cpp`. They route to Qt APIs where available and return capability stubs otherwise — clients don't break on unsupported commands.
-- **Authentication via bearer token**: Stateless; compatible with Playwright's `browserWSEndpoint` URL (`?token=`). Also accepted via `Authorization` header.
-- **Persistent profiles via `QWebEngineProfile`**: Named profiles with isolated cookie jars and localStorage. Stored in a user-configurable directory. No external profile manager needed.
-- **GitHub Releases for binary distribution**: Standard pattern for compiled tools — no registry dependency. Versioned archives published per platform on `git tag` push via GitHub Actions matrix.
+- TODO - document why things are the way they are
+- Example: "We use JWT instead of sessions because the API serves mobile + web"
+- Example: "Chose Drizzle over Prisma for better type inference and SQL control"
+- Example: "Monorepo with turborepo because shared types between API and web"
 
 ---
 
 ## Dependencies & Integrations
 
-- **Qt6 ≥ 6.4** — modules required: `QtWebEngineWidgets`, `QtWebEngineCore`, `QtNetwork`, `QtWebSockets`, `QtWidgets`. Install via Qt online installer or system package manager. On Ubuntu: `apt install qt6-webengine-dev`.
-- **CMake ≥ 3.16** — build system. All platform builds use CMake; no Qmake.
-- **MSVC 2022 + Windows SDK 10.0.22000** — required for Windows Qt6 WebEngine builds. Set `CMAKE_GENERATOR "Visual Studio 17 2022"` and `CMAKE_GENERATOR_PLATFORM x64`.
-- **`lipo`** (macOS) — combines separate `x86_64` and `arm64` builds into a universal binary for macOS distribution.
-- **GitHub Actions** — matrix release builds: `ubuntu-latest` (x86_64), `ubuntu-arm64` or cross-compile (arm64), `macos-latest` (universal), `windows-latest` (MSVC x64). Triggered by `git tag` push.
-- **`QPA_PLATFORM=offscreen`** — environment variable required for headless rendering without a display server. Set programmatically by the binary when `--headless` is passed.
-- **`QTWEBENGINE_CHROMIUM_FLAGS`** — environment variable used to pass Chromium flags (e.g., `--remote-debugging-port=9222 --disable-gpu --no-sandbox`) to the embedded Chromium instance.
+- TODO - document external service integrations
+- Example: "Email via SendGrid — API key in SENDGRID_API_KEY env var"
+- Example: "File uploads go to S3 bucket defined in AWS_S3_BUCKET"
+- Example: "Auth tokens are RS256 signed — public key at /api/auth/.well-known/jwks.json"
 
 ---
 
 ## Development Setup
 
 ```bash
-# Prerequisites: Qt6 ≥ 6.4 with WebEngine, CMake ≥ 3.16
-
-# Configure (Debug)
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
-
-# Configure (Release with strip)
-cmake -B build-release -DCMAKE_BUILD_TYPE=Release
-
-# Build
-cmake --build build --parallel
-
-# Run headless (offscreen, no display required)
-./build/anoa-browser --headless --port 9222
-
-# Run headed (visible window)
-./build/anoa-browser --port 9222
-
-# Install to system
-sudo cmake --install build-release
+# TODO - document how to run the project locally
+# Example:
+# cp .env.example .env
+# docker-compose up -d    # Start database
+# npm install
+# npm run db:migrate       # Run migrations
+# npm run dev              # Start dev server
 ```
 
 ---
