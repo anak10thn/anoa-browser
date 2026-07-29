@@ -175,6 +175,8 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 | `POST` | `/render/navigate?url=<url>` | `text/plain` | Load a URL into the embedded browser |
 | `POST` | `/render/click?x=<px>&y=<px>&button=left\|right\|middle` | `text/plain` | Synthesize a mouse click at viewport coordinates (button defaults to `left`) |
 | `POST` | `/render/scroll?dy=<delta>&x=<px>&y=<px>` | `text/plain` | Synthesize a mouse wheel event; `dy` in angle-delta units (±120 per notch, positive scrolls up), `x`/`y` default to the viewport center |
+| `POST` | `/render/type?text=<text>` | `text/plain` | Type text into the focused element (URL-encoded query param, or raw request body) |
+| `POST` | `/render/key?key=<name>` | `text/plain` | Press a named key: `enter`, `tab`, `backspace`, `delete`, `escape`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown` |
 | `GET` | `/render/stream.mjpeg` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) |
 
 ### Usage example
@@ -239,8 +241,11 @@ Controls:
 |---|---|
 | Left/right/middle mouse click | Click at that position in the page |
 | Mouse wheel | Scroll the page under the pointer |
-| `Up` / `Down` arrows | Scroll one wheel notch |
-| `q` / `Ctrl-C` | Quit and restore the terminal |
+| Typing (any text, incl. paste) | Typed into the focused element |
+| `Enter` / `Backspace` / `Tab` / arrows | Forwarded to the page (arrows scroll when no field is focused) |
+| `Ctrl-C` / `Ctrl-Q` | Quit and restore the terminal |
+
+The status bar shows the last event forwarded to the browser (`click 640,360`, `typed "hello"`, …). If it doesn't change when you click, your terminal isn't delivering mouse reports — check its mouse-reporting setting, or in tmux enable `set -g mouse on`.
 
 ```bash
 # 1. Start the browser (any machine, headless or headed)
