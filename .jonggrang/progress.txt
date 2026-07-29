@@ -62,3 +62,13 @@
 - PPM P6 export: after convertToFormat(Format_RGB888), copy exactly width*3 bytes per constScanLine(y) — bytesPerLine() includes 4-byte alignment padding that must not be emitted.
 - Click coordinates are in LOGICAL widget pixels; report m_browser->width()/height() in X-Anoa-Viewport-* headers (grab() returns device pixels on HiDPI, so clients must map via viewport, not image size assumptions).
 - End-to-end click test without network: two local file:// pages, page A has a full-viewport <a href> — click center, then assert /render/html contains page B's marker.
+
+## 2026-07-29 — task-002: anoa-term terminal viewer client
+
+- anoa-term is intentionally Qt-free (POSIX sockets + termios only) — the server-side PPM endpoint means the client needs no image decoder, keeping it a single ~450-line file.
+- CMake AUTOMOC applies to every target; a non-Qt executable still gets an (empty, harmless) mocs_compilation.cpp — no need to disable AUTOMOC per target.
+- Probe the HTTP endpoint BEFORE entering the alt screen/raw mode so connection errors print as normal stderr lines instead of flashing the terminal.
+- Half-block rendering: 1 cell = 1×2 px with ▀, fg=top/bg=bottom; emit SGR color codes only on change and reset the "last color" cache at each row since rows end with \033[0m.
+- SGR mouse parsing must tolerate incomplete escape sequences at the buffer tail — keep unconsumed bytes and resume after the next read (never assume one read = one sequence).
+- Non-interactive testing recipe: `(sleep 2; printf '\033[<0;40;12M...q') | script -q out.txt ./anoa-term ...` gives the client a real pty; under `script` the winsize falls back to 80×24, which makes click-coordinate assertions deterministic.
+- Click mapping: pageX = cellX * viewportW / imgW using the ACTUAL PPM dimensions from the response (KeepAspectRatio means returned size ≠ requested size).
