@@ -51,3 +51,14 @@
 - Embed the HTML as a `static const char htmlTmpl[] = R"(...)"` raw string literal with a single `%1` placeholder; use `QString::fromUtf8(htmlTmpl).arg(screenshotUrl).toUtf8()` to inject the dynamic screenshot URL — avoids complex string concatenation.
 - `QString::arg()` is safe here because the HTML template contains no other `%` characters; but would need escaping (`%%`) if template ever gains CSS percentages.
 - For the `<img>` src cache-buster, use `src.indexOf("?")>=0?"&":"?"` so the separator is correct whether or not the screenshot URL already has query params (it will when auth token is appended).
+
+## 2026-07-29 — task-001: /render/click, /render/scroll, /render/screenshot.ppm endpoints
+
+- Synthetic mouse input to QWebEngineView MUST target `focusProxy()` (the Chromium render widget), not the view itself — events posted to the view are silently ignored.
+- Use `QCoreApplication::postEvent` with heap-allocated events (not sendEvent + stack events) so the HTTP handler never re-enters the widget stack synchronously.
+- Qt6 QMouseEvent: use the 7-arg ctor (type, localPos, scenePos, globalPos, button, buttons, modifiers) — the 6-arg one is deprecated and trips -Wpedantic builds.
+- Send a leading MouseMove before Press/Release so Chromium's hover/hit-testing state matches the click position.
+- QWheelEvent with null pixelDelta + angleDelta(0, dy) behaves like a classic notched wheel; dy=±120 per notch.
+- PPM P6 export: after convertToFormat(Format_RGB888), copy exactly width*3 bytes per constScanLine(y) — bytesPerLine() includes 4-byte alignment padding that must not be emitted.
+- Click coordinates are in LOGICAL widget pixels; report m_browser->width()/height() in X-Anoa-Viewport-* headers (grab() returns device pixels on HiDPI, so clients must map via viewport, not image size assumptions).
+- End-to-end click test without network: two local file:// pages, page A has a full-viewport <a href> — click center, then assert /render/html contains page B's marker.

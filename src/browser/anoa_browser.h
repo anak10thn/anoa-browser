@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QNetworkCookie>
+#include <QPoint>
 #include <QUrl>
 #include <QWebEngineView>
 
@@ -22,6 +23,9 @@ public:
     QList<QNetworkCookie> getCookies(const QUrl &origin);
     void setCookie(const QNetworkCookie &cookie, const QUrl &origin);
     void clearStorage(const QUrl &origin);
+
+    void sendClick(const QPoint &pos, Qt::MouseButton button);
+    void sendScroll(const QPoint &pos, int angleDeltaY);
 
 private:
     Config m_config;

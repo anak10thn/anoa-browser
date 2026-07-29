@@ -1,8 +1,11 @@
 #include "anoa_browser.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -150,4 +153,44 @@ void AnoaBrowser::clearStorage(const QUrl &origin)
     m_profile->cookieStore()->deleteAllCookies();
     m_profile->clearAllVisitedLinks();
     page()->triggerAction(QWebEnginePage::Stop);
+}
+
+// Synthetic input must go to the render widget (focusProxy), not the
+// QWebEngineView itself — events posted to the view are not forwarded
+// to Chromium. postEvent (not sendEvent) keeps this callable from HTTP
+// handler code without re-entering the widget stack synchronously.
+static QWidget *inputTarget(QWebEngineView *view)
+{
+    QWidget *proxy = view->focusProxy();
+    return proxy ? proxy : view;
+}
+
+void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button)
+{
+    QWidget *target = inputTarget(this);
+    const QPointF posF(pos);
+    const QPointF globalF(target->mapToGlobal(pos));
+    // Leading move puts the pointer at the click position so hover/hit-testing
+    // state matches a real interaction before the press arrives.
+    QCoreApplication::postEvent(target,
+        new QMouseEvent(QEvent::MouseMove, posF, posF, globalF,
+                        Qt::NoButton, Qt::NoButton, Qt::NoModifier));
+    QCoreApplication::postEvent(target,
+        new QMouseEvent(QEvent::MouseButtonPress, posF, posF, globalF,
+                        button, button, Qt::NoModifier));
+    QCoreApplication::postEvent(target,
+        new QMouseEvent(QEvent::MouseButtonRelease, posF, posF, globalF,
+                        button, Qt::NoButton, Qt::NoModifier));
+}
+
+void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
+{
+    QWidget *target = inputTarget(this);
+    const QPointF posF(pos);
+    const QPointF globalF(target->mapToGlobal(pos));
+    // Null pixelDelta = classic notched wheel; angleDelta is in 1/8 degree,
+    // one wheel notch = 120.
+    QCoreApplication::postEvent(target,
+        new QWheelEvent(posF, globalF, QPoint(), QPoint(0, angleDeltaY),
+                        Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false));
 }
