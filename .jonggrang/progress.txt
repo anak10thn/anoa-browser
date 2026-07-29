@@ -72,3 +72,9 @@
 - SGR mouse parsing must tolerate incomplete escape sequences at the buffer tail — keep unconsumed bytes and resume after the next read (never assume one read = one sequence).
 - Non-interactive testing recipe: `(sleep 2; printf '\033[<0;40;12M...q') | script -q out.txt ./anoa-term ...` gives the client a real pty; under `script` the winsize falls back to 80×24, which makes click-coordinate assertions deterministic.
 - Click mapping: pageX = cellX * viewportW / imgW using the ACTUAL PPM dimensions from the response (KeepAspectRatio means returned size ≠ requested size).
+
+## 2026-07-29 — task-003: Document terminal view in README
+
+- anoa-term gets its own top-level README section (after Web Render Endpoints) since it is a separate binary, not just an endpoint — endpoint rows alone would hide it.
+- Pipe characters inside a Markdown table cell (button=left|right|middle) must be escaped as \| or they split the cell.
+- Note the terminal requirements (truecolor + SGR mouse) explicitly — this is the #1 support question for TUI tools.

@@ -12,7 +12,8 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 - **Headless and headed modes** from the same binary
 - **HTTP discovery endpoints** — `/json`, `/json/version`, `/json/list` (Chrome-compatible)
 - **WebSocket CDP proxy** with session multiplexing and optional bearer token auth
-- **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation over plain HTTP (`/render/*`)
+- **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation, click/scroll injection over plain HTTP (`/render/*`)
+- **Terminal viewer (`anoa-term`)** — watch and control the browser from any terminal: live ANSI rendering, mouse clicks and scrolling forwarded to the page
 - **Remote CDP friendly** — Chromium started with `--remote-allow-origins=*`, so clients behind tunnels/reverse proxies connect without Origin rejections (access control via `--auth-token`)
 - **`Page.printToPDF`** — intercepted and handled via `QWebEnginePage::printToPdf`
 - **Named browser profiles** — isolated cookie jars and localStorage per profile
@@ -169,8 +170,11 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 |---|---|---|---|
 | `GET` | `/render` | `text/html` | Live viewer page — auto-refreshing screenshot in the browser |
 | `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot |
+| `GET` | `/render/screenshot.ppm?w=<px>&h=<px>` | `image/x-portable-pixmap` | Current frame as binary PPM (P6), scaled server-side (aspect ratio kept); `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size for coordinate mapping |
 | `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
 | `POST` | `/render/navigate?url=<url>` | `text/plain` | Load a URL into the embedded browser |
+| `POST` | `/render/click?x=<px>&y=<px>&button=left\|right\|middle` | `text/plain` | Synthesize a mouse click at viewport coordinates (button defaults to `left`) |
+| `POST` | `/render/scroll?dy=<delta>&x=<px>&y=<px>` | `text/plain` | Synthesize a mouse wheel event; `dy` in angle-delta units (±120 per notch, positive scrolls up), `x`/`y` default to the viewport center |
 | `GET` | `/render/stream.mjpeg` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) |
 
 ### Usage example
@@ -195,7 +199,51 @@ curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycomb
 
 # 6. Stream live MJPEG (e.g. in VLC or ffplay)
 ffplay "http://localhost:9222/render/stream.mjpeg?token=mysecret"
+
+# 7. Click at viewport coordinates (640, 360)
+curl -X POST "http://localhost:9222/render/click?x=640&y=360&token=mysecret"
+
+# 8. Scroll down one wheel notch
+curl -X POST "http://localhost:9222/render/scroll?dy=-120&token=mysecret"
 ```
+
+---
+
+## Terminal Viewer (`anoa-term`)
+
+`anoa-term` renders the live browser view directly in your terminal as ANSI truecolor half-blocks and forwards terminal mouse input back to the page — click a link in your terminal and the browser clicks it. Built automatically alongside `anoa-browser` on Linux/macOS (POSIX only, no Qt dependency).
+
+```
+anoa-term [options]
+
+Options:
+  --host <host>     anoa-browser host (default: 127.0.0.1)
+  --port <N>        anoa-browser HTTP port (default: 9222)
+  --token <secret>  Bearer token if the server was started with --auth-token
+  --fps <N>         Refresh rate, 1-30 (default: 10)
+```
+
+Controls:
+
+| Input | Action |
+|---|---|
+| Left/right/middle mouse click | Click at that position in the page |
+| Mouse wheel | Scroll the page under the pointer |
+| `Up` / `Down` arrows | Scroll one wheel notch |
+| `q` / `Ctrl-C` | Quit and restore the terminal |
+
+```bash
+# 1. Start the browser (any machine, headless or headed)
+./anoa-browser --headless --port 9222 --auth-token mysecret
+
+# 2. Point it somewhere
+curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycombinator.com&token=mysecret"
+
+# 3. Watch and control it from your terminal (works over SSH too)
+./anoa-term --host localhost --port 9222 --token mysecret
+```
+
+Requires a terminal with truecolor and SGR mouse support (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …).
 
 ---
 
@@ -256,6 +304,9 @@ anoa-browser
 │   ├── cdp_proxy             # QWebSocketServer bridge, session multiplexing, auth
 │   └── cdp_extensions        # Profiler / HeapProfiler / Security domain stubs
 └── pdf/                      # Page.printToPDF interceptor via QWebEnginePage::printToPdf
+
+anoa-term (tools/anoa-term/)  # POSIX terminal viewer — ANSI half-block rendering,
+                              # SGR mouse → /render/click + /render/scroll
 ```
 
 All subsystems are implemented with Qt built-in classes (no third-party dependencies beyond Qt6).
