@@ -95,3 +95,12 @@
 - Named control keys need BOTH the Qt::Key code and the matching control-char text ("\r" for Return, "\t" for Tab, " " for Space) or some handlers miss them.
 - Set monotonic timestamps (setTimestamp) on synthetic mouse events — Chromium click-count logic compares stamps and treats all-zero stamps as double/triple-click runs.
 - Verified click reaches JS onclick handlers (not just native anchors) via a local page that mirrors events into document.title, readable through /render/html — input VALUES are not serialized by toHtml(), so mirror to title/attributes when testing.
+
+## 2026-07-29 — task-007: anoa-term keyboard forwarding + input feedback
+
+- Once keys are forwarded to the page, q can no longer quit — move quit to Ctrl-C/Ctrl-Q (raw mode has ISIG off, so Ctrl-C arrives as byte 3).
+- Batch consecutive printable bytes into ONE /render/type call before any control byte/escape flushes — pasted text must not become one HTTP request per character. UTF-8 continuation bytes (≥0x80) pass through the batch untouched.
+- Forward arrow keys as key events instead of wheel scrolls: in a text field they move the caret, otherwise Chromium scrolls the page anyway — both behaviors for free.
+- Status bar shows the last forwarded event ("click 312,172", "typed \"xyz\"") — the #1 debugging aid for "clicks don't work" reports: if it doesn't change, the terminal isn't delivering mouse reports.
+- Status bar is truncated to terminal width — put diagnostic info BEFORE long usage hints or it silently disappears at 80 cols (bug found via pty test grep coming back empty).
+- Terminal Backspace arrives as DEL (127) more often than BS (8) — handle both.

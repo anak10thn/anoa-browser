@@ -13,7 +13,8 @@
 //   anoa-term [--host 127.0.0.1] [--port 9222] [--token SECRET] [--fps 10]
 //             [--gfx auto|halfblock|iterm|kitty]
 //
-// Keys: q quit · arrow Up/Down scroll · mouse click = click in the page.
+// Mouse clicks, wheel scrolling and the keyboard (text, Enter, Backspace,
+// Tab, arrows) are forwarded to the page. Ctrl-C / Ctrl-Q quits.
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -384,6 +385,34 @@ void sendScroll(const Options &opt, const DisplayMap &map, int cellX, int cellY,
     httpRequest(opt, "POST", withToken(opt, path), resp);
 }
 
+std::string urlEncode(const std::string &in)
+{
+    std::string out;
+    for (const char c : in) {
+        const auto u = static_cast<unsigned char>(c);
+        if (isalnum(u) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += c;
+        } else {
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%%%02X", u);
+            out += hex;
+        }
+    }
+    return out;
+}
+
+void sendText(const Options &opt, const std::string &text)
+{
+    HttpResponse resp;
+    httpRequest(opt, "POST", withToken(opt, "/render/type?text=" + urlEncode(text)), resp);
+}
+
+void sendKey(const Options &opt, const std::string &keyName)
+{
+    HttpResponse resp;
+    httpRequest(opt, "POST", withToken(opt, "/render/key?key=" + keyName), resp);
+}
+
 // ── Rendering ───────────────────────────────────────────────────────────────
 
 void renderStatusBar(int cols, int rows, const std::string &statusText)
@@ -486,19 +515,55 @@ void renderGfx(GfxMode mode, const std::string &png, int dispCols, int dispRows)
 
 // ── Input handling ──────────────────────────────────────────────────────────
 
-// Consume every complete escape sequence / key in `buf`; returns false on quit.
-bool processInput(std::string &buf, const Options &opt, const DisplayMap &map)
+// Consume every complete escape sequence / key in `buf`; returns false on
+// quit. `feedback` receives a short description of the last event forwarded,
+// shown in the status bar so users can verify their terminal delivers input.
+bool processInput(std::string &buf, const Options &opt, const DisplayMap &map,
+                  std::string &feedback)
 {
+    // Batch consecutive printable bytes into one /render/type call so pasted
+    // text is not sent one HTTP request per character. UTF-8 continuation
+    // bytes (>= 0x80) pass straight through.
+    std::string pending;
+    auto flushPending = [&]() {
+        if (pending.empty())
+            return;
+        sendText(opt, pending);
+        feedback = "typed \"" + (pending.size() > 12 ? pending.substr(0, 12) + "…" : pending) + "\"";
+        pending.clear();
+    };
+
     size_t i = 0;
     while (i < buf.size()) {
         const char c = buf[i];
-        if (c == 'q' || c == 'Q' || c == 3) // 3 = Ctrl-C (ISIG is off)
+        const auto u = static_cast<unsigned char>(c);
+
+        if (c == 3 || c == 17) { // Ctrl-C / Ctrl-Q (ISIG is off)
+            flushPending();
             return false;
+        }
 
         if (c != '\033') {
+            if (c == '\r' || c == '\n') {
+                flushPending();
+                sendKey(opt, "enter");
+                feedback = "key enter";
+            } else if (c == 127 || c == 8) {
+                flushPending();
+                sendKey(opt, "backspace");
+                feedback = "key backspace";
+            } else if (c == '\t') {
+                flushPending();
+                sendKey(opt, "tab");
+                feedback = "key tab";
+            } else if (u >= 32 || u >= 0x80) { // printable ASCII or UTF-8 bytes
+                pending += c;
+            }
             ++i;
             continue;
         }
+
+        flushPending();
         if (i + 1 >= buf.size())
             break; // incomplete sequence — wait for more bytes
         if (buf[i + 1] != '[') {
@@ -506,9 +571,13 @@ bool processInput(std::string &buf, const Options &opt, const DisplayMap &map)
             continue;
         }
 
-        // Arrow keys: ESC [ A (up) / ESC [ B (down) → scroll one wheel notch.
-        if (i + 2 < buf.size() && (buf[i + 2] == 'A' || buf[i + 2] == 'B')) {
-            sendScroll(opt, map, -1, -1, buf[i + 2] == 'A' ? 120 : -120);
+        // Arrow keys → forwarded as key events. In a focused text field they
+        // move the caret; otherwise Chromium scrolls the page — both natural.
+        if (i + 2 < buf.size() && buf[i + 2] >= 'A' && buf[i + 2] <= 'D') {
+            static const char *arrows[] = {"up", "down", "right", "left"};
+            const char *name = arrows[buf[i + 2] - 'A'];
+            sendKey(opt, name);
+            feedback = std::string("key ") + name;
             i += 3;
             continue;
         }
@@ -544,12 +613,20 @@ bool processInput(std::string &buf, const Options &opt, const DisplayMap &map)
                 const int cellX = nums[1] - 1;
                 const int cellY = nums[2] - 1;
                 if (final == 'M') {
-                    if (btn >= 0 && btn <= 2)
+                    int pageX = 0, pageY = 0;
+                    const bool inPage = mapCellToPage(map, cellX, cellY, pageX, pageY);
+                    if (btn >= 0 && btn <= 2) {
                         sendClick(opt, map, cellX, cellY, btn);
-                    else if (btn == 64)
+                        feedback = inPage ? "click " + std::to_string(pageX) + ","
+                                                + std::to_string(pageY)
+                                          : "click outside page";
+                    } else if (btn == 64) {
                         sendScroll(opt, map, cellX, cellY, 120);
-                    else if (btn == 65)
+                        feedback = "scroll up";
+                    } else if (btn == 65) {
                         sendScroll(opt, map, cellX, cellY, -120);
+                        feedback = "scroll down";
+                    }
                 }
             }
             i = j;
@@ -557,6 +634,7 @@ bool processInput(std::string &buf, const Options &opt, const DisplayMap &map)
         }
         i += 2;
     }
+    flushPending();
     buf.erase(0, i);
     return true;
 }
@@ -567,8 +645,9 @@ void usage(const char *argv0)
             "Usage: %s [--host HOST] [--port PORT] [--token SECRET] [--fps N]\n"
             "          [--gfx auto|halfblock|iterm|kitty]\n"
             "Connects to a running anoa-browser and renders its view in the\n"
-            "terminal. Click and scroll in the terminal to drive the page.\n"
-            "Keys: q quit, Up/Down scroll.\n"
+            "terminal. Click, scroll and type in the terminal to drive the page.\n"
+            "Keys are forwarded to the page (text, Enter, Backspace, Tab,\n"
+            "arrows); Ctrl-C or Ctrl-Q quits.\n"
             "--gfx auto (default) uses the iTerm2/kitty image protocol when the\n"
             "terminal supports it (crisp, full resolution) and falls back to\n"
             "ANSI halfblock rendering everywhere else.\n",
@@ -665,6 +744,7 @@ int main(int argc, char *argv[])
     DisplayMap map;
     std::string inputBuf;
     std::string lastPng;
+    std::string lastInput;
     const long framePeriodUs = 1000000L / opt.fps;
 
     while (!g_quit) {
@@ -723,11 +803,15 @@ int main(int argc, char *argv[])
             }
         }
 
-        std::string status = " anoa-term  " + opt.host + ":" + std::to_string(opt.port)
-                             + "  " + std::to_string(map.viewportW) + "x"
-                             + std::to_string(map.viewportH) + "  [" + modeName + "]";
-        status += fetched ? "  click=click  wheel/arrows=scroll  q=quit"
-                          : "  connection lost — retrying…  q=quit";
+        std::string status = " anoa-term " + opt.host + ":" + std::to_string(opt.port)
+                             + " " + std::to_string(map.viewportW) + "x"
+                             + std::to_string(map.viewportH) + " [" + modeName + "]";
+        if (!fetched)
+            status += " connection lost — retrying…";
+        // Once the user has interacted, the last forwarded event replaces the
+        // long usage hint so it survives narrow terminals.
+        status += lastInput.empty() ? " click/type/scroll drive the page, ctrl-c quits"
+                                    : " ctrl-c=quit | " + lastInput;
         renderStatusBar(cols, rows, status);
 
         // Wait out the frame period on stdin so input is handled immediately.
@@ -743,7 +827,7 @@ int main(int argc, char *argv[])
             const ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
             if (n > 0) {
                 inputBuf.append(buf, static_cast<size_t>(n));
-                if (!processInput(inputBuf, opt, map))
+                if (!processInput(inputBuf, opt, map, lastInput))
                     break;
             }
         }
