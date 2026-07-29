@@ -1,9 +1,11 @@
 #include "anoa_browser.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QJsonArray>
@@ -170,17 +172,23 @@ void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button)
     QWidget *target = inputTarget(this);
     const QPointF posF(pos);
     const QPointF globalF(target->mapToGlobal(pos));
+    // Chromium's click-count logic compares event timestamps; leaving them at 0
+    // makes every synthetic click look simultaneous (double/triple-click runs).
+    const auto stamp = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
     // Leading move puts the pointer at the click position so hover/hit-testing
     // state matches a real interaction before the press arrives.
-    QCoreApplication::postEvent(target,
-        new QMouseEvent(QEvent::MouseMove, posF, posF, globalF,
-                        Qt::NoButton, Qt::NoButton, Qt::NoModifier));
-    QCoreApplication::postEvent(target,
-        new QMouseEvent(QEvent::MouseButtonPress, posF, posF, globalF,
-                        button, button, Qt::NoModifier));
-    QCoreApplication::postEvent(target,
-        new QMouseEvent(QEvent::MouseButtonRelease, posF, posF, globalF,
-                        button, Qt::NoButton, Qt::NoModifier));
+    auto *move = new QMouseEvent(QEvent::MouseMove, posF, posF, globalF,
+                                 Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+    move->setTimestamp(stamp);
+    auto *press = new QMouseEvent(QEvent::MouseButtonPress, posF, posF, globalF,
+                                  button, button, Qt::NoModifier);
+    press->setTimestamp(stamp + 1);
+    auto *release = new QMouseEvent(QEvent::MouseButtonRelease, posF, posF, globalF,
+                                    button, Qt::NoButton, Qt::NoModifier);
+    release->setTimestamp(stamp + 50);
+    QCoreApplication::postEvent(target, move);
+    QCoreApplication::postEvent(target, press);
+    QCoreApplication::postEvent(target, release);
 }
 
 void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
@@ -190,7 +198,61 @@ void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
     const QPointF globalF(target->mapToGlobal(pos));
     // Null pixelDelta = classic notched wheel; angleDelta is in 1/8 degree,
     // one wheel notch = 120.
-    QCoreApplication::postEvent(target,
-        new QWheelEvent(posF, globalF, QPoint(), QPoint(0, angleDeltaY),
-                        Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false));
+    auto *wheel = new QWheelEvent(posF, globalF, QPoint(), QPoint(0, angleDeltaY),
+                                  Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    wheel->setTimestamp(static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
+    QCoreApplication::postEvent(target, wheel);
+}
+
+void AnoaBrowser::sendText(const QString &text)
+{
+    QWidget *target = inputTarget(this);
+    for (const QChar &ch : text) {
+        // key = 0 (unknown) + non-empty text: Chromium takes the character from
+        // the text payload, which handles any unicode without a key-code table.
+        QCoreApplication::postEvent(target,
+            new QKeyEvent(QEvent::KeyPress, 0, Qt::NoModifier, QString(ch)));
+        QCoreApplication::postEvent(target,
+            new QKeyEvent(QEvent::KeyRelease, 0, Qt::NoModifier, QString(ch)));
+    }
+}
+
+bool AnoaBrowser::sendKey(const QString &keyName)
+{
+    struct NamedKey {
+        const char *name;
+        Qt::Key key;
+        const char *text; // control chars Chromium expects alongside the key
+    };
+    static const NamedKey keys[] = {
+        {"enter", Qt::Key_Return, "\r"},
+        {"tab", Qt::Key_Tab, "\t"},
+        {"backspace", Qt::Key_Backspace, ""},
+        {"delete", Qt::Key_Delete, ""},
+        {"escape", Qt::Key_Escape, ""},
+        {"space", Qt::Key_Space, " "},
+        {"up", Qt::Key_Up, ""},
+        {"down", Qt::Key_Down, ""},
+        {"left", Qt::Key_Left, ""},
+        {"right", Qt::Key_Right, ""},
+        {"home", Qt::Key_Home, ""},
+        {"end", Qt::Key_End, ""},
+        {"pageup", Qt::Key_PageUp, ""},
+        {"pagedown", Qt::Key_PageDown, ""},
+    };
+
+    const QString wanted = keyName.toLower();
+    for (const NamedKey &k : keys) {
+        if (wanted == QLatin1String(k.name)) {
+            QWidget *target = inputTarget(this);
+            QCoreApplication::postEvent(target,
+                new QKeyEvent(QEvent::KeyPress, k.key, Qt::NoModifier,
+                              QString::fromLatin1(k.text)));
+            QCoreApplication::postEvent(target,
+                new QKeyEvent(QEvent::KeyRelease, k.key, Qt::NoModifier,
+                              QString::fromLatin1(k.text)));
+            return true;
+        }
+    }
+    return false;
 }

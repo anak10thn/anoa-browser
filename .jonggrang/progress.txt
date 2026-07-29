@@ -88,3 +88,10 @@
 - Skip re-sending the image when the PNG body is byte-identical to the previous frame — static pages then cost zero terminal bandwidth and never flicker.
 - PNG dimensions come straight from the IHDR chunk (bytes 16-23, big-endian) — no decoder needed for layout math.
 - Unified click mapping through a DisplayMap {dispCols, dispRows, viewportW/H} works for both backends: halfblock dispCols=ppmW, dispRows=ceil(ppmH/2); gfx = computed cell rect.
+
+## 2026-07-29 — task-006: /render/type and /render/key endpoints
+
+- Text insertion via QKeyEvent with key=0 (unknown) + non-empty text works for arbitrary unicode — Chromium takes the character from the text payload, no key-code table needed.
+- Named control keys need BOTH the Qt::Key code and the matching control-char text ("\r" for Return, "\t" for Tab, " " for Space) or some handlers miss them.
+- Set monotonic timestamps (setTimestamp) on synthetic mouse events — Chromium click-count logic compares stamps and treats all-zero stamps as double/triple-click runs.
+- Verified click reaches JS onclick handlers (not just native anchors) via a local page that mirrors events into document.title, readable through /render/html — input VALUES are not serialized by toHtml(), so mirror to title/attributes when testing.

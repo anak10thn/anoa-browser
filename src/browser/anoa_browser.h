@@ -26,6 +26,8 @@ public:
 
     void sendClick(const QPoint &pos, Qt::MouseButton button);
     void sendScroll(const QPoint &pos, int angleDeltaY);
+    void sendText(const QString &text);
+    bool sendKey(const QString &keyName);
 
 private:
     Config m_config;

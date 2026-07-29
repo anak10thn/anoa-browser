@@ -435,6 +435,51 @@ setInterval(refresh,500);
 
         m_browser->sendScroll(pos, dy);
         sendResponse(socket, 200, "OK", "scrolled", "text/plain");
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/type")) {
+        // Prefer text from the query string; fall back to the request body
+        // (same pattern as /render/navigate) for long payloads.
+        QString text = query.queryItemValue(QStringLiteral("text"), QUrl::FullyDecoded);
+        if (text.isEmpty()) {
+            QByteArray bodyBytes = requestData.mid(headerEnd + 4);
+            bool lengthOk = false;
+            int contentLength = headers.value(QStringLiteral("content-length")).toInt(&lengthOk);
+            if (lengthOk && contentLength > bodyBytes.size()) {
+                while (bodyBytes.size() < contentLength) {
+                    if (!socket->waitForReadyRead(5000))
+                        break;
+                    bodyBytes += socket->readAll();
+                }
+            }
+            text = QString::fromUtf8(bodyBytes);
+        }
+
+        if (text.isEmpty()) {
+            sendResponse(socket, 400, "Bad Request", "empty text", "text/plain");
+            return;
+        }
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        m_browser->sendText(text);
+        sendResponse(socket, 200, "OK", "typed", "text/plain");
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/key")) {
+        const QString keyName = query.queryItemValue(QStringLiteral("key"));
+        if (keyName.isEmpty()) {
+            sendResponse(socket, 400, "Bad Request", "missing key", "text/plain");
+            return;
+        }
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        if (!m_browser->sendKey(keyName)) {
+            sendResponse(socket, 400, "Bad Request", "unknown key", "text/plain");
+            return;
+        }
+        sendResponse(socket, 200, "OK", "key sent", "text/plain");
     } else if (method == QLatin1String("GET")
                && path == QLatin1String("/render/stream.mjpeg")) {
         // Send MJPEG stream headers — keep socket open, no Content-Length.
