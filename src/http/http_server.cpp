@@ -210,6 +210,8 @@ void HttpServer::handleNewConnection()
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: image/png\r\n"
                 "Cache-Control: no-cache\r\n"
+                "X-Anoa-Viewport-Width: " + QByteArray::number(m_browser->width()) + "\r\n"
+                "X-Anoa-Viewport-Height: " + QByteArray::number(m_browser->height()) + "\r\n"
                 "Content-Length: " + QByteArray::number(pngBytes.size()) + "\r\n"
                 "Connection: close\r\n"
                 "\r\n";

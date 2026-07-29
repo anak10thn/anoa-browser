@@ -78,3 +78,13 @@
 - anoa-term gets its own top-level README section (after Web Render Endpoints) since it is a separate binary, not just an endpoint — endpoint rows alone would hide it.
 - Pipe characters inside a Markdown table cell (button=left|right|middle) must be escaped as \| or they split the cell.
 - Note the terminal requirements (truecolor + SGR mouse) explicitly — this is the #1 support question for TUI tools.
+
+## 2026-07-29 — task-004: anoa-term high-resolution gfx mode (iTerm2/kitty)
+
+- Halfblock pixelation is inherent (1 cell = 1×2 px); the fix is terminal image protocols: OSC 1337 (iTerm2/WezTerm) and kitty APC G (kitty/ghostty), auto-detected from TERM/TERM_PROGRAM/KITTY_WINDOW_ID.
+- kitty protocol: re-transmitting with the same image id (i=1) AND placement id (p=1) replaces the previous frame atomically — no a=d delete needed, no flicker. Payload must be chunked ≤4096 base64 bytes; only the first chunk carries control keys; C=1 keeps the cursor in place.
+- iTerm2 protocol: compute the aspect-correct cell rect yourself and send preserveAspectRatio=0 — letting the terminal letterbox (preserveAspectRatio=1) breaks click-coordinate mapping.
+- Cell pixel aspect via XTWINOPS: send \033[16t right after entering raw mode (before any other input), read \033[6;<h>;<w>t with a select() timeout; fall back to 8×16. Under `script` ptys nothing responds — the fallback keeps tests deterministic.
+- Skip re-sending the image when the PNG body is byte-identical to the previous frame — static pages then cost zero terminal bandwidth and never flicker.
+- PNG dimensions come straight from the IHDR chunk (bytes 16-23, big-endian) — no decoder needed for layout math.
+- Unified click mapping through a DisplayMap {dispCols, dispRows, viewportW/H} works for both backends: halfblock dispCols=ppmW, dispRows=ceil(ppmH/2); gfx = computed cell rect.

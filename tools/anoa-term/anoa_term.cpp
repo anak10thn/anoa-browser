@@ -1,11 +1,17 @@
 // anoa-term — terminal viewer/controller for a running anoa-browser.
 //
-// Renders the live browser view as ANSI truecolor half-blocks and forwards
-// terminal mouse clicks and wheel events back to the browser through the
-// /render/* HTTP endpoints. Pure POSIX + C++17, no Qt dependency.
+// Renders the live browser view in the terminal and forwards terminal mouse
+// clicks and wheel events back to the browser through the /render/* HTTP
+// endpoints. Pure POSIX + C++17, no Qt dependency.
+//
+// Two rendering backends:
+//   - gfx: full-resolution PNG via the iTerm2 inline-image (OSC 1337) or
+//     kitty graphics (APC G) protocol — crisp, auto-detected where supported
+//   - halfblock: ANSI truecolor ▀ cells (1 cell = 1×2 px) — works everywhere
 //
 // Usage:
 //   anoa-term [--host 127.0.0.1] [--port 9222] [--token SECRET] [--fps 10]
+//             [--gfx auto|halfblock|iterm|kitty]
 //
 // Keys: q quit · arrow Up/Down scroll · mouse click = click in the page.
 
@@ -15,10 +21,12 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,11 +38,14 @@ namespace {
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
+enum class GfxMode { Auto, Halfblock, Iterm, Kitty };
+
 struct Options {
     std::string host = "127.0.0.1";
     int port = 9222;
     std::string token;
     int fps = 10;
+    GfxMode gfx = GfxMode::Auto;
 };
 
 // ── Minimal HTTP/1.1 client (Connection: close per request) ────────────────
@@ -133,14 +144,12 @@ std::string withToken(const Options &opt, std::string path)
     return path;
 }
 
-// ── PPM (P6) parsing ────────────────────────────────────────────────────────
+// ── PPM (P6) parsing — halfblock backend ────────────────────────────────────
 
 struct Frame {
     int width = 0;
     int height = 0;
     std::vector<unsigned char> rgb; // width*height*3
-    int viewportW = 0;              // browser logical viewport, for click mapping
-    int viewportH = 0;
 };
 
 bool parsePpm(const std::string &data, Frame &frame)
@@ -184,6 +193,51 @@ bool parsePpm(const std::string &data, Frame &frame)
     frame.rgb.assign(data.begin() + static_cast<long>(pos),
                      data.begin() + static_cast<long>(pos + need));
     return true;
+}
+
+// ── PNG IHDR dimensions — gfx backend needs only width/height ──────────────
+
+bool pngDimensions(const std::string &png, int &w, int &h)
+{
+    static const unsigned char sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    if (png.size() < 24 || memcmp(png.data(), sig, 8) != 0)
+        return false;
+    const auto *p = reinterpret_cast<const unsigned char *>(png.data());
+    w = (p[16] << 24) | (p[17] << 16) | (p[18] << 8) | p[19];
+    h = (p[20] << 24) | (p[21] << 16) | (p[22] << 8) | p[23];
+    return w > 0 && h > 0;
+}
+
+std::string base64Encode(const std::string &in)
+{
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((in.size() + 2) / 3) * 4);
+    size_t i = 0;
+    while (i + 2 < in.size()) {
+        const unsigned v = (static_cast<unsigned char>(in[i]) << 16)
+                           | (static_cast<unsigned char>(in[i + 1]) << 8)
+                           | static_cast<unsigned char>(in[i + 2]);
+        out += tbl[(v >> 18) & 63];
+        out += tbl[(v >> 12) & 63];
+        out += tbl[(v >> 6) & 63];
+        out += tbl[v & 63];
+        i += 3;
+    }
+    if (i + 1 == in.size()) {
+        const unsigned v = static_cast<unsigned char>(in[i]) << 16;
+        out += tbl[(v >> 18) & 63];
+        out += tbl[(v >> 12) & 63];
+        out += "==";
+    } else if (i + 2 == in.size()) {
+        const unsigned v = (static_cast<unsigned char>(in[i]) << 16)
+                           | (static_cast<unsigned char>(in[i + 1]) << 8);
+        out += tbl[(v >> 18) & 63];
+        out += tbl[(v >> 12) & 63];
+        out += tbl[(v >> 6) & 63];
+        out += '=';
+    }
+    return out;
 }
 
 // ── Terminal state ──────────────────────────────────────────────────────────
@@ -238,9 +292,115 @@ void terminalSize(int &cols, int &rows)
     }
 }
 
-// ── Rendering: 1 cell = 1×2 pixels via ▀ (fg = top px, bg = bottom px) ─────
+// Ask the terminal for its character-cell size in pixels (XTWINOPS 16).
+// Must run in raw mode with no other pending input (i.e. right at startup).
+// Falls back to 8×16 (the common 1:2 cell) when the terminal stays silent.
+void queryCellSize(int &cellW, int &cellH)
+{
+    cellW = 8;
+    cellH = 16;
+    fputs("\033[16t", stdout);
+    fflush(stdout);
 
-void renderFrame(const Frame &frame, int cols, int rows, const std::string &statusText)
+    std::string buf;
+    for (int attempts = 0; attempts < 10; ++attempts) {
+        struct timeval tv = {0, 50000}; // 50 ms per poll, ≤500 ms total
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &tv) <= 0)
+            continue;
+        char tmp[64];
+        const ssize_t n = read(STDIN_FILENO, tmp, sizeof(tmp));
+        if (n <= 0)
+            continue;
+        buf.append(tmp, static_cast<size_t>(n));
+        int h = 0, w = 0;
+        const size_t at = buf.find("\033[6;");
+        if (at != std::string::npos
+            && sscanf(buf.c_str() + at, "\033[6;%d;%dt", &h, &w) == 2 && w > 0 && h > 0) {
+            cellW = w;
+            cellH = h;
+            return;
+        }
+    }
+}
+
+GfxMode detectGfx()
+{
+    const char *term = getenv("TERM");
+    const char *prog = getenv("TERM_PROGRAM");
+    if (getenv("KITTY_WINDOW_ID") || (term && strstr(term, "kitty"))
+        || (prog && strcmp(prog, "ghostty") == 0))
+        return GfxMode::Kitty;
+    if (prog && (strcmp(prog, "iTerm.app") == 0 || strcmp(prog, "WezTerm") == 0))
+        return GfxMode::Iterm;
+    return GfxMode::Halfblock;
+}
+
+// ── Coordinate mapping: terminal cells → browser viewport pixels ───────────
+
+// Extent of the displayed page image, in terminal cells, plus the browser's
+// logical viewport size. Valid for both backends: halfblock shows 1 px per
+// column and 2 px per row; gfx stretches the PNG over dispCols×dispRows.
+struct DisplayMap {
+    int dispCols = 0;
+    int dispRows = 0;
+    int viewportW = 0;
+    int viewportH = 0;
+};
+
+bool mapCellToPage(const DisplayMap &map, int cellX, int cellY, int &pageX, int &pageY)
+{
+    if (map.dispCols <= 0 || map.dispRows <= 0 || map.viewportW <= 0 || map.viewportH <= 0)
+        return false;
+    if (cellX < 0 || cellY < 0 || cellX >= map.dispCols || cellY >= map.dispRows)
+        return false;
+    pageX = static_cast<int>((cellX + 0.5) * map.viewportW / map.dispCols);
+    pageY = static_cast<int>((cellY + 0.5) * map.viewportH / map.dispRows);
+    return true;
+}
+
+void sendClick(const Options &opt, const DisplayMap &map, int cellX, int cellY, int button)
+{
+    int pageX = 0, pageY = 0;
+    if (!mapCellToPage(map, cellX, cellY, pageX, pageY))
+        return;
+    static const char *names[] = {"left", "middle", "right"};
+    const std::string path = "/render/click?x=" + std::to_string(pageX)
+                             + "&y=" + std::to_string(pageY)
+                             + "&button=" + names[button % 3];
+    HttpResponse resp;
+    httpRequest(opt, "POST", withToken(opt, path), resp);
+}
+
+void sendScroll(const Options &opt, const DisplayMap &map, int cellX, int cellY, int dy)
+{
+    std::string path = "/render/scroll?dy=" + std::to_string(dy);
+    int pageX = 0, pageY = 0;
+    if (mapCellToPage(map, cellX, cellY, pageX, pageY))
+        path += "&x=" + std::to_string(pageX) + "&y=" + std::to_string(pageY);
+    HttpResponse resp;
+    httpRequest(opt, "POST", withToken(opt, path), resp);
+}
+
+// ── Rendering ───────────────────────────────────────────────────────────────
+
+void renderStatusBar(int cols, int rows, const std::string &statusText)
+{
+    std::string out = "\033[" + std::to_string(rows) + ";1H\033[7m";
+    std::string status = statusText;
+    if (static_cast<int>(status.size()) > cols)
+        status.resize(static_cast<size_t>(cols));
+    out += status;
+    out.append(static_cast<size_t>(cols) - status.size(), ' ');
+    out += "\033[0m";
+    fwrite(out.data(), 1, out.size(), stdout);
+    fflush(stdout);
+}
+
+// Halfblock: 1 cell = 1×2 pixels via ▀ (fg = top px, bg = bottom px).
+void renderHalfblock(const Frame &frame, int cols, int rows)
 {
     std::string out;
     out.reserve(static_cast<size_t>(cols) * static_cast<size_t>(rows) * 24);
@@ -279,52 +439,55 @@ void renderFrame(const Frame &frame, int cols, int rows, const std::string &stat
         lastFr = lastFg = lastFb = lastBr = lastBg = lastBb = -1;
     }
 
-    out += "\033[7m"; // status bar: inverse video, padded/truncated to width
-    std::string status = statusText;
-    if (static_cast<int>(status.size()) > cols)
-        status.resize(static_cast<size_t>(cols));
-    out += status;
-    out.append(static_cast<size_t>(cols) - status.size(), ' ');
-    out += "\033[0m";
+    fwrite(out.data(), 1, out.size(), stdout);
+    fflush(stdout);
+}
+
+// Gfx: full-resolution PNG via terminal graphics protocol, drawn into an
+// aspect-correct dispCols×dispRows cell rectangle at the top-left.
+void renderGfx(GfxMode mode, const std::string &png, int dispCols, int dispRows)
+{
+    const std::string b64 = base64Encode(png);
+    std::string out = "\033[H";
+
+    if (mode == GfxMode::Iterm) {
+        // preserveAspectRatio=0: we already sized the cell rect to the image
+        // aspect, so let the terminal fill it exactly.
+        out += "\033]1337;File=inline=1;size=" + std::to_string(png.size())
+               + ";width=" + std::to_string(dispCols)
+               + ";height=" + std::to_string(dispRows)
+               + ";preserveAspectRatio=0:" + b64 + "\007";
+    } else { // Kitty
+        // Same image id (i=1) + placement id (p=1) each frame → the terminal
+        // replaces the previous frame atomically, no delete needed. Payload
+        // must be chunked to ≤4096 bytes; only the first chunk carries keys.
+        const size_t chunkSize = 4096;
+        size_t off = 0;
+        bool first = true;
+        while (off < b64.size()) {
+            const size_t len = std::min(chunkSize, b64.size() - off);
+            const bool last = off + len >= b64.size();
+            out += "\033_G";
+            if (first) {
+                out += "a=T,f=100,i=1,p=1,q=2,C=1,c=" + std::to_string(dispCols)
+                       + ",r=" + std::to_string(dispRows) + ",";
+                first = false;
+            }
+            out += "m=" + std::string(last ? "0" : "1") + ";";
+            out += b64.substr(off, len);
+            out += "\033\\";
+            off += len;
+        }
+    }
 
     fwrite(out.data(), 1, out.size(), stdout);
     fflush(stdout);
 }
 
-// ── Input: map terminal cells back to browser viewport coordinates ─────────
-
-void sendClick(const Options &opt, const Frame &frame, int cellX, int cellY, int button)
-{
-    if (frame.width <= 0 || frame.viewportW <= 0)
-        return;
-    const int px = cellX;         // cell (cx,cy) shows pixels (cx, cy*2..cy*2+1)
-    const int py = cellY * 2 + 1; // aim at the cell's vertical center
-    if (px >= frame.width || py >= frame.height)
-        return;
-    const int pageX = px * frame.viewportW / frame.width;
-    const int pageY = py * frame.viewportH / frame.height;
-    static const char *names[] = {"left", "middle", "right"};
-    const std::string path = "/render/click?x=" + std::to_string(pageX)
-                             + "&y=" + std::to_string(pageY)
-                             + "&button=" + names[button % 3];
-    HttpResponse resp;
-    httpRequest(opt, "POST", withToken(opt, path), resp);
-}
-
-void sendScroll(const Options &opt, const Frame &frame, int cellX, int cellY, int dy)
-{
-    std::string path = "/render/scroll?dy=" + std::to_string(dy);
-    if (frame.width > 0 && frame.viewportW > 0 && cellX >= 0
-        && cellX < frame.width && cellY * 2 < frame.height) {
-        path += "&x=" + std::to_string(cellX * frame.viewportW / frame.width)
-                + "&y=" + std::to_string((cellY * 2 + 1) * frame.viewportH / frame.height);
-    }
-    HttpResponse resp;
-    httpRequest(opt, "POST", withToken(opt, path), resp);
-}
+// ── Input handling ──────────────────────────────────────────────────────────
 
 // Consume every complete escape sequence / key in `buf`; returns false on quit.
-bool processInput(std::string &buf, const Options &opt, const Frame &frame)
+bool processInput(std::string &buf, const Options &opt, const DisplayMap &map)
 {
     size_t i = 0;
     while (i < buf.size()) {
@@ -345,7 +508,7 @@ bool processInput(std::string &buf, const Options &opt, const Frame &frame)
 
         // Arrow keys: ESC [ A (up) / ESC [ B (down) → scroll one wheel notch.
         if (i + 2 < buf.size() && (buf[i + 2] == 'A' || buf[i + 2] == 'B')) {
-            sendScroll(opt, frame, -1, -1, buf[i + 2] == 'A' ? 120 : -120);
+            sendScroll(opt, map, -1, -1, buf[i + 2] == 'A' ? 120 : -120);
             i += 3;
             continue;
         }
@@ -382,11 +545,11 @@ bool processInput(std::string &buf, const Options &opt, const Frame &frame)
                 const int cellY = nums[2] - 1;
                 if (final == 'M') {
                     if (btn >= 0 && btn <= 2)
-                        sendClick(opt, frame, cellX, cellY, btn);
+                        sendClick(opt, map, cellX, cellY, btn);
                     else if (btn == 64)
-                        sendScroll(opt, frame, cellX, cellY, 120);
+                        sendScroll(opt, map, cellX, cellY, 120);
                     else if (btn == 65)
-                        sendScroll(opt, frame, cellX, cellY, -120);
+                        sendScroll(opt, map, cellX, cellY, -120);
                 }
             }
             i = j;
@@ -402,9 +565,13 @@ void usage(const char *argv0)
 {
     fprintf(stderr,
             "Usage: %s [--host HOST] [--port PORT] [--token SECRET] [--fps N]\n"
+            "          [--gfx auto|halfblock|iterm|kitty]\n"
             "Connects to a running anoa-browser and renders its view in the\n"
             "terminal. Click and scroll in the terminal to drive the page.\n"
-            "Keys: q quit, Up/Down scroll.\n",
+            "Keys: q quit, Up/Down scroll.\n"
+            "--gfx auto (default) uses the iTerm2/kitty image protocol when the\n"
+            "terminal supports it (crisp, full resolution) and falls back to\n"
+            "ANSI halfblock rendering everywhere else.\n",
             argv0);
 }
 
@@ -424,6 +591,20 @@ int main(int argc, char *argv[])
             opt.token = argv[++i];
         } else if (arg == "--fps" && hasValue) {
             opt.fps = atoi(argv[++i]);
+        } else if (arg == "--gfx" && hasValue) {
+            const std::string mode = argv[++i];
+            if (mode == "auto")
+                opt.gfx = GfxMode::Auto;
+            else if (mode == "halfblock")
+                opt.gfx = GfxMode::Halfblock;
+            else if (mode == "iterm")
+                opt.gfx = GfxMode::Iterm;
+            else if (mode == "kitty")
+                opt.gfx = GfxMode::Kitty;
+            else {
+                usage(argv[0]);
+                return 2;
+            }
         } else if (arg == "-h" || arg == "--help") {
             usage(argv[0]);
             return 0;
@@ -461,6 +642,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "anoa-term: stdin/stdout must be a terminal\n");
         return 1;
     }
+
+    GfxMode gfx = (opt.gfx == GfxMode::Auto) ? detectGfx() : opt.gfx;
+
     if (!enterRawMode()) {
         fprintf(stderr, "anoa-term: failed to set raw terminal mode\n");
         return 1;
@@ -469,40 +653,82 @@ int main(int argc, char *argv[])
     signal(SIGTERM, onSignalQuit);
     signal(SIGWINCH, onSignalResize);
 
+    int cellW = 8, cellH = 16;
+    if (gfx != GfxMode::Halfblock)
+        queryCellSize(cellW, cellH);
+
+    const char *modeName = (gfx == GfxMode::Iterm) ? "iterm"
+                           : (gfx == GfxMode::Kitty) ? "kitty"
+                                                     : "halfblock";
+
     Frame frame;
+    DisplayMap map;
     std::string inputBuf;
+    std::string lastPng;
     const long framePeriodUs = 1000000L / opt.fps;
 
     while (!g_quit) {
         if (g_resized) {
             g_resized = 0;
-            fputs("\033[2J", stdout); // clear stale cells after resize
+            lastPng.clear();          // force a redraw at the new size
+            fputs("\033[2J", stdout); // clear stale cells
         }
 
         int cols = 0, rows = 0;
         terminalSize(cols, rows);
-        const int imgW = cols;
-        const int imgH = (rows - 1) * 2;
+        bool fetched = false;
+        std::string statusExtra;
 
-        HttpResponse resp;
-        const std::string path = "/render/screenshot.ppm?w=" + std::to_string(imgW)
-                                 + "&h=" + std::to_string(imgH);
-        if (httpRequest(opt, "GET", withToken(opt, path), resp) && resp.status == 200) {
-            Frame next;
-            if (parsePpm(resp.body, next)) {
-                next.viewportW = atoi(resp.headers["x-anoa-viewport-width"].c_str());
-                next.viewportH = atoi(resp.headers["x-anoa-viewport-height"].c_str());
-                frame = std::move(next);
+        if (gfx == GfxMode::Halfblock) {
+            const int imgW = cols;
+            const int imgH = (rows - 1) * 2;
+            HttpResponse resp;
+            const std::string path = "/render/screenshot.ppm?w=" + std::to_string(imgW)
+                                     + "&h=" + std::to_string(imgH);
+            if (httpRequest(opt, "GET", withToken(opt, path), resp) && resp.status == 200
+                && parsePpm(resp.body, frame)) {
+                map.viewportW = atoi(resp.headers["x-anoa-viewport-width"].c_str());
+                map.viewportH = atoi(resp.headers["x-anoa-viewport-height"].c_str());
+                map.dispCols = frame.width;
+                map.dispRows = (frame.height + 1) / 2;
+                renderHalfblock(frame, cols, rows);
+                fetched = true;
             }
-            const std::string status = " anoa-term  " + opt.host + ":"
-                                       + std::to_string(opt.port) + "  "
-                                       + std::to_string(frame.viewportW) + "x"
-                                       + std::to_string(frame.viewportH)
-                                       + "  click=click  wheel/arrows=scroll  q=quit";
-            renderFrame(frame, cols, rows, status);
         } else {
-            renderFrame(frame, cols, rows, " anoa-term  connection lost — retrying…  q=quit");
+            HttpResponse resp;
+            int imgW = 0, imgH = 0;
+            if (httpRequest(opt, "GET", withToken(opt, "/render/screenshot.png"), resp)
+                && resp.status == 200 && pngDimensions(resp.body, imgW, imgH)) {
+                map.viewportW = atoi(resp.headers["x-anoa-viewport-width"].c_str());
+                map.viewportH = atoi(resp.headers["x-anoa-viewport-height"].c_str());
+
+                // Fit an aspect-correct cell rect into cols × (rows-1) cells.
+                // colsPerRow = image aspect corrected by the cell pixel aspect.
+                const double colsPerRow = (static_cast<double>(imgW) / imgH)
+                                          * (static_cast<double>(cellH) / cellW);
+                int r = rows - 1;
+                int c = static_cast<int>(llround(r * colsPerRow));
+                if (c > cols) {
+                    c = cols;
+                    r = std::max(1, static_cast<int>(llround(c / colsPerRow)));
+                }
+                map.dispCols = std::max(1, c);
+                map.dispRows = std::max(1, r);
+
+                if (resp.body != lastPng) { // skip identical frames — no flicker
+                    renderGfx(gfx, resp.body, map.dispCols, map.dispRows);
+                    lastPng = std::move(resp.body);
+                }
+                fetched = true;
+            }
         }
+
+        std::string status = " anoa-term  " + opt.host + ":" + std::to_string(opt.port)
+                             + "  " + std::to_string(map.viewportW) + "x"
+                             + std::to_string(map.viewportH) + "  [" + modeName + "]";
+        status += fetched ? "  click=click  wheel/arrows=scroll  q=quit"
+                          : "  connection lost — retrying…  q=quit";
+        renderStatusBar(cols, rows, status);
 
         // Wait out the frame period on stdin so input is handled immediately.
         struct timeval tv;
@@ -517,7 +743,7 @@ int main(int argc, char *argv[])
             const ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
             if (n > 0) {
                 inputBuf.append(buf, static_cast<size_t>(n));
-                if (!processInput(inputBuf, opt, frame))
+                if (!processInput(inputBuf, opt, map))
                     break;
             }
         }
