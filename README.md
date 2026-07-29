@@ -169,7 +169,7 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 | Method | Path | Response | Description |
 |---|---|---|---|
 | `GET` | `/render` | `text/html` | Live viewer page — auto-refreshing screenshot in the browser |
-| `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot |
+| `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot; `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size |
 | `GET` | `/render/screenshot.ppm?w=<px>&h=<px>` | `image/x-portable-pixmap` | Current frame as binary PPM (P6), scaled server-side (aspect ratio kept); `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size for coordinate mapping |
 | `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
 | `POST` | `/render/navigate?url=<url>` | `text/plain` | Load a URL into the embedded browser |
@@ -211,7 +211,14 @@ curl -X POST "http://localhost:9222/render/scroll?dy=-120&token=mysecret"
 
 ## Terminal Viewer (`anoa-term`)
 
-`anoa-term` renders the live browser view directly in your terminal as ANSI truecolor half-blocks and forwards terminal mouse input back to the page — click a link in your terminal and the browser clicks it. Built automatically alongside `anoa-browser` on Linux/macOS (POSIX only, no Qt dependency).
+`anoa-term` renders the live browser view directly in your terminal and forwards terminal mouse input back to the page — click a link in your terminal and the browser clicks it. Built automatically alongside `anoa-browser` on Linux/macOS (POSIX only, no Qt dependency).
+
+Two rendering backends, auto-detected:
+
+| Backend | Quality | Terminals |
+|---|---|---|
+| `iterm` / `kitty` | Full-resolution PNG (crisp) | iTerm2, WezTerm (`iterm`); kitty, Ghostty (`kitty`) |
+| `halfblock` | ANSI truecolor ▀ cells (1 cell = 1×2 px, pixelated) | Everything else with truecolor support |
 
 ```
 anoa-term [options]
@@ -221,7 +228,10 @@ Options:
   --port <N>        anoa-browser HTTP port (default: 9222)
   --token <secret>  Bearer token if the server was started with --auth-token
   --fps <N>         Refresh rate, 1-30 (default: 10)
+  --gfx <mode>      auto | halfblock | iterm | kitty (default: auto)
 ```
+
+`--gfx auto` picks the image protocol from `TERM`/`TERM_PROGRAM`; pass `--gfx iterm` or `--gfx kitty` explicitly if detection misses (e.g. inside tmux, which hides the outer terminal — image protocols need tmux ≥ 3.4 with `allow-passthrough`, otherwise use `--gfx halfblock`).
 
 Controls:
 
@@ -243,7 +253,7 @@ curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycomb
 ./anoa-term --host localhost --port 9222 --token mysecret
 ```
 
-Requires a terminal with truecolor and SGR mouse support (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …).
+Requires a terminal with SGR mouse support; the halfblock fallback additionally needs truecolor (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …).
 
 ---
 
@@ -305,8 +315,9 @@ anoa-browser
 │   └── cdp_extensions        # Profiler / HeapProfiler / Security domain stubs
 └── pdf/                      # Page.printToPDF interceptor via QWebEnginePage::printToPdf
 
-anoa-term (tools/anoa-term/)  # POSIX terminal viewer — ANSI half-block rendering,
-                              # SGR mouse → /render/click + /render/scroll
+anoa-term (tools/anoa-term/)  # POSIX terminal viewer — iTerm2/kitty image protocols
+                              # or ANSI half-block fallback; SGR mouse →
+                              # /render/click + /render/scroll
 ```
 
 All subsystems are implemented with Qt built-in classes (no third-party dependencies beyond Qt6).
