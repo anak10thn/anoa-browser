@@ -1,0 +1,83 @@
+name: Update Homebrew tap
+
+# Standalone trigger to (re)sync the Homebrew tap with an existing GitHub
+# Release — for when the tap update inside the Release workflow was skipped
+# (HOMEBREW_TAP_TOKEN missing), failed, or the release was created manually.
+# Run it from Actions → "Update Homebrew tap" → Run workflow; leave `tag`
+# empty to sync the latest release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to sync (e.g. v0.3.1). Empty = latest release.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Syncing tap to release $TAG"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.tag.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'anoa-browser-macos-universal.tar.gz' \
+            --pattern 'anoa-browser-linux-x86_64.tar.gz'
+
+      - name: Update tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN not set — cannot push to the tap."
+            exit 1
+          fi
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          MACOS_SHA256=$(sha256sum anoa-browser-macos-universal.tar.gz | awk '{print $1}')
+          LINUX_SHA256=$(sha256sum anoa-browser-linux-x86_64.tar.gz | awk '{print $1}')
+          git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git" /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          mkdir -p Casks Formula
+
+          # macOS Cask
+          sed -e "s/{{VERSION}}/${VERSION}/" \
+              -e "s/{{MACOS_SHA256}}/${MACOS_SHA256}/" \
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser.rb.tpl" > Casks/anoa-browser.rb
+
+          # Linux Formula
+          sed -e "s/{{VERSION}}/${VERSION}/" \
+              -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser-linux.rb.tpl" > Formula/anoa-browser-linux.rb
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Tap already up to date with ${TAG} — nothing to push."
+            exit 0
+          fi
+          git commit -m "anoa-browser v${VERSION}"
+          git push

@@ -351,6 +351,8 @@ On macOS, `DISPLAY` is not required. On Linux without a display server, `QPA_PLA
 
 Tag pushes require the macOS signing secrets (`MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) — CI fails fast if any are missing, so an unsigned build can never be released. Without `HOMEBREW_TAP_TOKEN` the tap update is skipped (warning only). To smoke-test the pipeline without publishing, run the Release workflow manually (`workflow_dispatch`) — artifacts only, no release, no tap update.
 
+If the tap update was skipped or failed, resync it without re-running the release: **Actions → Update Homebrew tap → Run workflow** (or `gh workflow run update-homebrew-tap.yml -f tag=vX.Y.Z`). Leave `tag` empty to sync the latest release; the run is idempotent and pushes nothing when the tap already matches.
+
 ---
 
 ## Architecture
