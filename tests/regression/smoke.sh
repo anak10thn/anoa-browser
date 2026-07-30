@@ -11,6 +11,17 @@ PASS=0
 FAIL=0
 PROC_PID=""
 
+# Resolve BINARY to an absolute path before any cd.
+case "$BINARY" in /*) ;; *) BINARY="$(pwd)/$BINARY" ;; esac
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Node ESM resolves bare imports ('ws', '@playwright/test') from the CWD's
+# node_modules — a global npm install is NOT on the ESM resolution path.
+# Run snippets from the test dirs that declare the needed dependency
+# (npm install must have been run there first).
+run_node_ws() { (cd "$ROOT_DIR/tests/integration" && node --input-type=module); }
+run_node_playwright() { (cd "$ROOT_DIR/tests/e2e" && node --input-type=module); }
+
 wait_for_port() {
   local port=$1 timeout=${2:-15}
   local start=$SECONDS
@@ -66,16 +77,14 @@ if [ -z "$TARGET_WS" ]; then
   assert_fail "REG-02: /json/list returned no targets"
 else
   # Use node to do a quick WebSocket handshake
-  WS_OK=$(node --input-type=module << EOF
+  if run_node_ws << EOF
 import WebSocket from 'ws';
 const ws = new WebSocket('${TARGET_WS}');
 ws.once('open', () => { ws.close(); process.exit(0); });
 ws.once('error', () => process.exit(1));
 setTimeout(() => process.exit(1), 5000);
 EOF
-  echo $?)
-  if [ "$WS_OK" -eq 0 ] 2>/dev/null || node --input-type=module \
-      --eval "import WebSocket from 'ws'; const ws = new WebSocket('${TARGET_WS}'); ws.once('open',()=>{ws.close();process.exit(0);}); ws.once('error',()=>process.exit(1)); setTimeout(()=>process.exit(1),5000);" 2>/dev/null; then
+  then
     assert_pass "REG-02: CDP proxy accepted WebSocket connection"
   else
     assert_fail "REG-02: Could not connect WebSocket to $TARGET_WS"
@@ -84,7 +93,7 @@ fi
 
 # REG-03: Profiler.enable returns {}
 echo "=== REG-03: Profiler.enable stub ==="
-RESULT=$(node --input-type=module << EOF 2>/dev/null || echo "ERROR"
+RESULT=$(run_node_ws << EOF 2>/dev/null || echo "ERROR"
 import WebSocket from 'ws';
 const list = await fetch('http://localhost:${PORT}/json/list').then(r=>r.json());
 const ws = new WebSocket(list[0].webSocketDebuggerUrl);
@@ -105,7 +114,7 @@ fi
 
 # REG-04: Page.printToPDF returns %PDF-
 echo "=== REG-04: Page.printToPDF valid PDF ==="
-PDF_OK=$(node --input-type=module << EOF 2>/dev/null; echo $?
+PDF_OK=$(run_node_ws << EOF >/dev/null 2>&1; echo $?
 import WebSocket from 'ws';
 const list = await fetch('http://localhost:${PORT}/json/list').then(r=>r.json());
 const ws = new WebSocket(list[0].webSocketDebuggerUrl);
@@ -129,7 +138,7 @@ fi
 
 # REG-05: Playwright connectOverCDP succeeds
 echo "=== REG-05: Playwright connectOverCDP ==="
-PW_OK=$(node --input-type=module << EOF 2>/dev/null; echo $?
+PW_OK=$(run_node_playwright << EOF >/dev/null 2>&1; echo $?
 import { chromium } from '@playwright/test';
 const browser = await chromium.connectOverCDP('http://localhost:${PORT}');
 const contexts = browser.contexts();

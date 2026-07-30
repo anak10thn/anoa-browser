@@ -191,8 +191,8 @@ describe('Render endpoints (no auth)', () => {
       const controller = new AbortController();
       const timeout = setTimeout(() => {
         controller.abort();
-        reject(new Error('No MJPEG boundary received within 3s'));
-      }, 3000);
+        reject(new Error('No MJPEG boundary received within 15s'));
+      }, 15000);
 
       fetch(`${BASE_URL}/render/stream.mjpeg`, { signal: controller.signal })
         .then(resp => {

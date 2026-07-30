@@ -87,19 +87,13 @@ jobs:
         working-directory: tests/integration
         run: npm install
 
-      - name: Start anoa-browser
-        run: |
-          ./build/anoa-browser --headless --port 9222 &
-          echo "BROWSER_PID=$!" >> $GITHUB_ENV
-          timeout 30 bash -c 'until nc -z 127.0.0.1 9222; do sleep 0.5; done'
-
+      # Do NOT start a shared anoa-browser here: every integration test file
+      # spawns (and stops) its own instance on the same port triplet. A shared
+      # instance on 9222 makes those spawns fail to bind, so auth suites end up
+      # talking to the shared no-auth browser and fail with 200-instead-of-401.
       - name: Run integration tests (Vitest)
         working-directory: tests/integration
         run: npx vitest run
-
-      - name: Stop anoa-browser
-        if: always()
-        run: kill ${{ env.BROWSER_PID }} || true
 
   # ── 3. Shell Integration Tests ─────────────────────────────────────────────
   shell-tests:
@@ -238,8 +232,12 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install ws globally
-        run: npm install -g ws
+      # smoke.sh runs its node snippets from these directories — a global
+      # npm install is not on Node's ESM resolution path.
+      - name: Install smoke test dependencies
+        run: |
+          (cd tests/integration && npm install)
+          (cd tests/e2e && npm install)
 
       - name: Run smoke tests
         run: bash tests/regression/smoke.sh

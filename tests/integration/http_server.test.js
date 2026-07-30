@@ -27,7 +27,10 @@ describe('HTTP Discovery Server (no auth)', () => {
       fetch(`${BASE_URL}/json`).then(r => r.json()),
       fetch(`${BASE_URL}/json/list`).then(r => r.json()),
     ]);
-    expect(JSON.stringify(r1)).toBe(JSON.stringify(r2));
+    // `title` is volatile during startup (empty ↔ "about:blank" race between
+    // the two upstream fetches) — compare everything else.
+    const stripTitle = (targets) => targets.map(({ title, ...rest }) => rest);
+    expect(stripTitle(r1)).toEqual(stripTitle(r2));
   });
 
   // HTTP-03

@@ -1,0 +1,26 @@
+{
+  "active": false,
+  "iteration": 4,
+  "modified_domains": [
+    "testing"
+  ],
+  "domain_phases": {
+    "testing": {
+      "review": {
+        "status": "PENDING",
+        "agent": null,
+        "timestamp": null
+      },
+      "testing": {
+        "status": "PENDING",
+        "agent": null,
+        "timestamp": null
+      }
+    }
+  },
+  "dirty_bit": true,
+  "last_outputs": [],
+  "stuck_count": 0,
+  "created_at": "2026-07-30T00:20:39.668Z",
+  "updated_at": "2026-07-30T00:21:39.818Z"
+}

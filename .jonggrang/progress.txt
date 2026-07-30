@@ -104,3 +104,15 @@
 - Status bar shows the last forwarded event ("click 312,172", "typed \"xyz\"") — the #1 debugging aid for "clicks don't work" reports: if it doesn't change, the terminal isn't delivering mouse reports.
 - Status bar is truncated to terminal width — put diagnostic info BEFORE long usage hints or it silently disappears at 80 cols (bug found via pty test grep coming back empty).
 - Terminal Backspace arrives as DEL (127) more often than BS (8) — handle both.
+
+## 2026-07-30 — task-009/010: CI green — root causes of the long-failing pipeline
+
+- CI started a shared anoa-browser on 9222 while every integration test file ALSO spawns its own on 9222 — the spawns failed to bind silently and auth suites talked to the shared no-auth instance (200-instead-of-401). Fix: no shared instance for integration job + main.cpp exits 1 on bind failure.
+- vitest runs test files in PARALLEL by default — files that bind fixed ports need fileParallelism:false in vitest.config.js.
+- QTextStream + ::exit(1) silently drops the error message (exit skips destructors → no flush). Use Qt::endl (flushes) before any ::exit.
+- CDP Browser.getVersion returns {protocolVersion, product, ...} — several tests asserted a nonexistent "Browser" field (that's the /json/version HTTP shape, different endpoint).
+- QWebSocketServer cannot reject during HTTP upgrade; unauthorized WS clients see open→close(1008). Tests must treat close(1008)-before-data as rejection, and the server should use CloseCodePolicyViolated not CloseCodeNormal.
+- @playwright/test has NO named beforeAll/afterAll exports — use test.beforeAll/test.afterAll; the import error made playwright report "No tests found" (job always failed).
+- Node ESM ignores global npm installs — smoke.sh must run node snippets from a directory whose node_modules has the dep (cd tests/integration for ws, tests/e2e for @playwright/test).
+- QtWebEngine CDP does not implement Storage.getCookies → playwright context.cookies() rejects; document as expected limitation like newPage().
+- macOS-only: binding 0.0.0.0:P succeeds while 127.0.0.1:P is taken (SO_REUSEADDR semantics) — PORT-03 conflict test only meaningful on Linux.

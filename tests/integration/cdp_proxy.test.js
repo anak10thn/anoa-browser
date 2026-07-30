@@ -44,7 +44,7 @@ describe('WebSocket CDP Proxy (no auth)', () => {
     const resp = await sendCdp(ws, 'Browser.getVersion', {}, 888);
     ws.close();
     expect(resp.id).toBe(888);
-    expect(resp.result).toHaveProperty('Browser');
+    expect(resp.result).toHaveProperty('product');
   });
 
   // WS-09
@@ -56,7 +56,7 @@ describe('WebSocket CDP Proxy (no auth)', () => {
     const resp = await sendCdp(ws, 'Browser.getVersion', {}, 777);
     ws.close();
     expect(resp.id).toBe(777);
-    expect(resp.result).toHaveProperty('Browser');
+    expect(resp.result).toHaveProperty('product');
   });
 
   // WS-12
@@ -65,7 +65,7 @@ describe('WebSocket CDP Proxy (no auth)', () => {
     const response = await sendCdp(ws, 'Browser.getVersion', {}, 1);
     ws.close();
     expect(response).toHaveProperty('id', 1);
-    expect(response.result).toHaveProperty('Browser');
+    expect(response.result).toHaveProperty('product');
   });
 
   // WS-06
@@ -141,31 +141,43 @@ describe('WebSocket CDP Proxy (with auth token)', () => {
     });
   });
 
-  // WS-04
-  it('Client with wrong token is rejected with HTTP 401', async () => {
-    const wsUrl = await getProtectedWsUrl();
-    await new Promise((resolve, reject) => {
-      const ws = new WebSocket(`${wsUrl}?token=wrongtoken`);
-      ws.once('open', () => { ws.close(); reject(new Error('Should have been rejected')); });
-      ws.once('unexpected-response', (_req, resp) => {
-        expect(resp.statusCode).toBe(401);
-        resolve();
-      });
-      ws.once('error', () => resolve()); // connection refused is also acceptable
-    });
-  });
-
-  // WS-05
-  it('Client with no token is rejected when auth is required', async () => {
-    const wsUrl = await getProtectedWsUrl();
-    await new Promise((resolve, reject) => {
+  // QWebSocketServer cannot reject a client during the HTTP upgrade, so the
+  // proxy completes the handshake and immediately closes unauthorized
+  // connections with 1008 (policy violation) before any CDP traffic flows.
+  // "Rejected" therefore means: error, non-101 response, or close(1008)
+  // without ever receiving a message.
+  function expectRejected(wsUrl) {
+    return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
-      ws.once('open', () => { ws.close(); reject(new Error('Should have been rejected')); });
       ws.once('unexpected-response', (_req, resp) => {
         expect(resp.statusCode).toBe(401);
         resolve();
       });
       ws.once('error', () => resolve());
+      ws.once('close', (code) => {
+        try {
+          expect(code).toBe(1008);
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+      ws.once('message', () => {
+        ws.close();
+        reject(new Error('Unauthorized client received CDP data'));
+      });
     });
+  }
+
+  // WS-04
+  it('Client with wrong token is rejected', async () => {
+    const wsUrl = await getProtectedWsUrl();
+    await expectRejected(`${wsUrl}?token=wrongtoken`);
+  });
+
+  // WS-05
+  it('Client with no token is rejected when auth is required', async () => {
+    const wsUrl = await getProtectedWsUrl();
+    await expectRejected(wsUrl);
   });
 });
