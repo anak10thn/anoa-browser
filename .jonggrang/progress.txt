@@ -140,3 +140,13 @@
 - `xattr -dr` does not exist on macOS 26 (Darwin 25); recurse with `find … -exec xattr -d com.apple.quarantine {} +` and `|| true` so a missing attr doesn't fail the install.
 - Local verdict cache is polluted by prior unquarantined runs of the same cdhash — "it runs on my machine" is NOT proof the postflight worked; verify by counting remaining quarantine xattrs (must be 0), not by launching.
 - The shipped ad-hoc signature is NOT strict-valid (codesign -v --strict: "QtWebEngineCore.framework embedded framework contains modified or invalid version") — a known Qt+codesign issue — but that only matters under quarantine/Gatekeeper strict eval. Unquarantined, the app runs fine (proven: --version, headless, /json/version). Strict-valid signing is deferred (needs proper inside-out Versions/A signing or notarization).
+
+## 2026-07-30 — proper macOS signing + notarization (Developer ID)
+
+- Root cause of the SIGKILL/quarantine saga was ad-hoc signing, not just quarantine. Real fix = Developer ID Application signing + Apple notarization. User has an Apple Developer account; chose App Store Connect API key auth.
+- Hand-rolled inside-out codesign loops FAIL strict verify on QtWebEngineCore.framework ("embedded framework contains modified or invalid version") — a well-known Qt layout issue. Use `macdeployqt -sign-for-notarization=<identity>` instead; it understands the Qt framework/helper/install-name layout.
+- CANNOT validate macOS signing locally here: local Qt is Homebrew arm64-only, CI uses aqt universal Qt — different dylib set (Homebrew pulls separate libbrotlicommon etc.) and arch. Signing errors reproduced locally are not predictive of CI.
+- Validation loop that does NOT waste releases: set secrets, trigger release.yml via workflow_dispatch (build-macos signs+notarizes+staples but the `release` job is gated to tags, so nothing publishes). Download the artifact, `stapler validate` / `spctl -a -vvv`. Only tag once green.
+- anoa-term relocated INTO the .app bundle (Contents/MacOS/) so it is covered by the app signature + staple (a standalone Mach-O cannot be stapled). This also fixes the ad-hoc anoa-term quarantine SIGKILL for free (postflight now de-quarantines it inside the bundle).
+- Entitlements required for QtWebEngine V8 under hardened runtime: allow-jit, allow-unsigned-executable-memory, disable-library-validation. Applied to the leaf executables + helper, then reseal QtWebEngineCore + the app.
+- Secrets needed: MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, MACOS_NOTARY_KEY_P8_BASE64, MACOS_NOTARY_KEY_ID, MACOS_NOTARY_ISSUER_ID.

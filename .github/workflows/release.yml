@@ -189,26 +189,103 @@ jobs:
           lipo -archs build/anoa-term | grep -q x86_64
           lipo -archs build/anoa-term | grep -q arm64
 
-      - name: Deploy Qt frameworks into .app bundle
+      # Ship anoa-term INSIDE the .app bundle (before deploy/sign) so it is
+      # covered by the app's signature + notarization ticket — a standalone
+      # binary cannot be stapled.
+      - name: Move anoa-term into the app bundle
         run: |
-          macdeployqt build/anoa-browser.app -verbose=2 -always-overwrite
-          PLAT="build/anoa-browser.app/Contents/PlugIns/platforms"
+          cp build/anoa-term build/anoa-browser.app/Contents/MacOS/anoa-term
+          # strip must precede signing — it would otherwise break the signature.
+          strip -x build/anoa-browser.app/Contents/MacOS/anoa-browser || true
+          strip -x build/anoa-browser.app/Contents/MacOS/anoa-term || true
+
+      # Import the Developer ID cert (if provided) BEFORE macdeployqt, so
+      # macdeployqt can sign the bundle for notarization in one pass. macdeployqt
+      # understands the Qt framework layout (QtWebEngineCore, the helper app,
+      # install-name rewrites) that hand-rolled codesign loops get wrong.
+      - name: Import signing certificate
+        id: cert
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_CERT_P12_BASE64:-}" ]; then
+            echo "identity=" >> "$GITHUB_OUTPUT"
+            echo "::warning::macOS signing secrets not set — building an ad-hoc bundle (Gatekeeper blocks it; the Homebrew cask strips quarantine as a fallback)."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KCPASS="$(openssl rand -base64 24)"
+          security create-keychain -p "$KCPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+          [ -n "$IDENTITY" ] || { echo "No Developer ID Application identity in the provided .p12"; exit 1; }
+          echo "Signing as: $IDENTITY"
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Qt frameworks (+ sign for notarization when signing)
+        run: |
+          set -euo pipefail
+          APP=build/anoa-browser.app
+          IDENTITY="${{ steps.cert.outputs.identity }}"
+          if [ -n "$IDENTITY" ]; then
+            # macdeployqt deploys AND signs the whole bundle correctly for
+            # notarization (hardened runtime + secure timestamp).
+            macdeployqt "$APP" -verbose=2 -always-overwrite \
+              -sign-for-notarization="$IDENTITY"
+          else
+            macdeployqt "$APP" -verbose=2 -always-overwrite
+          fi
+          PLAT="$APP/Contents/PlugIns/platforms"
           cp "$QT_ROOT_DIR/plugins/platforms/libqoffscreen.dylib" "$PLAT/" 2>/dev/null || true
-          RES="build/anoa-browser.app/Contents/Resources"
+          RES="$APP/Contents/Resources"
           mkdir -p "$RES/qtwebengine_locales"
           cp -r "$QT_ROOT_DIR/resources/"* "$RES/" 2>/dev/null || true
           cp -r "$QT_ROOT_DIR/translations/qtwebengine_locales/"* "$RES/qtwebengine_locales/" 2>/dev/null || true
 
-      # arm64 refuses to run unsigned code and macdeployqt invalidates the
-      # linker's ad-hoc signatures — re-sign the whole bundle ad-hoc.
-      # strip must happen BEFORE signing (it would invalidate the signature).
-      - name: Strip & ad-hoc sign
+      # Re-sign the leaf executables with JIT entitlements (QtWebEngine's V8
+      # needs them under the hardened runtime), then reseal the enclosing
+      # framework and app. Only runs on the signed path.
+      - name: Apply entitlements & notarize
+        if: ${{ steps.cert.outputs.identity != '' }}
+        env:
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
-          strip -x build/anoa-browser.app/Contents/MacOS/anoa-browser || true
-          strip -x build/anoa-term || true
-          codesign --force --deep --sign - build/anoa-browser.app
-          codesign --force --sign - build/anoa-term
-          codesign --verify --deep build/anoa-browser.app
+          set -euo pipefail
+          APP=build/anoa-browser.app
+          ENT="$GITHUB_WORKSPACE/.github/entitlements/anoa-browser.entitlements"
+          IDENTITY="${{ steps.cert.outputs.identity }}"
+          sign() { codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"; }
+          HELP="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app"
+          [ -d "$HELP" ] && sign --entitlements "$ENT" "$HELP"
+          sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-term"
+          sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-browser"
+          # Reseal the framework that contains the re-signed helper, then the app.
+          sign "$APP/Contents/Frameworks/QtWebEngineCore.framework"
+          sign --entitlements "$ENT" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          echo "$MACOS_NOTARY_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
+      - name: Ad-hoc sign (unsigned fallback only)
+        if: ${{ steps.cert.outputs.identity == '' }}
+        run: codesign --force --deep --sign - build/anoa-browser.app
 
       - name: Smoke test the bundle
         run: |
@@ -219,11 +296,11 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:9333/json/version | grep -q Browser
-          ./build/anoa-term --help
+          ./build/anoa-browser.app/Contents/MacOS/anoa-term --help
           kill $BROWSER_PID
 
       - name: Package
-        run: tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser.app anoa-term
+        run: tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser.app
 
       - uses: actions/upload-artifact@v4
         with:

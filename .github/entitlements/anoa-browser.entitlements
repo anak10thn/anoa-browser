@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- QtWebEngine embeds Chromium; V8 JITs JavaScript into executable memory,
+       which the hardened runtime forbids by default. These three entitlements
+       are the standard set Chromium-based apps need to pass notarization and
+       still run under the hardened runtime. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- macdeployqt-bundled frameworks and the QtWebEngineProcess helper are
+       signed by us (not Apple), so library validation must be relaxed. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
