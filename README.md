@@ -37,11 +37,25 @@ brew install --cask anoa-browser
 
 Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
 
+**Upgrade** — `brew update` first, so the tap picks up the newest release:
+
+```bash
+brew update
+brew upgrade --cask anoa-browser
+```
+
 ### Linux (Homebrew)
 
 ```bash
 brew tap porcupine-md/tap
 brew install anoa-browser-linux
+```
+
+**Upgrade:**
+
+```bash
+brew update
+brew upgrade anoa-browser-linux
 ```
 
 ### Linux (portable tarball)
