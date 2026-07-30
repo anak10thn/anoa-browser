@@ -151,6 +151,111 @@
       "started_at": "2026-07-29T13:41:28.554Z",
       "completed_at": "2026-07-29T13:42:11.414Z",
       "error_log": []
+    },
+    {
+      "id": "task-009",
+      "title": "Exit non-zero on port bind failure; version from CMake project",
+      "description": "",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "src/main.cpp",
+        "CMakeLists.txt"
+      ],
+      "started_at": "2026-07-30T00:10:30.102Z",
+      "completed_at": "2026-07-30T00:11:33.221Z",
+      "error_log": []
+    },
+    {
+      "id": "task-010",
+      "title": "Fix integration tests + CI workflow (port conflicts, wrong assertions)",
+      "description": "",
+      "priority": 2,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-009"
+      ],
+      "passes": true,
+      "files": [
+        "tests/integration/cdp_proxy.test.js",
+        "tests/integration/pdf_handler.test.js",
+        "tests/integration/http_server.test.js",
+        "tests/integration/render_endpoints.test.js",
+        "tests/integration/vitest.config.js",
+        "tests/regression/smoke.sh",
+        "tests/e2e/playwright.test.ts",
+        "tests/e2e/puppeteer.test.js",
+        "src/cdp/cdp_proxy.cpp",
+        "src/config/config.cpp",
+        ".github/workflows/ci.yml"
+      ],
+      "started_at": "2026-07-30T00:11:33.353Z",
+      "completed_at": "2026-07-30T00:22:19.602Z",
+      "error_log": []
+    },
+    {
+      "id": "task-011",
+      "title": "Linux packaging: bash launcher, qt.conf, patchelf, anoa-term in bundle",
+      "description": "",
+      "priority": 3,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-010"
+      ],
+      "passes": true,
+      "files": [
+        "resources/anoa-browser.sh",
+        ".github/workflows/release.yml",
+        ".github/homebrew/anoa-browser-linux.rb.tpl"
+      ],
+      "started_at": "2026-07-30T00:22:19.763Z",
+      "completed_at": "2026-07-30T00:23:47.810Z",
+      "error_log": []
+    },
+    {
+      "id": "task-012",
+      "title": "macOS universal build (Intel+ARM) + Homebrew cask",
+      "description": "",
+      "priority": 4,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-011"
+      ],
+      "passes": true,
+      "files": [
+        ".github/workflows/release.yml",
+        ".github/homebrew/anoa-browser.rb.tpl"
+      ],
+      "started_at": "2026-07-30T00:23:47.950Z",
+      "completed_at": "2026-07-30T00:25:49.827Z",
+      "error_log": []
+    },
+    {
+      "id": "task-013",
+      "title": "Fix port_layout PORT-03 set -e abort on expected non-zero exit",
+      "description": "",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "tests/integration/port_layout.test.sh"
+      ],
+      "started_at": "2026-07-30T00:31:56.890Z",
+      "completed_at": "2026-07-30T00:32:45.023Z",
+      "error_log": []
     }
   ]
 }
