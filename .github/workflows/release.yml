@@ -291,28 +291,39 @@ jobs:
             *.zip
           generate_release_notes: true
 
+      # Skips (does not fail the release) when HOMEBREW_TAP_TOKEN is not set —
+      # the GitHub Release above has already published the artifacts. Update
+      # the tap manually or re-run with the secret configured. The token is
+      # checked inside the script because the `secrets` context is not reliably
+      # available in a step-level `if:`.
       - name: Update Homebrew tap
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping Homebrew tap update. Release artifacts are published; update the tap manually or re-run after setting the secret."
+            exit 0
+          fi
           VERSION="${GITHUB_REF_NAME#v}"
           MACOS_SHA256=$(sha256sum anoa-browser-macos-universal.tar.gz | awk '{print $1}')
           LINUX_SHA256=$(sha256sum anoa-browser-linux-x86_64.tar.gz | awk '{print $1}')
-          git clone --depth=1 https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git /tmp/homebrew-tap
+          git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          cd -
-          mkdir -p /tmp/homebrew-tap/Casks /tmp/homebrew-tap/Formula
+          mkdir -p Casks Formula
 
           # macOS Cask
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{MACOS_SHA256}}/${MACOS_SHA256}/" \
-              .github/homebrew/anoa-browser.rb.tpl > /tmp/homebrew-tap/Casks/anoa-browser.rb
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser.rb.tpl" > Casks/anoa-browser.rb
 
           # Linux Formula
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
-              .github/homebrew/anoa-browser-linux.rb.tpl > /tmp/homebrew-tap/Formula/anoa-browser-linux.rb
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser-linux.rb.tpl" > Formula/anoa-browser-linux.rb
 
-          cd /tmp/homebrew-tap && git add -A && git commit -m "anoa-browser v${VERSION}" && git push
+          git add -A
+          git commit -m "anoa-browser v${VERSION}"
+          git push
