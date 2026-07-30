@@ -31,10 +31,11 @@ One universal (x86_64 + arm64) build serves both architectures:
 
 ```bash
 brew tap porcupine-md/tap
-brew install --cask --no-quarantine anoa-browser
+brew trust porcupine-md/tap        # tap ships a cask + formula
+brew install --cask anoa-browser
 ```
 
-`--no-quarantine` is recommended because the app is ad-hoc signed, not notarized. Installs `anoa-browser` and `anoa-term` into your `PATH`.
+Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is ad-hoc signed (not notarized); the cask clears the quarantine flag on install so it launches normally with no extra steps.
 
 ### Linux (Homebrew)
 

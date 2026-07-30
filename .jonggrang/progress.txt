@@ -131,3 +131,12 @@
 
 - Under bash strict mode (errexit), a bare `wait "$PID"` aborts the script when the child exits non-zero — even when that exit code is exactly what the test wants to assert. Always `EXIT_CODE=0; wait "$PID" || EXIT_CODE=$?`.
 - Final CI state: unit, integration (82), shell (8+4), e2e (12+8), smoke (5) — all green; release workflow green on linux/macos-universal/windows via workflow_dispatch.
+
+## 2026-07-30 — task-014: macOS cask quarantine fix (ad-hoc app on Apple Silicon / macOS 26)
+
+- brew's `--no-quarantine` CLI flag was REMOVED in Homebrew 6 — documenting it is a hard error for users. Handle quarantine inside the cask instead.
+- Ad-hoc-signed (non-notarized) app: if launched even ONCE while com.apple.quarantine is set, Gatekeeper caches a reject by cdhash and the kernel SIGKILLs it thereafter (exit 137) even after the flag is removed; macOS 26 also deletes the bundle. The flag must be cleared BEFORE first launch.
+- Cask `postflight` must target `appdir.join("anoa-browser.app")`, NOT `staged_path` — by postflight time the .app has already been moved out of the Caskroom staging dir (staged_path find matches nothing → 292 files stayed quarantined).
+- `xattr -dr` does not exist on macOS 26 (Darwin 25); recurse with `find … -exec xattr -d com.apple.quarantine {} +` and `|| true` so a missing attr doesn't fail the install.
+- Local verdict cache is polluted by prior unquarantined runs of the same cdhash — "it runs on my machine" is NOT proof the postflight worked; verify by counting remaining quarantine xattrs (must be 0), not by launching.
+- The shipped ad-hoc signature is NOT strict-valid (codesign -v --strict: "QtWebEngineCore.framework embedded framework contains modified or invalid version") — a known Qt+codesign issue — but that only matters under quarantine/Gatekeeper strict eval. Unquarantined, the app runs fine (proven: --version, headless, /json/version). Strict-valid signing is deferred (needs proper inside-out Versions/A signing or notarization).
