@@ -126,3 +126,8 @@
 - Homebrew cask: tar.gz cask artifacts get quarantined on install; ad-hoc-signed apps need caveats pointing at --no-quarantine / xattr -dr.
 - Add workflow_dispatch to release.yml with the publish/tap steps gated on startsWith(github.ref, 'refs/tags/') — packaging can then be exercised end-to-end from any branch without cutting a release.
 - Bundle smoke tests in the release workflow (extract tarball to a clean dir, launch with env -u LD_LIBRARY_PATH, curl /json/version) catch broken packaging before it ships.
+
+## 2026-07-30 — task-013: CI fully green
+
+- Under bash strict mode (errexit), a bare `wait "$PID"` aborts the script when the child exits non-zero — even when that exit code is exactly what the test wants to assert. Always `EXIT_CODE=0; wait "$PID" || EXIT_CODE=$?`.
+- Final CI state: unit, integration (82), shell (8+4), e2e (12+8), smoke (5) — all green; release workflow green on linux/macos-universal/windows via workflow_dispatch.
