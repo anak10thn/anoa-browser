@@ -9,10 +9,13 @@ class AnoaBrowserLinux < Formula
 
   def install
     libexec.install Dir["*"]
+    # anoa-browser.sh sets LD_LIBRARY_PATH / QtWebEngine paths relative to its
+    # own (symlink-resolved) location, so a plain symlink is enough.
     bin.install_symlink libexec/"anoa-browser.sh" => "anoa-browser"
+    bin.install_symlink libexec/"anoa-term"
   end
 
   test do
-    assert_match version.to_s, shell_output("#{bin}/anoa-browser --version 2>&1", 1)
+    assert_match version.to_s, shell_output("#{bin}/anoa-browser --version")
   end
 end
