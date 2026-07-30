@@ -292,6 +292,12 @@ jobs:
           sign() { codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"; }
           HELP="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app"
           [ -d "$HELP" ] && sign --entitlements "$ENT" "$HELP"
+          # Plugins copied after macdeployqt's signing pass (libqoffscreen) are
+          # unsigned — codesign refuses to seal the app over unsigned nested
+          # code. Force-sign every plugin dylib; re-signing the rest is harmless.
+          find "$APP/Contents/PlugIns" -name '*.dylib' -print0 | while IFS= read -r -d '' dylib; do
+            sign "$dylib"
+          done
           sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-term"
           sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-browser"
           # Reseal the framework that contains the re-signed helper, then the app.
