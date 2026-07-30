@@ -256,6 +256,24 @@
       "started_at": "2026-07-30T00:31:56.890Z",
       "completed_at": "2026-07-30T00:32:45.023Z",
       "error_log": []
+    },
+    {
+      "id": "task-014",
+      "title": "Fix macOS cask: strip quarantine in postflight, drop bogus --no-quarantine caveat",
+      "description": "",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        ".github/homebrew/anoa-browser.rb.tpl",
+        "README.md"
+      ],
+      "started_at": "2026-07-30T01:22:56.753Z",
+      "completed_at": "2026-07-30T01:23:19.149Z",
+      "error_log": []
     }
   ]
 }
