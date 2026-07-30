@@ -56,6 +56,10 @@ target_include_directories(anoa-browser PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_definitions(anoa-browser PRIVATE
+    ANOA_VERSION="${PROJECT_VERSION}"
+)
+
 target_link_libraries(anoa-browser PRIVATE
     Qt6::WebEngineWidgets
     Qt6::WebEngineCore
@@ -111,6 +115,12 @@ else()
     target_compile_options(anoa-browser PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# ── anoa-term: terminal viewer client (POSIX only, no Qt dependency) ────────
+if(NOT WIN32)
+    add_executable(anoa-term tools/anoa-term/anoa_term.cpp)
+    target_compile_options(anoa-term PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 # RPATH for portable Linux distribution (binary finds ./lib at runtime)
 if(UNIX AND NOT APPLE)
     set_target_properties(anoa-browser PROPERTIES
@@ -138,6 +148,12 @@ if(APPLE)
     )
 else()
     install(TARGETS anoa-browser
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
+if(NOT WIN32)
+    install(TARGETS anoa-term
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()

@@ -1,0 +1,156 @@
+{
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Add /render/click, /render/scroll and /render/screenshot.ppm endpoints",
+      "description": "Server-side input injection: POST /render/click?x=&y=&button= and POST /render/scroll?x=&y=&dy= synthesize mouse events into the QWebEngineView render widget (focusProxy). GET /render/screenshot.ppm?w=&h= returns a server-side scaled binary PPM (P6) frame with X-Anoa-Viewport-Width/Height headers so terminal clients can map click coordinates.",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp",
+        "src/http/http_server.cpp"
+      ],
+      "started_at": "2026-07-29T13:03:29.829Z",
+      "completed_at": "2026-07-29T13:06:42.062Z",
+      "error_log": []
+    },
+    {
+      "id": "task-002",
+      "title": "Add anoa-term terminal viewer client",
+      "description": "New dependency-free POSIX C++ terminal client (tools/anoa-term/anoa_term.cpp) built as a second CMake target. Fetches /render/screenshot.ppm scaled to the terminal grid, renders ANSI truecolor half-blocks, enables SGR mouse tracking, forwards clicks to /render/click and wheel to /render/scroll. Flags: --host --port --token --fps. q/Ctrl-C quits and restores the terminal.",
+      "priority": 2,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-001"
+      ],
+      "passes": true,
+      "files": [
+        "tools/anoa-term/anoa_term.cpp",
+        "CMakeLists.txt"
+      ],
+      "started_at": "2026-07-29T13:07:15.849Z",
+      "completed_at": "2026-07-29T13:10:20.810Z",
+      "error_log": []
+    },
+    {
+      "id": "task-003",
+      "title": "Document terminal view in README",
+      "description": "Add anoa-term usage plus new /render/click, /render/scroll, /render/screenshot.ppm rows to the Web Render Endpoints table.",
+      "priority": 3,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-002"
+      ],
+      "passes": true,
+      "files": [
+        "README.md"
+      ],
+      "started_at": "2026-07-29T13:10:20.904Z",
+      "completed_at": "2026-07-29T13:11:21.104Z",
+      "error_log": []
+    },
+    {
+      "id": "task-004",
+      "title": "High-resolution graphics mode for anoa-term (iTerm2/kitty protocols)",
+      "description": "Add --gfx auto|halfblock|iterm|kitty to anoa-term. In gfx mode fetch full-res /render/screenshot.png and display it via the iTerm2 inline-image (OSC 1337) or kitty graphics (APC G) protocol in an aspect-correct cell rectangle; query cell pixel size via CSI 16t with a 1:2 fallback. Auto-detect terminal from TERM/TERM_PROGRAM. Click/scroll mapping unified over the displayed cell rect. Server: emit X-Anoa-Viewport-* headers on screenshot.png too.",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "tools/anoa-term/anoa_term.cpp",
+        "src/http/http_server.cpp"
+      ],
+      "started_at": "2026-07-29T13:16:55.334Z",
+      "completed_at": "2026-07-29T13:20:13.464Z",
+      "error_log": []
+    },
+    {
+      "id": "task-005",
+      "title": "Document anoa-term --gfx modes in README",
+      "description": "",
+      "priority": 2,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-004"
+      ],
+      "passes": true,
+      "files": [
+        "README.md"
+      ],
+      "started_at": "2026-07-29T13:20:13.564Z",
+      "completed_at": "2026-07-29T13:21:02.752Z",
+      "error_log": []
+    },
+    {
+      "id": "task-006",
+      "title": "Add /render/type and /render/key endpoints, timestamped mouse events",
+      "description": "POST /render/type?text= inserts text into the focused element via per-char QKeyEvent; POST /render/key?key=enter|backspace|tab|... dispatches named special keys. Set monotonic timestamps on synthetic mouse events so Chromium click-count logic behaves. Verified against a local page with JS onclick/oninput handlers.",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp",
+        "src/http/http_server.cpp"
+      ],
+      "started_at": "2026-07-29T13:35:17.666Z",
+      "completed_at": "2026-07-29T13:37:55.742Z",
+      "error_log": []
+    },
+    {
+      "id": "task-007",
+      "title": "anoa-term keyboard forwarding + input feedback in status bar",
+      "description": "Forward printable chars to /render/type (batched), Enter/Backspace/Tab to /render/key. Quit moves to Ctrl-C/Ctrl-Q since q must be typeable. Status bar shows the last input event sent (click x,y / key / typed chars) so users can see whether their terminal is delivering mouse reports.",
+      "priority": 2,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-006"
+      ],
+      "passes": true,
+      "files": [
+        "tools/anoa-term/anoa_term.cpp"
+      ],
+      "started_at": "2026-07-29T13:37:55.841Z",
+      "completed_at": "2026-07-29T13:41:28.458Z",
+      "error_log": []
+    },
+    {
+      "id": "task-008",
+      "title": "Document typing support in README",
+      "description": "",
+      "priority": 3,
+      "status": "completed",
+      "feature_id": "work-session-mpo0gl1b",
+      "skill": null,
+      "blocked_by": [
+        "task-007"
+      ],
+      "passes": true,
+      "files": [
+        "README.md"
+      ],
+      "started_at": "2026-07-29T13:41:28.554Z",
+      "completed_at": "2026-07-29T13:42:11.414Z",
+      "error_log": []
+    }
+  ]
+}

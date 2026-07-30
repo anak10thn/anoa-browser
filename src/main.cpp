@@ -21,7 +21,7 @@ int main(int argc, char *argv[])
     }
 
     QApplication app(argc, argv);
-    app.setApplicationVersion(QStringLiteral("0.1.0"));
+    app.setApplicationVersion(QStringLiteral(ANOA_VERSION));
 
     Config config = parseArgs(argc, argv);
 
@@ -43,12 +43,18 @@ int main(int argc, char *argv[])
     const auto wsPort    = static_cast<quint16>(config.port + 2);
 
     HttpServer httpServer(httpPort, debugPort, wsPort, config.authToken, &browser, &app);
-    httpServer.start();
+    if (!httpServer.start()) {
+        qCritical("Failed to bind HTTP server to port %u (already in use?)", httpPort);
+        return 1;
+    }
 
     CdpProxy cdpProxy(wsPort, debugPort, config.authToken, &app);
     // Provide the initial page for commands handled locally (e.g. Page.printToPDF).
     cdpProxy.setPage(browser.page());
-    cdpProxy.start();
+    if (!cdpProxy.start()) {
+        qCritical("Failed to bind CDP proxy to port %u (already in use?)", wsPort);
+        return 1;
+    }
 
     return app.exec();
 }

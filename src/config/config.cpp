@@ -15,7 +15,7 @@ static void validatePort(int port)
 {
     if (port < 1 || port > 65535) {
         QTextStream err(stderr);
-        err << "Error: --port must be between 1 and 65535, got " << port << "\n";
+        err << "Error: --port must be between 1 and 65535, got " << port << Qt::endl;
         ::exit(1);
     }
 }
@@ -25,7 +25,7 @@ static void validateExtensionPaths(const QStringList &paths)
     for (const QString &p : paths) {
         if (!QFileInfo(p).isDir()) {
             QTextStream err(stderr);
-            err << "Error: extension path is not an existing directory: " << p << "\n";
+            err << "Error: extension path is not an existing directory: " << p << Qt::endl;
             ::exit(1);
         }
     }
@@ -37,7 +37,7 @@ Config loadConfigFile(const QString &path)
     QFileInfo fi(path);
     if (!fi.exists()) {
         QTextStream err(stderr);
-        err << "Error: config file not found: " << path << "\n";
+        err << "Error: config file not found: " << path << Qt::endl;
         ::exit(1);
     }
 
@@ -46,14 +46,14 @@ Config loadConfigFile(const QString &path)
         QFile f(path);
         if (!f.open(QIODevice::ReadOnly)) {
             QTextStream err(stderr);
-            err << "Error: cannot open config file: " << path << "\n";
+            err << "Error: cannot open config file: " << path << Qt::endl;
             ::exit(1);
         }
         QJsonParseError parseErr;
         QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &parseErr);
         if (doc.isNull()) {
             QTextStream err(stderr);
-            err << "Error: invalid JSON in config file: " << parseErr.errorString() << "\n";
+            err << "Error: invalid JSON in config file: " << parseErr.errorString() << Qt::endl;
             ::exit(1);
         }
         QJsonObject obj = doc.object();
@@ -151,7 +151,7 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
         int w = parser.value(widthOpt).toInt(&ok);
         if (!ok || w <= 0) {
             QTextStream err(stderr);
-            err << "Error: --width must be a positive integer, got " << parser.value(widthOpt) << "\n";
+            err << "Error: --width must be a positive integer, got " << parser.value(widthOpt) << Qt::endl;
             ::exit(1);
         }
         cfg.width = w;
@@ -161,7 +161,7 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
         int h = parser.value(heightOpt).toInt(&ok);
         if (!ok || h <= 0) {
             QTextStream err(stderr);
-            err << "Error: --height must be a positive integer, got " << parser.value(heightOpt) << "\n";
+            err << "Error: --height must be a positive integer, got " << parser.value(heightOpt) << Qt::endl;
             ::exit(1);
         }
         cfg.height = h;

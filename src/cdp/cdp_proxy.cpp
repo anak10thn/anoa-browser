@@ -69,7 +69,10 @@ void CdpProxy::onNewConnection()
             }
         }
         if (!authorized) {
-            client->close(QWebSocketProtocol::CloseCodeNormal,
+            // QWebSocketServer offers no hook to reject during the HTTP
+            // upgrade, so the handshake has already completed; 1008 (policy
+            // violation) is the closest to an HTTP 401 a client can observe.
+            client->close(QWebSocketProtocol::CloseCodePolicyViolated,
                           QStringLiteral("Unauthorized"));
             client->deleteLater();
             return;

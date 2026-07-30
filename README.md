@@ -12,7 +12,8 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 - **Headless and headed modes** from the same binary
 - **HTTP discovery endpoints** — `/json`, `/json/version`, `/json/list` (Chrome-compatible)
 - **WebSocket CDP proxy** with session multiplexing and optional bearer token auth
-- **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation over plain HTTP (`/render/*`)
+- **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation, click/scroll injection over plain HTTP (`/render/*`)
+- **Terminal viewer (`anoa-term`)** — watch and control the browser from any terminal: live ANSI rendering, mouse clicks and scrolling forwarded to the page
 - **Remote CDP friendly** — Chromium started with `--remote-allow-origins=*`, so clients behind tunnels/reverse proxies connect without Origin rejections (access control via `--auth-token`)
 - **`Page.printToPDF`** — intercepted and handled via `QWebEnginePage::printToPdf`
 - **Named browser profiles** — isolated cookie jars and localStorage per profile
@@ -22,7 +23,43 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 
 ---
 
-## Prerequisites
+## Install
+
+### macOS (Homebrew) — Intel & Apple Silicon
+
+One universal (x86_64 + arm64) build serves both architectures:
+
+```bash
+brew tap porcupine-md/tap
+brew install --cask --no-quarantine anoa-browser
+```
+
+`--no-quarantine` is recommended because the app is ad-hoc signed, not notarized. Installs `anoa-browser` and `anoa-term` into your `PATH`.
+
+### Linux (Homebrew)
+
+```bash
+brew tap porcupine-md/tap
+brew install anoa-browser-linux
+```
+
+### Linux (portable tarball)
+
+The release tarball is self-contained: the binary, every Qt/WebEngine shared library, plugins, and resources, plus a launcher script that wires them together (`LD_LIBRARY_PATH`, `QTWEBENGINEPROCESS_PATH`, …).
+
+```bash
+tar xzf anoa-browser-linux-x86_64.tar.gz
+./anoa-browser/anoa-browser.sh --headless --port 9222   # launcher, not the raw binary
+./anoa-browser/anoa-term
+```
+
+### Windows
+
+Download `anoa-browser-windows-x86_64.zip` from [Releases](https://github.com/porcupine-md/anoa-browser/releases) and run `anoa-browser.exe`.
+
+---
+
+## Prerequisites (building from source)
 
 | Dependency | Version | Notes |
 |---|---|---|
@@ -168,9 +205,14 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 | Method | Path | Response | Description |
 |---|---|---|---|
 | `GET` | `/render` | `text/html` | Live viewer page — auto-refreshing screenshot in the browser |
-| `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot |
+| `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot; `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size |
+| `GET` | `/render/screenshot.ppm?w=<px>&h=<px>` | `image/x-portable-pixmap` | Current frame as binary PPM (P6), scaled server-side (aspect ratio kept); `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size for coordinate mapping |
 | `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
 | `POST` | `/render/navigate?url=<url>` | `text/plain` | Load a URL into the embedded browser |
+| `POST` | `/render/click?x=<px>&y=<px>&button=left\|right\|middle` | `text/plain` | Synthesize a mouse click at viewport coordinates (button defaults to `left`) |
+| `POST` | `/render/scroll?dy=<delta>&x=<px>&y=<px>` | `text/plain` | Synthesize a mouse wheel event; `dy` in angle-delta units (±120 per notch, positive scrolls up), `x`/`y` default to the viewport center |
+| `POST` | `/render/type?text=<text>` | `text/plain` | Type text into the focused element (URL-encoded query param, or raw request body) |
+| `POST` | `/render/key?key=<name>` | `text/plain` | Press a named key: `enter`, `tab`, `backspace`, `delete`, `escape`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown` |
 | `GET` | `/render/stream.mjpeg` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) |
 
 ### Usage example
@@ -195,7 +237,64 @@ curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycomb
 
 # 6. Stream live MJPEG (e.g. in VLC or ffplay)
 ffplay "http://localhost:9222/render/stream.mjpeg?token=mysecret"
+
+# 7. Click at viewport coordinates (640, 360)
+curl -X POST "http://localhost:9222/render/click?x=640&y=360&token=mysecret"
+
+# 8. Scroll down one wheel notch
+curl -X POST "http://localhost:9222/render/scroll?dy=-120&token=mysecret"
 ```
+
+---
+
+## Terminal Viewer (`anoa-term`)
+
+`anoa-term` renders the live browser view directly in your terminal and forwards terminal mouse input back to the page — click a link in your terminal and the browser clicks it. Built automatically alongside `anoa-browser` on Linux/macOS (POSIX only, no Qt dependency).
+
+Two rendering backends, auto-detected:
+
+| Backend | Quality | Terminals |
+|---|---|---|
+| `iterm` / `kitty` | Full-resolution PNG (crisp) | iTerm2, WezTerm (`iterm`); kitty, Ghostty (`kitty`) |
+| `halfblock` | ANSI truecolor ▀ cells (1 cell = 1×2 px, pixelated) | Everything else with truecolor support |
+
+```
+anoa-term [options]
+
+Options:
+  --host <host>     anoa-browser host (default: 127.0.0.1)
+  --port <N>        anoa-browser HTTP port (default: 9222)
+  --token <secret>  Bearer token if the server was started with --auth-token
+  --fps <N>         Refresh rate, 1-30 (default: 10)
+  --gfx <mode>      auto | halfblock | iterm | kitty (default: auto)
+```
+
+`--gfx auto` picks the image protocol from `TERM`/`TERM_PROGRAM`; pass `--gfx iterm` or `--gfx kitty` explicitly if detection misses (e.g. inside tmux, which hides the outer terminal — image protocols need tmux ≥ 3.4 with `allow-passthrough`, otherwise use `--gfx halfblock`).
+
+Controls:
+
+| Input | Action |
+|---|---|
+| Left/right/middle mouse click | Click at that position in the page |
+| Mouse wheel | Scroll the page under the pointer |
+| Typing (any text, incl. paste) | Typed into the focused element |
+| `Enter` / `Backspace` / `Tab` / arrows | Forwarded to the page (arrows scroll when no field is focused) |
+| `Ctrl-C` / `Ctrl-Q` | Quit and restore the terminal |
+
+The status bar shows the last event forwarded to the browser (`click 640,360`, `typed "hello"`, …). If it doesn't change when you click, your terminal isn't delivering mouse reports — check its mouse-reporting setting, or in tmux enable `set -g mouse on`.
+
+```bash
+# 1. Start the browser (any machine, headless or headed)
+./anoa-browser --headless --port 9222 --auth-token mysecret
+
+# 2. Point it somewhere
+curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycombinator.com&token=mysecret"
+
+# 3. Watch and control it from your terminal (works over SSH too)
+./anoa-term --host localhost --port 9222 --token mysecret
+```
+
+Requires a terminal with SGR mouse support; the halfblock fallback additionally needs truecolor (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …).
 
 ---
 
@@ -256,6 +355,10 @@ anoa-browser
 │   ├── cdp_proxy             # QWebSocketServer bridge, session multiplexing, auth
 │   └── cdp_extensions        # Profiler / HeapProfiler / Security domain stubs
 └── pdf/                      # Page.printToPDF interceptor via QWebEnginePage::printToPdf
+
+anoa-term (tools/anoa-term/)  # POSIX terminal viewer — iTerm2/kitty image protocols
+                              # or ANSI half-block fallback; SGR mouse →
+                              # /render/click + /render/scroll
 ```
 
 All subsystems are implemented with Qt built-in classes (no third-party dependencies beyond Qt6).

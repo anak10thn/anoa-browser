@@ -51,3 +51,83 @@
 - Embed the HTML as a `static const char htmlTmpl[] = R"(...)"` raw string literal with a single `%1` placeholder; use `QString::fromUtf8(htmlTmpl).arg(screenshotUrl).toUtf8()` to inject the dynamic screenshot URL — avoids complex string concatenation.
 - `QString::arg()` is safe here because the HTML template contains no other `%` characters; but would need escaping (`%%`) if template ever gains CSS percentages.
 - For the `<img>` src cache-buster, use `src.indexOf("?")>=0?"&":"?"` so the separator is correct whether or not the screenshot URL already has query params (it will when auth token is appended).
+
+## 2026-07-29 — task-001: /render/click, /render/scroll, /render/screenshot.ppm endpoints
+
+- Synthetic mouse input to QWebEngineView MUST target `focusProxy()` (the Chromium render widget), not the view itself — events posted to the view are silently ignored.
+- Use `QCoreApplication::postEvent` with heap-allocated events (not sendEvent + stack events) so the HTTP handler never re-enters the widget stack synchronously.
+- Qt6 QMouseEvent: use the 7-arg ctor (type, localPos, scenePos, globalPos, button, buttons, modifiers) — the 6-arg one is deprecated and trips -Wpedantic builds.
+- Send a leading MouseMove before Press/Release so Chromium's hover/hit-testing state matches the click position.
+- QWheelEvent with null pixelDelta + angleDelta(0, dy) behaves like a classic notched wheel; dy=±120 per notch.
+- PPM P6 export: after convertToFormat(Format_RGB888), copy exactly width*3 bytes per constScanLine(y) — bytesPerLine() includes 4-byte alignment padding that must not be emitted.
+- Click coordinates are in LOGICAL widget pixels; report m_browser->width()/height() in X-Anoa-Viewport-* headers (grab() returns device pixels on HiDPI, so clients must map via viewport, not image size assumptions).
+- End-to-end click test without network: two local file:// pages, page A has a full-viewport <a href> — click center, then assert /render/html contains page B's marker.
+
+## 2026-07-29 — task-002: anoa-term terminal viewer client
+
+- anoa-term is intentionally Qt-free (POSIX sockets + termios only) — the server-side PPM endpoint means the client needs no image decoder, keeping it a single ~450-line file.
+- CMake AUTOMOC applies to every target; a non-Qt executable still gets an (empty, harmless) mocs_compilation.cpp — no need to disable AUTOMOC per target.
+- Probe the HTTP endpoint BEFORE entering the alt screen/raw mode so connection errors print as normal stderr lines instead of flashing the terminal.
+- Half-block rendering: 1 cell = 1×2 px with ▀, fg=top/bg=bottom; emit SGR color codes only on change and reset the "last color" cache at each row since rows end with \033[0m.
+- SGR mouse parsing must tolerate incomplete escape sequences at the buffer tail — keep unconsumed bytes and resume after the next read (never assume one read = one sequence).
+- Non-interactive testing recipe: `(sleep 2; printf '\033[<0;40;12M...q') | script -q out.txt ./anoa-term ...` gives the client a real pty; under `script` the winsize falls back to 80×24, which makes click-coordinate assertions deterministic.
+- Click mapping: pageX = cellX * viewportW / imgW using the ACTUAL PPM dimensions from the response (KeepAspectRatio means returned size ≠ requested size).
+
+## 2026-07-29 — task-003: Document terminal view in README
+
+- anoa-term gets its own top-level README section (after Web Render Endpoints) since it is a separate binary, not just an endpoint — endpoint rows alone would hide it.
+- Pipe characters inside a Markdown table cell (button=left|right|middle) must be escaped as \| or they split the cell.
+- Note the terminal requirements (truecolor + SGR mouse) explicitly — this is the #1 support question for TUI tools.
+
+## 2026-07-29 — task-004: anoa-term high-resolution gfx mode (iTerm2/kitty)
+
+- Halfblock pixelation is inherent (1 cell = 1×2 px); the fix is terminal image protocols: OSC 1337 (iTerm2/WezTerm) and kitty APC G (kitty/ghostty), auto-detected from TERM/TERM_PROGRAM/KITTY_WINDOW_ID.
+- kitty protocol: re-transmitting with the same image id (i=1) AND placement id (p=1) replaces the previous frame atomically — no a=d delete needed, no flicker. Payload must be chunked ≤4096 base64 bytes; only the first chunk carries control keys; C=1 keeps the cursor in place.
+- iTerm2 protocol: compute the aspect-correct cell rect yourself and send preserveAspectRatio=0 — letting the terminal letterbox (preserveAspectRatio=1) breaks click-coordinate mapping.
+- Cell pixel aspect via XTWINOPS: send \033[16t right after entering raw mode (before any other input), read \033[6;<h>;<w>t with a select() timeout; fall back to 8×16. Under `script` ptys nothing responds — the fallback keeps tests deterministic.
+- Skip re-sending the image when the PNG body is byte-identical to the previous frame — static pages then cost zero terminal bandwidth and never flicker.
+- PNG dimensions come straight from the IHDR chunk (bytes 16-23, big-endian) — no decoder needed for layout math.
+- Unified click mapping through a DisplayMap {dispCols, dispRows, viewportW/H} works for both backends: halfblock dispCols=ppmW, dispRows=ceil(ppmH/2); gfx = computed cell rect.
+
+## 2026-07-29 — task-006: /render/type and /render/key endpoints
+
+- Text insertion via QKeyEvent with key=0 (unknown) + non-empty text works for arbitrary unicode — Chromium takes the character from the text payload, no key-code table needed.
+- Named control keys need BOTH the Qt::Key code and the matching control-char text ("\r" for Return, "\t" for Tab, " " for Space) or some handlers miss them.
+- Set monotonic timestamps (setTimestamp) on synthetic mouse events — Chromium click-count logic compares stamps and treats all-zero stamps as double/triple-click runs.
+- Verified click reaches JS onclick handlers (not just native anchors) via a local page that mirrors events into document.title, readable through /render/html — input VALUES are not serialized by toHtml(), so mirror to title/attributes when testing.
+
+## 2026-07-29 — task-007: anoa-term keyboard forwarding + input feedback
+
+- Once keys are forwarded to the page, q can no longer quit — move quit to Ctrl-C/Ctrl-Q (raw mode has ISIG off, so Ctrl-C arrives as byte 3).
+- Batch consecutive printable bytes into ONE /render/type call before any control byte/escape flushes — pasted text must not become one HTTP request per character. UTF-8 continuation bytes (≥0x80) pass through the batch untouched.
+- Forward arrow keys as key events instead of wheel scrolls: in a text field they move the caret, otherwise Chromium scrolls the page anyway — both behaviors for free.
+- Status bar shows the last forwarded event ("click 312,172", "typed \"xyz\"") — the #1 debugging aid for "clicks don't work" reports: if it doesn't change, the terminal isn't delivering mouse reports.
+- Status bar is truncated to terminal width — put diagnostic info BEFORE long usage hints or it silently disappears at 80 cols (bug found via pty test grep coming back empty).
+- Terminal Backspace arrives as DEL (127) more often than BS (8) — handle both.
+
+## 2026-07-30 — task-009/010: CI green — root causes of the long-failing pipeline
+
+- CI started a shared anoa-browser on 9222 while every integration test file ALSO spawns its own on 9222 — the spawns failed to bind silently and auth suites talked to the shared no-auth instance (200-instead-of-401). Fix: no shared instance for integration job + main.cpp exits 1 on bind failure.
+- vitest runs test files in PARALLEL by default — files that bind fixed ports need fileParallelism:false in vitest.config.js.
+- QTextStream + ::exit(1) silently drops the error message (exit skips destructors → no flush). Use Qt::endl (flushes) before any ::exit.
+- CDP Browser.getVersion returns {protocolVersion, product, ...} — several tests asserted a nonexistent "Browser" field (that's the /json/version HTTP shape, different endpoint).
+- QWebSocketServer cannot reject during HTTP upgrade; unauthorized WS clients see open→close(1008). Tests must treat close(1008)-before-data as rejection, and the server should use CloseCodePolicyViolated not CloseCodeNormal.
+- @playwright/test has NO named beforeAll/afterAll exports — use test.beforeAll/test.afterAll; the import error made playwright report "No tests found" (job always failed).
+- Node ESM ignores global npm installs — smoke.sh must run node snippets from a directory whose node_modules has the dep (cd tests/integration for ws, tests/e2e for @playwright/test).
+- QtWebEngine CDP does not implement Storage.getCookies → playwright context.cookies() rejects; document as expected limitation like newPage().
+- macOS-only: binding 0.0.0.0:P succeeds while 127.0.0.1:P is taken (SO_REUSEADDR semantics) — PORT-03 conflict test only meaningful on Linux.
+
+## 2026-07-30 — task-011/012: distribution packaging (Homebrew, Linux launcher, universal macOS)
+
+- Qt6 WebEngine env var names: QTWEBENGINE_RESOURCES_PATH and QTWEBENGINE_LOCALES_PATH — the old launcher used QTWEBENGINERESOURCEPATH/QTWEBENGINE_LOCALE which Qt silently ignores. Ship a qt.conf next to the binary as the primary mechanism (Prefix/Plugins/LibraryExecutables/Data/Translations) with env vars as backup.
+- The release workflow used patchelf without ever installing it (not preinstalled on ubuntu-22.04 runners) — the Linux job could never have succeeded.
+- aqt's mac desktop Qt (clang_64) is a universal x86_64+arm64 build: add -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" and ONE artifact serves Intel and Apple Silicon; verify slices with lipo -archs.
+- Order matters on macOS: strip → macdeployqt-modified binaries must be re-signed (codesign --force --deep --sign -) or arm64 refuses to launch; stripping after signing invalidates the signature.
+- Homebrew cask: tar.gz cask artifacts get quarantined on install; ad-hoc-signed apps need caveats pointing at --no-quarantine / xattr -dr.
+- Add workflow_dispatch to release.yml with the publish/tap steps gated on startsWith(github.ref, 'refs/tags/') — packaging can then be exercised end-to-end from any branch without cutting a release.
+- Bundle smoke tests in the release workflow (extract tarball to a clean dir, launch with env -u LD_LIBRARY_PATH, curl /json/version) catch broken packaging before it ships.
+
+## 2026-07-30 — task-013: CI fully green
+
+- Under bash strict mode (errexit), a bare `wait "$PID"` aborts the script when the child exits non-zero — even when that exit code is exactly what the test wants to assert. Always `EXIT_CODE=0; wait "$PID" || EXIT_CODE=$?`.
+- Final CI state: unit, integration (82), shell (8+4), e2e (12+8), smoke (5) — all green; release workflow green on linux/macos-universal/windows via workflow_dispatch.

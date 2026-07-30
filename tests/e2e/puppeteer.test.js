@@ -99,7 +99,7 @@ describe('Puppeteer Compatibility (Suite 7)', () => {
   it('Raw CDP command Browser.getVersion returns version info', async () => {
     const session = await page.createCDPSession();
     const result = await session.send('Browser.getVersion');
-    assert.ok(result.Browser, 'Browser.getVersion should return Browser field');
+    assert.ok(result.product, 'Browser.getVersion should return product field');
     await session.detach();
   });
 

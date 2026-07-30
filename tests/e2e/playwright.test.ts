@@ -8,8 +8,8 @@
  * Key constraint: browser.newPage() is NOT supported by anoa-browser (QtWebEngine
  * limitation). Always use browser.contexts()[0].pages()[0] to get the existing page.
  */
-import { chromium, type BrowserType, type Browser, type Page, type BrowserContext } from '@playwright/test';
-import { test, expect, beforeAll, afterAll } from '@playwright/test';
+import { chromium, type Browser, type Page, type BrowserContext } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 const HTTP_PORT  = parseInt(process.env.ANOA_PORT  ?? '9222', 10);
 const AUTH_TOKEN = process.env.ANOA_AUTH_TOKEN ?? '';
@@ -20,7 +20,7 @@ let context: BrowserContext;
 let page: Page;
 
 // PW-01 / PW-02 are tested in the beforeAll connection.
-beforeAll(async () => {
+test.beforeAll(async () => {
   const connectOpts = AUTH_TOKEN
     ? { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } }
     : {};
@@ -33,7 +33,7 @@ beforeAll(async () => {
   page = pages[0];
 });
 
-afterAll(async () => {
+test.afterAll(async () => {
   // PW-13: disconnect gracefully
   await browser.close();
 });
@@ -90,10 +90,11 @@ test('Navigate back/forward works', async () => {
   expect(page.url()).toMatch(/example\.com/);
 });
 
-// PW-10
-test('context.cookies() returns an array', async () => {
-  const cookies = await context.cookies();
-  expect(Array.isArray(cookies)).toBe(true);
+// PW-10: context.cookies() needs Storage.getCookies, which QtWebEngine's CDP
+// backend does not implement ("Browser context management is not supported").
+// Like PW-11, this documents the expected limitation.
+test('context.cookies() rejects (Storage.getCookies not supported)', async () => {
+  await expect(context.cookies()).rejects.toThrow();
 });
 
 // PW-11: browser.newPage() is expected to fail — document the expected behavior

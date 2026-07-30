@@ -5,6 +5,7 @@
 #include <QBuffer>
 #include <QEventLoop>
 #include <QHostAddress>
+#include <QImage>
 #include <QMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -209,6 +210,8 @@ void HttpServer::handleNewConnection()
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: image/png\r\n"
                 "Cache-Control: no-cache\r\n"
+                "X-Anoa-Viewport-Width: " + QByteArray::number(m_browser->width()) + "\r\n"
+                "X-Anoa-Viewport-Height: " + QByteArray::number(m_browser->height()) + "\r\n"
                 "Content-Length: " + QByteArray::number(pngBytes.size()) + "\r\n"
                 "Connection: close\r\n"
                 "\r\n";
@@ -336,6 +339,147 @@ setInterval(refresh,500);
         socket->flush();
         socket->disconnectFromHost();
         socket->deleteLater();
+    } else if (method == QLatin1String("GET")
+               && path == QLatin1String("/render/screenshot.ppm")) {
+        // Binary PPM (P6) frame, optionally scaled server-side via ?w=&h=.
+        // Terminal clients parse PPM with ~20 lines of code — no image decoder
+        // needed. X-Anoa-Viewport-* headers carry the logical widget size so
+        // clients can map image pixels back to click coordinates.
+        QByteArray ppmBytes;
+        int viewportW = 0, viewportH = 0;
+        if (m_browser) {
+            QPixmap pixmap = m_browser->grab();
+            if (!pixmap.isNull()) {
+                viewportW = m_browser->width();
+                viewportH = m_browser->height();
+                QImage img = pixmap.toImage();
+                int reqW = query.queryItemValue(QStringLiteral("w")).toInt();
+                int reqH = query.queryItemValue(QStringLiteral("h")).toInt();
+                if (reqW > 0 && reqH > 0)
+                    img = img.scaled(reqW, reqH, Qt::KeepAspectRatio,
+                                     Qt::SmoothTransformation);
+                img = img.convertToFormat(QImage::Format_RGB888);
+                ppmBytes = "P6\n" + QByteArray::number(img.width()) + " "
+                           + QByteArray::number(img.height()) + "\n255\n";
+                // Copy width*3 bytes per row — scanlines are 4-byte aligned so
+                // bytesPerLine() may include padding that must not be emitted.
+                for (int y = 0; y < img.height(); ++y)
+                    ppmBytes.append(reinterpret_cast<const char *>(img.constScanLine(y)),
+                                    img.width() * 3);
+            }
+        }
+        if (ppmBytes.isEmpty()) {
+            sendResponse(socket, 503, "Service Unavailable", "capture failed", "text/plain");
+        } else {
+            QByteArray response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: image/x-portable-pixmap\r\n"
+                "Cache-Control: no-cache\r\n"
+                "X-Anoa-Viewport-Width: " + QByteArray::number(viewportW) + "\r\n"
+                "X-Anoa-Viewport-Height: " + QByteArray::number(viewportH) + "\r\n"
+                "Content-Length: " + QByteArray::number(ppmBytes.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            response += ppmBytes;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+            socket->deleteLater();
+        }
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/click")) {
+        bool okX = false, okY = false;
+        int x = query.queryItemValue(QStringLiteral("x")).toInt(&okX);
+        int y = query.queryItemValue(QStringLiteral("y")).toInt(&okY);
+        if (!okX || !okY || x < 0 || y < 0) {
+            sendResponse(socket, 400, "Bad Request", "invalid coordinates", "text/plain");
+            return;
+        }
+
+        QString buttonStr = query.queryItemValue(QStringLiteral("button")).toLower();
+        Qt::MouseButton button = Qt::LeftButton;
+        if (buttonStr == QLatin1String("right"))
+            button = Qt::RightButton;
+        else if (buttonStr == QLatin1String("middle"))
+            button = Qt::MiddleButton;
+        else if (!buttonStr.isEmpty() && buttonStr != QLatin1String("left")) {
+            sendResponse(socket, 400, "Bad Request", "invalid button", "text/plain");
+            return;
+        }
+
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        m_browser->sendClick(QPoint(x, y), button);
+        sendResponse(socket, 200, "OK", "clicked", "text/plain");
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/scroll")) {
+        bool okDy = false;
+        int dy = query.queryItemValue(QStringLiteral("dy")).toInt(&okDy);
+        if (!okDy || dy == 0) {
+            sendResponse(socket, 400, "Bad Request", "invalid dy", "text/plain");
+            return;
+        }
+
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        // x/y optional — default to the viewport center.
+        bool okX = false, okY = false;
+        int x = query.queryItemValue(QStringLiteral("x")).toInt(&okX);
+        int y = query.queryItemValue(QStringLiteral("y")).toInt(&okY);
+        QPoint pos(okX && x >= 0 ? x : m_browser->width() / 2,
+                   okY && y >= 0 ? y : m_browser->height() / 2);
+
+        m_browser->sendScroll(pos, dy);
+        sendResponse(socket, 200, "OK", "scrolled", "text/plain");
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/type")) {
+        // Prefer text from the query string; fall back to the request body
+        // (same pattern as /render/navigate) for long payloads.
+        QString text = query.queryItemValue(QStringLiteral("text"), QUrl::FullyDecoded);
+        if (text.isEmpty()) {
+            QByteArray bodyBytes = requestData.mid(headerEnd + 4);
+            bool lengthOk = false;
+            int contentLength = headers.value(QStringLiteral("content-length")).toInt(&lengthOk);
+            if (lengthOk && contentLength > bodyBytes.size()) {
+                while (bodyBytes.size() < contentLength) {
+                    if (!socket->waitForReadyRead(5000))
+                        break;
+                    bodyBytes += socket->readAll();
+                }
+            }
+            text = QString::fromUtf8(bodyBytes);
+        }
+
+        if (text.isEmpty()) {
+            sendResponse(socket, 400, "Bad Request", "empty text", "text/plain");
+            return;
+        }
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        m_browser->sendText(text);
+        sendResponse(socket, 200, "OK", "typed", "text/plain");
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/key")) {
+        const QString keyName = query.queryItemValue(QStringLiteral("key"));
+        if (keyName.isEmpty()) {
+            sendResponse(socket, 400, "Bad Request", "missing key", "text/plain");
+            return;
+        }
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        if (!m_browser->sendKey(keyName)) {
+            sendResponse(socket, 400, "Bad Request", "unknown key", "text/plain");
+            return;
+        }
+        sendResponse(socket, 200, "OK", "key sent", "text/plain");
     } else if (method == QLatin1String("GET")
                && path == QLatin1String("/render/stream.mjpeg")) {
         // Send MJPEG stream headers — keep socket open, no Content-Length.

@@ -86,14 +86,25 @@ describe('Page.printToPDF', () => {
   it('PDF after page navigation contains rendered content', async () => {
     // Navigate to example.com then print; PDF should be non-trivial in size.
     await sendCdp(ws, 'Page.navigate', { url: 'https://example.com' }, nextId());
-    // Wait briefly for render
-    await new Promise((r) => setTimeout(r, 2000));
+    // Poll until the page has actually loaded — a fixed sleep is flaky on
+    // cold CI runners and prints the still-blank page.
+    const deadline = Date.now() + 20000;
+    let loaded = false;
+    while (Date.now() < deadline && !loaded) {
+      const evalResp = await sendCdp(ws, 'Runtime.evaluate', {
+        expression: "document.readyState === 'complete' && location.hostname === 'example.com'",
+        returnByValue: true,
+      }, nextId());
+      loaded = evalResp.result?.result?.value === true;
+      if (!loaded) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(loaded).toBe(true);
     const resp = await sendCdp(ws, 'Page.printToPDF', {}, nextId());
     expect(isPdfBase64(resp.result.data)).toBe(true);
     // Rendered page PDF should be meaningfully larger than an empty-page PDF (~4KB)
     const bytes = Buffer.from(resp.result.data, 'base64');
     expect(bytes.length).toBeGreaterThan(4096);
-  }, 30000);
+  }, 40000);
 
   // PDF-10 (stretch goal)
   it('Concurrent PDF requests both return valid PDFs (no race)', async () => {
