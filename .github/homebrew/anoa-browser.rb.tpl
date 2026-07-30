@@ -8,7 +8,7 @@ cask "anoa-browser" do
   desc "Headless browser built on Qt6/QWebEngine with CDP support"
   homepage "https://github.com/porcupine-md/anoa-browser"
 
-  depends_on macos: ">= :monterey"
+  depends_on macos: :monterey
 
   app "anoa-browser.app"
 
