@@ -56,6 +56,10 @@ target_include_directories(anoa-browser PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_definitions(anoa-browser PRIVATE
+    ANOA_VERSION="${PROJECT_VERSION}"
+)
+
 target_link_libraries(anoa-browser PRIVATE
     Qt6::WebEngineWidgets
     Qt6::WebEngineCore
