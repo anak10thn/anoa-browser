@@ -274,6 +274,12 @@ jobs:
           mkdir -p "$RES/qtwebengine_locales"
           cp -r "$QT_ROOT_DIR/resources/"* "$RES/" 2>/dev/null || true
           cp -r "$QT_ROOT_DIR/translations/qtwebengine_locales/"* "$RES/qtwebengine_locales/" 2>/dev/null || true
+          # Deployed Qt frameworks can carry a stray empty Versions/Resources
+          # dir — an invalid framework layout. Old codesign and notarization
+          # tolerate it, but Gatekeeper on current macOS rejects the whole app
+          # ("embedded framework contains modified or invalid version"). Purge
+          # before sealing; empty dirs are not part of the code seal.
+          find "$APP/Contents/Frameworks" -type d -path '*/Versions/Resources' -empty -print -delete
 
       # Re-sign the leaf executables with JIT entitlements (QtWebEngine's V8
       # needs them under the hardened runtime), then reseal the enclosing
@@ -313,6 +319,15 @@ jobs:
             --wait
           xcrun stapler staple "$APP"
           xcrun stapler validate "$APP"
+
+          # Guard: a stray empty Versions/Resources inside any framework makes
+          # Gatekeeper reject the app on current macOS even though codesign and
+          # notarization both pass. Fail here instead of on users' machines.
+          if find "$APP/Contents/Frameworks" -type d -path '*/Versions/Resources' -empty | grep .; then
+            echo "::error::Invalid framework layout: stray empty Versions/Resources dir(s) above."
+            exit 1
+          fi
+          spctl --assess --type execute --verbose=2 "$APP"
 
       - name: Ad-hoc sign (unsigned fallback only)
         if: ${{ steps.cert.outputs.identity == '' }}
