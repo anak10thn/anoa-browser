@@ -116,3 +116,13 @@
 - Node ESM ignores global npm installs — smoke.sh must run node snippets from a directory whose node_modules has the dep (cd tests/integration for ws, tests/e2e for @playwright/test).
 - QtWebEngine CDP does not implement Storage.getCookies → playwright context.cookies() rejects; document as expected limitation like newPage().
 - macOS-only: binding 0.0.0.0:P succeeds while 127.0.0.1:P is taken (SO_REUSEADDR semantics) — PORT-03 conflict test only meaningful on Linux.
+
+## 2026-07-30 — task-011/012: distribution packaging (Homebrew, Linux launcher, universal macOS)
+
+- Qt6 WebEngine env var names: QTWEBENGINE_RESOURCES_PATH and QTWEBENGINE_LOCALES_PATH — the old launcher used QTWEBENGINERESOURCEPATH/QTWEBENGINE_LOCALE which Qt silently ignores. Ship a qt.conf next to the binary as the primary mechanism (Prefix/Plugins/LibraryExecutables/Data/Translations) with env vars as backup.
+- The release workflow used patchelf without ever installing it (not preinstalled on ubuntu-22.04 runners) — the Linux job could never have succeeded.
+- aqt's mac desktop Qt (clang_64) is a universal x86_64+arm64 build: add -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" and ONE artifact serves Intel and Apple Silicon; verify slices with lipo -archs.
+- Order matters on macOS: strip → macdeployqt-modified binaries must be re-signed (codesign --force --deep --sign -) or arm64 refuses to launch; stripping after signing invalidates the signature.
+- Homebrew cask: tar.gz cask artifacts get quarantined on install; ad-hoc-signed apps need caveats pointing at --no-quarantine / xattr -dr.
+- Add workflow_dispatch to release.yml with the publish/tap steps gated on startsWith(github.ref, 'refs/tags/') — packaging can then be exercised end-to-end from any branch without cutting a release.
+- Bundle smoke tests in the release workflow (extract tarball to a clean dir, launch with env -u LD_LIBRARY_PATH, curl /json/version) catch broken packaging before it ships.
