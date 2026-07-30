@@ -5,7 +5,9 @@ on:
     tags:
       - 'v*.*.*'
   # Manual runs build and smoke-test all packages without publishing —
-  # the release/tap steps only run for tag pushes.
+  # the release/tap steps only run for tag pushes. Tag pushes REQUIRE the
+  # macOS signing secrets (guarded below): an unsigned release must never
+  # reach GitHub Releases / the Homebrew tap.
   workflow_dispatch:
 
 env:
@@ -39,7 +41,8 @@ jobs:
 
       - name: Configure & Build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR \
+            -DANOA_VERSION_OVERRIDE="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"
           cmake --build build --parallel
 
       - name: Package portable bundle
@@ -162,6 +165,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fail fast on tag pushes when signing secrets are missing — otherwise
+      # the release job would publish an ad-hoc (Gatekeeper-blocked) build to
+      # GitHub Releases and the Homebrew tap. Manual dispatch runs are exempt:
+      # they only produce throwaway artifacts.
+      - name: Require signing secrets on tag pushes
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=""
+          for var in MACOS_CERT_P12_BASE64 APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -z "${!var:-}" ] && missing="$missing $var"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Tag push requires macOS signing secrets, missing:$missing"
+            echo "Refusing to publish an unsigned macOS release. Set the secrets or delete the tag."
+            exit 1
+          fi
+
       # aqt's mac desktop Qt is a universal (x86_64 + arm64) build, so a single
       # job produces one binary that runs natively on Intel and Apple Silicon.
       - uses: jurplel/install-qt-action@v4
@@ -179,7 +204,8 @@ jobs:
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DANOA_VERSION_OVERRIDE="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"
           cmake --build build --parallel
 
       - name: Verify universal binaries
@@ -255,9 +281,9 @@ jobs:
       - name: Apply entitlements & notarize
         if: ${{ steps.cert.outputs.identity != '' }}
         env:
-          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           APP=build/anoa-browser.app
@@ -273,12 +299,11 @@ jobs:
           sign --entitlements "$ENT" "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
-          echo "$MACOS_NOTARY_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-            --key "$RUNNER_TEMP/notary.p8" \
-            --key-id "$MACOS_NOTARY_KEY_ID" \
-            --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$APP"
           xcrun stapler validate "$APP"
@@ -328,7 +353,7 @@ jobs:
 
       - name: Configure & Build
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DANOA_VERSION_OVERRIDE="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"
           cmake --build build --config Release
 
       - name: Deploy Qt DLLs & WebEngine resources

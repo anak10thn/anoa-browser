@@ -35,7 +35,7 @@ brew trust porcupine-md/tap        # tap ships a cask + formula
 brew install --cask anoa-browser
 ```
 
-Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is ad-hoc signed (not notarized); the cask clears the quarantine flag on install so it launches normally with no extra steps.
+Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
 
 ### Linux (Homebrew)
 
@@ -341,6 +341,15 @@ export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox"
 ```
 
 On macOS, `DISPLAY` is not required. On Linux without a display server, `QPA_PLATFORM=offscreen` is set automatically when `--headless` is passed.
+
+---
+
+## Releasing (maintainers)
+
+1. Create a tag `vX.Y.Z` — via GitHub (**Releases → Draft a new release → Choose a tag → Create new tag**) or CLI (`git tag vX.Y.Z && git push origin vX.Y.Z`). The tag name is the version: CI injects it into the build (`ANOA_VERSION_OVERRIDE`), so `CMakeLists.txt` never needs a manual bump.
+2. CI builds Linux / macOS / Windows, signs + notarizes the macOS app, publishes the GitHub Release, and updates the Homebrew tap automatically.
+
+Tag pushes require the macOS signing secrets (`MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) — CI fails fast if any are missing, so an unsigned build can never be released. Without `HOMEBREW_TAP_TOKEN` the tap update is skipped (warning only). To smoke-test the pipeline without publishing, run the Release workflow manually (`workflow_dispatch`) — artifacts only, no release, no tap update.
 
 ---
 

@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 project(anoa-browser VERSION 0.3.1 LANGUAGES CXX)
 
+# CI injects the git tag here so the tag is the single source of truth for the
+# version — CMakeLists.txt never needs a manual bump for releases. The value
+# above is just the default for local builds.
+set(ANOA_VERSION_OVERRIDE "" CACHE STRING "Version override (CI passes the git tag)")
+if(ANOA_VERSION_OVERRIDE)
+    string(REGEX REPLACE "^v" "" PROJECT_VERSION "${ANOA_VERSION_OVERRIDE}")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
