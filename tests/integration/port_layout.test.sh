@@ -100,8 +100,10 @@ if kill -0 "$SUBPID" 2>/dev/null; then
   # This is a soft assertion since Qt doesn't always hard-exit on bind failure
   assert_fail "PORT-03: Binary continued running despite port conflict (may be soft error)"
 else
-  wait "$SUBPID"
-  EXIT_CODE=$?
+  # `|| EXIT_CODE=$?` keeps set -e from aborting the script on the child's
+  # (expected) non-zero exit status.
+  EXIT_CODE=0
+  wait "$SUBPID" || EXIT_CODE=$?
   if [ "$EXIT_CODE" -ne 0 ]; then
     assert_pass "PORT-03: Binary exited non-zero when port was already in use"
   else
