@@ -344,6 +344,16 @@ On macOS, `DISPLAY` is not required. On Linux without a display server, `QPA_PLA
 
 ---
 
+## Releasing (maintainers)
+
+1. Bump `project(... VERSION ...)` in `CMakeLists.txt` and commit.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`
+3. CI builds Linux / macOS / Windows, signs + notarizes the macOS app, publishes the GitHub Release, and updates the Homebrew tap automatically.
+
+Tag pushes require the macOS signing secrets (`MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) — CI fails fast if any are missing, so an unsigned build can never be released. Without `HOMEBREW_TAP_TOKEN` the tap update is skipped (warning only). To smoke-test the pipeline without publishing, run the Release workflow manually (`workflow_dispatch`) — artifacts only, no release, no tap update.
+
+---
+
 ## Architecture
 
 ```
