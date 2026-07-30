@@ -35,7 +35,7 @@ brew trust porcupine-md/tap        # tap ships a cask + formula
 brew install --cask anoa-browser
 ```
 
-Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is ad-hoc signed (not notarized); the cask clears the quarantine flag on install so it launches normally with no extra steps.
+Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
 
 ### Linux (Homebrew)
 
