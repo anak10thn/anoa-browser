@@ -23,7 +23,43 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 
 ---
 
-## Prerequisites
+## Install
+
+### macOS (Homebrew) — Intel & Apple Silicon
+
+One universal (x86_64 + arm64) build serves both architectures:
+
+```bash
+brew tap porcupine-md/tap
+brew install --cask --no-quarantine anoa-browser
+```
+
+`--no-quarantine` is recommended because the app is ad-hoc signed, not notarized. Installs `anoa-browser` and `anoa-term` into your `PATH`.
+
+### Linux (Homebrew)
+
+```bash
+brew tap porcupine-md/tap
+brew install anoa-browser-linux
+```
+
+### Linux (portable tarball)
+
+The release tarball is self-contained: the binary, every Qt/WebEngine shared library, plugins, and resources, plus a launcher script that wires them together (`LD_LIBRARY_PATH`, `QTWEBENGINEPROCESS_PATH`, …).
+
+```bash
+tar xzf anoa-browser-linux-x86_64.tar.gz
+./anoa-browser/anoa-browser.sh --headless --port 9222   # launcher, not the raw binary
+./anoa-browser/anoa-term
+```
+
+### Windows
+
+Download `anoa-browser-windows-x86_64.zip` from [Releases](https://github.com/porcupine-md/anoa-browser/releases) and run `anoa-browser.exe`.
+
+---
+
+## Prerequisites (building from source)
 
 | Dependency | Version | Notes |
 |---|---|---|
