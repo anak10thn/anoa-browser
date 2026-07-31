@@ -10,12 +10,66 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QTextStream>
+#include <QUrl>
 
 static void validatePort(int port)
 {
     if (port < 1 || port > 65535) {
         QTextStream err(stderr);
         err << "Error: --port must be between 1 and 65535, got " << port << Qt::endl;
+        ::exit(1);
+    }
+}
+
+// Terminal-mode validators. Kept separate from validatePort() so the error
+// message names the flag the user actually typed.
+static void validateTermPort(int port)
+{
+    if (port < 1 || port > 65535) {
+        QTextStream err(stderr);
+        err << "Error: --term-port must be between 1 and 65535, got " << port << Qt::endl;
+        ::exit(1);
+    }
+}
+
+static void validateFps(int fps)
+{
+    if (fps < 1 || fps > 120) {
+        QTextStream err(stderr);
+        err << "Error: --fps must be between 1 and 120, got " << fps << Qt::endl;
+        ::exit(1);
+    }
+}
+
+static void validateGfxMode(const QString &mode)
+{
+    static const QStringList kModes{"auto", "halfblock", "iterm", "kitty"};
+    if (!kModes.contains(mode)) {
+        QTextStream err(stderr);
+        err << "Error: --gfx must be one of auto, halfblock, iterm, kitty; got " << mode << Qt::endl;
+        ::exit(1);
+    }
+}
+
+static void validateCdpUrl(const QString &url)
+{
+    if (url.isEmpty())
+        return;
+
+    const QUrl parsed(url);
+    const QString scheme = parsed.scheme().toLower();
+
+    if (scheme == "wss") {
+        QTextStream err(stderr);
+        err << "Error: --cdp does not support wss://: TLS CDP endpoints are unsupported "
+               "because Qt is not built with OpenSSL here; use ws:// or http://" << Qt::endl;
+        ::exit(1);
+    }
+
+    if (!parsed.isValid() || parsed.host().isEmpty()
+        || (scheme != "http" && scheme != "https" && scheme != "ws")) {
+        QTextStream err(stderr);
+        err << "Error: --cdp must be a URL with scheme http, https or ws, got " << url << Qt::endl;
         ::exit(1);
     }
 }
@@ -114,6 +168,16 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     QCommandLineOption widthOpt(QStringList{"width"}, "Browser viewport/window width in pixels (default 1280)", "width");
     QCommandLineOption heightOpt(QStringList{"height"}, "Browser viewport/window height in pixels (default 720)", "height");
 
+    // Terminal mode (`anoa-browser terminal`). Registered on the same parser so
+    // process() accepts them; deliberately named apart from --port/--auth-token,
+    // which keep their browser meaning in every mode.
+    QCommandLineOption termHostOpt("term-host", "Terminal mode: host of the anoa-browser to view (default 127.0.0.1)", "host");
+    QCommandLineOption termPortOpt("term-port", "Terminal mode: port of the anoa-browser to view (1-65535, default 9222)", "port");
+    QCommandLineOption termTokenOpt("term-token", "Terminal mode: bearer token for the viewed endpoint", "token");
+    QCommandLineOption fpsOpt("fps", "Terminal mode: frame rate (1-120, default 30)", "n");
+    QCommandLineOption gfxOpt("gfx", "Terminal mode: rendering backend (auto|halfblock|iterm|kitty, default auto)", "mode");
+    QCommandLineOption cdpOpt("cdp", "Terminal mode: attach to an external CDP endpoint (http://, https:// or ws:// URL) instead of /render/*", "url");
+
     parser.addOption(portOpt);
     parser.addOption(headlessOpt);
     parser.addOption(noSandboxOpt);
@@ -124,6 +188,12 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     parser.addOption(configOpt);
     parser.addOption(widthOpt);
     parser.addOption(heightOpt);
+    parser.addOption(termHostOpt);
+    parser.addOption(termPortOpt);
+    parser.addOption(termTokenOpt);
+    parser.addOption(fpsOpt);
+    parser.addOption(gfxOpt);
+    parser.addOption(cdpOpt);
 
     parser.process(*QCoreApplication::instance());
 
@@ -167,6 +237,38 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
         cfg.height = h;
     }
 
+    // Terminal-mode options are CLI-only: loadConfigFile() never sets them, so
+    // the struct defaults stand in when the flags are omitted.
+    if (parser.isSet(termHostOpt))
+        cfg.termHost = parser.value(termHostOpt);
+    if (parser.isSet(termTokenOpt))
+        cfg.termToken = parser.value(termTokenOpt);
+    if (parser.isSet(gfxOpt))
+        cfg.gfxMode = parser.value(gfxOpt);
+    if (parser.isSet(cdpOpt))
+        cfg.cdpUrl = parser.value(cdpOpt);
+
+    if (parser.isSet(termPortOpt)) {
+        bool ok = false;
+        int p = parser.value(termPortOpt).toInt(&ok);
+        if (!ok) {
+            QTextStream err(stderr);
+            err << "Error: --term-port must be an integer, got " << parser.value(termPortOpt) << Qt::endl;
+            ::exit(1);
+        }
+        cfg.termPort = p;
+    }
+    if (parser.isSet(fpsOpt)) {
+        bool ok = false;
+        int f = parser.value(fpsOpt).toInt(&ok);
+        if (!ok) {
+            QTextStream err(stderr);
+            err << "Error: --fps must be an integer, got " << parser.value(fpsOpt) << Qt::endl;
+            ::exit(1);
+        }
+        cfg.fps = f;
+    }
+
     // --extension is repeatable; append CLI entries on top of file config entries.
     const QStringList cliExtensions = parser.values(extensionOpt);
     if (!cliExtensions.isEmpty())
@@ -175,6 +277,10 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     // Validate
     validatePort(cfg.port);
     validateExtensionPaths(cfg.extensionPaths);
+    validateTermPort(cfg.termPort);
+    validateFps(cfg.fps);
+    validateGfxMode(cfg.gfxMode);
+    validateCdpUrl(cfg.cdpUrl);
 
     if (cfg.authToken.isEmpty()) {
         QTextStream err(stderr);
