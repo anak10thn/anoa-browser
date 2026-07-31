@@ -147,7 +147,10 @@ bool RenderHttpClient::httpRequest(const char *method, const std::string &pathWi
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd < 0)
             continue;
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
+        // Qualified: this is a member function of a QObject subclass, so an
+        // unqualified connect() resolves to the static QObject::connect
+        // overloads and never reaches the one in <sys/socket.h>.
+        if (::connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
             break;
         close(fd);
         fd = -1;
