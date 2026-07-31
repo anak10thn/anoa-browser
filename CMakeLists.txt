@@ -66,6 +66,11 @@ target_sources(anoa-browser PRIVATE
 if(NOT WIN32)
     target_sources(anoa-browser PRIVATE
         src/terminal/terminal_app.cpp
+        src/terminal/terminal_ui.cpp
+        # frame_backend.h has no .cpp of its own, so AUTOMOC only sees it (and
+        # generates the FrameBackend metaobject) when it is listed here.
+        src/terminal/frame_backend.h
+        src/terminal/terminal_ui.h
     )
 endif()
 
