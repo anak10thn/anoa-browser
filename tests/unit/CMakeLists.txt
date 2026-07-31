@@ -1,4 +1,7 @@
-find_package(Qt6 6.4 REQUIRED COMPONENTS Test Core)
+# Gui is for the test binary only: it verifies that QImage decodes PNG under a
+# plain QCoreApplication, the assumption terminal mode is built on. It is
+# deliberately NOT linked into anoa-config-lib.
+find_package(Qt6 6.4 REQUIRED COMPONENTS Test Core Gui)
 
 # Static library so the test binary can link against config logic without
 # bringing in the full browser stack (WebEngine, Widgets, etc.).
@@ -20,6 +23,7 @@ target_include_directories(anoa-browser-test-config PRIVATE
 target_link_libraries(anoa-browser-test-config PRIVATE
     Qt6::Test
     Qt6::Core
+    Qt6::Gui
     anoa-config-lib
 )
 set_target_properties(anoa-browser-test-config PROPERTIES AUTOMOC ON)

@@ -13,10 +13,24 @@ env:
 
 jobs:
   # ── 1. Unit Tests (QTest, no binary needed) ────────────────────────────────
+  # Runs on both Linux and macOS: the QTest suite carries the check that QImage
+  # decodes PNG under a plain QCoreApplication (no GUI application object),
+  # which terminal mode depends on and which is platform-specific.
   unit-tests:
-    name: Unit Tests (QTest)
-    runs-on: ubuntu-22.04
+    name: Unit Tests (QTest, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            qt_host: linux
+            qt_arch: linux_gcc_64
+          - os: macos-14
+            qt_host: mac
+            qt_arch: clang_64
 
     steps:
       - uses: actions/checkout@v4
@@ -24,15 +38,18 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          host: linux
+          host: ${{ matrix.qt_host }}
           target: desktop
-          arch: linux_gcc_64
+          arch: ${{ matrix.qt_arch }}
           modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ matrix.os }}
 
+      # Only Linux needs this; the top-level find_package pulls in WebEngine,
+      # which wants CUPS headers there.
       - name: Install system dependencies
+        if: runner.os == 'Linux'
         run: sudo apt-get install -y libcups2-dev
 
       - name: Configure (BUILD_TESTS=ON)
