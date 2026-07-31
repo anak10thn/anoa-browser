@@ -1,14 +1,23 @@
 #include "terminal/cdp_client.h"
 
+#include <cstdio> // stderr, for the QTextStream error lines
+
 #include <QAbstractSocket>
+#include <QCoreApplication>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QJsonValue>
 #include <QList>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QTextStream>
 #include <QTimer>
 #include <QUrlQuery>
 #include <QWebSocket>
 #include <QWebSocketProtocol>
+#include <QtGlobal>
 
 namespace {
 
@@ -22,6 +31,10 @@ constexpr int kMaxReconnectMs = 8000;
 // nothing next to the frame timer running at 30 fps.
 constexpr int kSweepIntervalMs = 250;
 
+// Prefix for the handful of messages this class writes straight to stderr.
+// Same wording as terminal_app.cpp, because to the user it is one program.
+const char kErrPrefix[] = "anoa-browser terminal: ";
+
 QString hostPort(const QUrl &url)
 {
     if (url.host().isEmpty())
@@ -29,6 +42,41 @@ QString hostPort(const QUrl &url)
     if (url.port() < 0)
         return url.host();
     return QStringLiteral("%1:%2").arg(url.host()).arg(url.port());
+}
+
+// One target row of /json/list, reduced to what the picker needs.
+struct PageTarget {
+    QString title;
+    QString url;
+    QString socketUrl;
+};
+
+// Target titles are page <title> text: arbitrary length, and arbitrary bytes
+// once a page is hostile. Trim it to something that fits a listing line.
+QString shortTitle(const QString &title)
+{
+    QString out = title.simplified();
+    if (out.isEmpty())
+        return QStringLiteral("(untitled)");
+    const int kMax = 60;
+    if (out.size() > kMax)
+        out = out.left(kMax - 3) + QStringLiteral("...");
+    return out;
+}
+
+// http://host:port -> http://host:port/json/list. A path that is already
+// spelled out is kept verbatim, so pointing --cdp at a proxy that serves the
+// target list somewhere else still works.
+QUrl discoveryUrlFor(const QUrl &base)
+{
+    QUrl out = base;
+    out.setFragment(QString());
+
+    QString path = base.path();
+    while (path.endsWith(QLatin1Char('/')))
+        path.chop(1);
+    out.setPath(path.isEmpty() ? QStringLiteral("/json/list") : path);
+    return out;
 }
 
 } // namespace
@@ -65,15 +113,40 @@ CdpClient::~CdpClient()
     m_reconnectTimer->stop();
     m_timeoutTimer->stop();
     m_pending.clear();
+    if (m_discoveryReply)
+        m_discoveryReply->abort(); // onDiscoveryFinished() returns at m_closing
     m_socket->abort();
 }
 
 void CdpClient::connectToEndpoint(const QUrl &url)
 {
-    m_endpoint = url;
+    m_requestedUrl = url;
     m_closing = false;
     m_attempt = 0;
-    openSocket();
+
+    const QString scheme = url.scheme().toLower();
+
+    if (scheme == QLatin1String("ws")) {
+        // Already a page target: no discovery, dial it.
+        m_endpoint = url;
+        openSocket();
+        return;
+    }
+
+    if (scheme == QLatin1String("http") || scheme == QLatin1String("https")) {
+        m_endpoint = QUrl(); // resolved by discovery
+        startDiscovery(url);
+        return;
+    }
+
+    // config.cpp's validateCdpUrl() has already turned wss:// (and every other
+    // scheme) into a parse-time exit, so this is a programming error rather
+    // than user input. The runtime branch exists because Q_ASSERT compiles out
+    // of a release build and a silent no-op here would look like a hang.
+    Q_ASSERT_X(scheme != QLatin1String("wss"), "CdpClient::connectToEndpoint",
+               "wss:// must be rejected by config validation before it reaches the client");
+    failDiscovery(QStringLiteral("--cdp scheme '%1' is not supported; use ws://, http:// or https://")
+                      .arg(url.scheme()));
 }
 
 void CdpClient::disconnectFromEndpoint()
@@ -81,6 +154,8 @@ void CdpClient::disconnectFromEndpoint()
     m_closing = true;
     m_reconnectTimer->stop();
     m_queued.clear();
+    if (m_discoveryReply)
+        m_discoveryReply->abort(); // finished() fires, and m_closing swallows it
     failAllPending(QStringLiteral("connection closed"), ErrorConnectionLost);
     m_socket->close();
     setState(State::Disconnected, QStringLiteral("disconnected"));
@@ -93,7 +168,9 @@ void CdpClient::setRequestTimeout(int ms)
 
 QString CdpClient::description() const
 {
-    return hostPort(m_endpoint);
+    // Before discovery resolves, the ws:// endpoint is not known yet — but the
+    // host:port the user typed is, and that is what the status bar wants.
+    return hostPort(m_endpoint.isEmpty() ? m_requestedUrl : m_endpoint);
 }
 
 int CdpClient::send(const QString &method, const QJsonObject &params, Handler onReply)
@@ -144,16 +221,185 @@ QUrl CdpClient::authorizedUrl(const QUrl &url) const
     return out;
 }
 
+void CdpClient::applyAuth(QNetworkRequest &request) const
+{
+    if (m_token.isEmpty())
+        return;
+    request.setRawHeader(QByteArrayLiteral("Authorization"),
+                         QByteArrayLiteral("Bearer ") + m_token.toUtf8());
+}
+
+void CdpClient::startDiscovery(const QUrl &base)
+{
+    if (!m_network)
+        m_network = new QNetworkAccessManager(this);
+
+    m_discoveryUrl = discoveryUrlFor(base);
+    m_discoveryTimedOut = false;
+
+    QNetworkRequest request(authorizedUrl(m_discoveryUrl));
+    applyAuth(request);
+
+    setState(State::Discovering,
+             QStringLiteral("looking up CDP targets at %1").arg(hostPort(base)));
+
+    QNetworkReply *reply = m_network->get(request);
+    m_discoveryReply = reply;
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply]() { onDiscoveryFinished(reply); });
+
+    // Without this a host that accepts the connection and then says nothing
+    // leaves the viewer on "looking up CDP targets" forever. abort() turns
+    // into a finished() with OperationCanceledError, which the flag relabels.
+    //
+    // The generation counter, rather than the reply pointer, is what tells a
+    // late timer that its request is already done: deleteLater() may well have
+    // freed that reply, and a fresh one can be handed the same address.
+    const int generation = ++m_discoveryGeneration;
+    QTimer::singleShot(m_requestTimeoutMs, this, [this, generation]() {
+        if (m_discoveryGeneration != generation || !m_discoveryReply)
+            return; // already answered, or superseded
+        m_discoveryTimedOut = true;
+        m_discoveryReply->abort();
+    });
+}
+
+void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
+{
+    reply->deleteLater();
+    if (m_discoveryReply == reply)
+        m_discoveryReply = nullptr;
+    if (m_closing)
+        return; // disconnectFromEndpoint() aborted it on purpose
+
+    // m_discoveryUrl, never reply->url(): the latter carries ?token=<secret>.
+    const QString where = m_discoveryUrl.toString();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        if (m_discoveryTimedOut) {
+            failDiscovery(QStringLiteral("%1 did not answer within %2 ms")
+                              .arg(where)
+                              .arg(m_requestTimeoutMs));
+        } else {
+            failDiscovery(
+                QStringLiteral("cannot reach %1: %2").arg(where, reply->errorString()));
+        }
+        return;
+    }
+
+    QJsonParseError parseError{};
+    const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        failDiscovery(QStringLiteral("%1 returned malformed JSON: %2")
+                          .arg(where, parseError.errorString()));
+        return;
+    }
+    if (!doc.isArray()) {
+        failDiscovery(QStringLiteral("%1 did not return a JSON array of targets").arg(where));
+        return;
+    }
+
+    const QJsonArray targets = doc.array();
+    if (targets.isEmpty()) {
+        failDiscovery(QStringLiteral("%1 lists no debuggable targets; is a page open?").arg(where));
+        return;
+    }
+
+    QList<PageTarget> pages;
+    QStringList otherTypes;
+    int attached = 0; // page targets some other debugger already holds
+    for (const QJsonValue &value : targets) {
+        const QJsonObject target = value.toObject();
+        const QString type = target.value(QStringLiteral("type")).toString();
+        if (type != QLatin1String("page")) {
+            // Deduplicated so "saw: service_worker" does not become a wall of
+            // the same word once a page registers a dozen workers.
+            const QString label = type.isEmpty() ? QStringLiteral("(no type)") : type;
+            if (!otherTypes.contains(label))
+                otherTypes.append(label);
+            continue;
+        }
+        const QString socketUrl =
+            target.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+        if (socketUrl.isEmpty()) {
+            // Chrome omits the field entirely once a client is attached.
+            ++attached;
+            continue;
+        }
+        PageTarget page;
+        page.title = target.value(QStringLiteral("title")).toString();
+        page.url = target.value(QStringLiteral("url")).toString();
+        page.socketUrl = socketUrl;
+        pages.append(page);
+    }
+
+    if (pages.isEmpty()) {
+        if (attached > 0) {
+            failDiscovery(QStringLiteral("%1 has %2 page target(s) but every one is already "
+                                         "attached by another debugger")
+                              .arg(where)
+                              .arg(attached));
+        } else {
+            failDiscovery(QStringLiteral("%1 has no target of type \"page\" (saw: %2)")
+                              .arg(where, otherTypes.join(QStringLiteral(", "))));
+        }
+        return;
+    }
+
+    if (pages.size() > 1) {
+        // Ambiguous, so say what was picked and what the alternatives were.
+        // Printed before the dial, on stderr, so it survives the alt screen.
+        QTextStream err(stderr);
+        err << kErrPrefix << pages.size() << " page targets at " << hostPort(m_requestedUrl)
+            << "; attaching to [0]" << Qt::endl;
+        for (int i = 0; i < pages.size(); ++i) {
+            err << "  [" << i << "] " << shortTitle(pages.at(i).title) << " - "
+                << pages.at(i).url << Qt::endl;
+        }
+        err << "  re-run with --cdp <webSocketDebuggerUrl> to attach to another one"
+            << Qt::endl;
+    }
+
+    const QUrl socketUrl(pages.first().socketUrl);
+    if (socketUrl.scheme().toLower() != QLatin1String("ws")) {
+        failDiscovery(QStringLiteral("%1 offered a %2:// debugger URL; only ws:// is supported")
+                          .arg(where, socketUrl.scheme()));
+        return;
+    }
+
+    m_endpoint = socketUrl;
+    openSocket();
+}
+
+void CdpClient::failDiscovery(const QString &message)
+{
+    // Terminal by definition: there is no second endpoint to fall back to, so
+    // the reconnect machinery stays off and the queued work is failed rather
+    // than left waiting for its 5 s deadline.
+    m_closing = true;
+    m_reconnectTimer->stop();
+    m_queued.clear();
+
+    QTextStream err(stderr);
+    err << kErrPrefix << message << Qt::endl;
+
+    setState(State::Disconnected, message);
+    failAllPending(message, ErrorConnectionLost);
+    emit discoveryFailed(message);
+
+    // exec() returns 1 and runTerminal() unwinds normally — ::exit() here
+    // would skip the termios restore if the viewer were already in raw mode.
+    if (m_exitOnDiscoveryFailure)
+        QCoreApplication::exit(1);
+}
+
 void CdpClient::openSocket()
 {
     if (m_endpoint.isEmpty())
         return;
 
     QNetworkRequest request(authorizedUrl(m_endpoint));
-    if (!m_token.isEmpty()) {
-        request.setRawHeader(QByteArrayLiteral("Authorization"),
-                             QByteArrayLiteral("Bearer ") + m_token.toUtf8());
-    }
+    applyAuth(request);
 
     const QString target = hostPort(m_endpoint);
     if (m_attempt > 0) {
