@@ -189,16 +189,20 @@ jobs:
 
       # aqt's mac desktop Qt is a universal (x86_64 + arm64) build, so a single
       # job produces one binary that runs natively on Intel and Apple Silicon.
+      # qtserialport: QtWebEngineCore references QtSerialPort (Web Serial API);
+      # without the module present macdeployqt aborts with "Cannot resolve
+      # rpath @rpath/QtSerialPort.framework". The -v2 cache key forces a fresh
+      # Qt install including the new module instead of restoring the old cache.
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: mac
           target: desktop
           arch: clang_64
-          modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
+          modules: qtwebchannel qtwebsockets qtpositioning qtwebengine qtserialport
           install-deps: true
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-clang64
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-macos-clang64-v2
 
       - name: Configure & Build (universal)
         run: |
