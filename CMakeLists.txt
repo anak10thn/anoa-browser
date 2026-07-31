@@ -60,6 +60,15 @@ target_sources(anoa-browser PRIVATE
     src/pdf/pdf_handler.cpp
 )
 
+# Terminal mode (`anoa-browser terminal`) is POSIX-only — termios, select() on
+# STDIN and SIGWINCH have no MSVC equivalent. On Windows the sources are left
+# out entirely and main.cpp reports the unsupported platform at runtime.
+if(NOT WIN32)
+    target_sources(anoa-browser PRIVATE
+        src/terminal/terminal_app.cpp
+    )
+endif()
+
 target_include_directories(anoa-browser PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
