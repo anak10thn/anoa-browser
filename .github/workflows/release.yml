@@ -50,12 +50,10 @@ jobs:
           bundle=dist/anoa-browser
           mkdir -p "$bundle"/lib "$bundle"/lib/qt6/libexec "$bundle"/resources "$bundle"/translations/qtwebengine_locales
 
-          # Binaries
+          # Binary — one executable; terminal mode is `anoa-browser terminal`.
           cp build/anoa-browser "$bundle/anoa-browser"
-          cp build/anoa-term "$bundle/anoa-term"
-          chmod +x "$bundle/anoa-browser" "$bundle/anoa-term"
+          chmod +x "$bundle/anoa-browser"
           patchelf --set-rpath '$ORIGIN/lib' "$bundle/anoa-browser"
-          patchelf --set-rpath '$ORIGIN/lib' "$bundle/anoa-term"
 
           # Iteratively copy ALL shared lib dependencies
           # Exclude glibc/core libs that MUST come from the host system
@@ -149,7 +147,13 @@ jobs:
           curl -sf http://127.0.0.1:9333/json/version | grep -q Browser
           curl -sf "http://127.0.0.1:9333/render/screenshot.png" -o /tmp/frame.png
           file /tmp/frame.png | grep -q "PNG image data"
-          ./anoa-term --help
+          # Terminal mode is the same binary, reached through the wrapper — the
+          # raw ./anoa-browser has no LD_LIBRARY_PATH/QT_PLUGIN_PATH and must
+          # never be the documented entry point. Stripping the build's Qt off
+          # the environment again proves terminal mode is self-contained too.
+          env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH \
+            ./anoa-browser.sh terminal --help > /tmp/term-help.txt
+          grep -q -- '--gfx' /tmp/term-help.txt
           kill $BROWSER_PID
 
       - uses: actions/upload-artifact@v4
@@ -216,18 +220,11 @@ jobs:
         run: |
           lipo -archs build/anoa-browser.app/Contents/MacOS/anoa-browser | grep -q x86_64
           lipo -archs build/anoa-browser.app/Contents/MacOS/anoa-browser | grep -q arm64
-          lipo -archs build/anoa-term | grep -q x86_64
-          lipo -archs build/anoa-term | grep -q arm64
 
-      # Ship anoa-term INSIDE the .app bundle (before deploy/sign) so it is
-      # covered by the app's signature + notarization ticket — a standalone
-      # binary cannot be stapled.
-      - name: Move anoa-term into the app bundle
+      - name: Strip the binary
         run: |
-          cp build/anoa-term build/anoa-browser.app/Contents/MacOS/anoa-term
           # strip must precede signing — it would otherwise break the signature.
           strip -x build/anoa-browser.app/Contents/MacOS/anoa-browser || true
-          strip -x build/anoa-browser.app/Contents/MacOS/anoa-term || true
 
       # Import the Developer ID cert (if provided) BEFORE macdeployqt, so
       # macdeployqt can sign the bundle for notarization in one pass. macdeployqt
@@ -308,7 +305,6 @@ jobs:
           find "$APP/Contents/PlugIns" -name '*.dylib' -print0 | while IFS= read -r -d '' dylib; do
             sign "$dylib"
           done
-          sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-term"
           sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-browser"
           # Reseal the framework that contains the re-signed helper, then the app.
           sign "$APP/Contents/Frameworks/QtWebEngineCore.framework"
@@ -346,7 +342,10 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:9333/json/version | grep -q Browser
-          ./build/anoa-browser.app/Contents/MacOS/anoa-term --help
+          # Terminal mode is the same signed binary — exercise the subcommand so
+          # the packaged, notarized artifact is what proves it runs.
+          ./build/anoa-browser.app/Contents/MacOS/anoa-browser terminal --help > /tmp/term-help.txt
+          grep -q -- '--gfx' /tmp/term-help.txt
           kill $BROWSER_PID
 
       - name: Package
@@ -391,6 +390,31 @@ jobs:
           New-Item -ItemType Directory -Path "build\Release\translations\qtwebengine_locales" -Force | Out-Null
           Copy-Item -Path "$qtDir\translations\qtwebengine_locales\*" -Destination "build\Release\translations\qtwebengine_locales\" -Force -ErrorAction SilentlyContinue
           Copy-Item -Path "$qtDir\bin\QtWebEngineProcess.exe" -Destination "build\Release\" -Force -ErrorAction SilentlyContinue
+
+      # Terminal mode is compiled out on Windows (see CMakeLists.txt), so the
+      # subcommand must fail cleanly rather than link-fail or crash. The error
+      # path in main.cpp runs before any application object exists, so this
+      # needs no display — only the deployed Qt DLLs.
+      - name: Verify terminal mode is refused
+        shell: pwsh
+        working-directory: build\Release
+        run: |
+          # Scratch files go to RUNNER_TEMP: build\Release is packaged wholesale
+          # and must not gain stray artifacts.
+          $outFile = Join-Path $env:RUNNER_TEMP 'term-out.txt'
+          $errFile = Join-Path $env:RUNNER_TEMP 'term-err.txt'
+          $exe = (Resolve-Path .\anoa-browser.exe).Path
+          $p = Start-Process -FilePath $exe -ArgumentList 'terminal' `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+          $text = (Get-Content $errFile -Raw)
+          Write-Host "exit=$($p.ExitCode) stderr=$text"
+          if ($p.ExitCode -eq 0) {
+            throw "anoa-browser terminal must exit non-zero on Windows, got 0"
+          }
+          if ($text -notmatch 'not supported on Windows') {
+            throw "anoa-browser terminal did not print the unsupported-platform error"
+          }
 
       - name: Package
         run: 7z a anoa-browser-windows-x86_64.zip .\build\Release\*
