@@ -40,6 +40,18 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--headless") == 0) {
             qputenv("QT_QPA_PLATFORM", "offscreen");
+        } else if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0
+                   || std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            // QCommandLineParser handles both of these, and it needs a live
+            // application object — which on a machine with no display aborts
+            // before it can print anything. `anoa-browser --version` therefore
+            // died with SIGABRT on any headless Linux box, which is also the
+            // one command the Homebrew Linux formula runs as its test.
+            //
+            // Neither path ever puts a pixel on a screen, so the offscreen
+            // platform is not a compromise here: it is simply the honest
+            // description of what the process is about to do.
+            qputenv("QT_QPA_PLATFORM", "offscreen");
         } else if (isOption(argv[i], "--term-host") || isOption(argv[i], "--term-port")
                    || isOption(argv[i], "--cdp")) {
             hasTarget = true;
