@@ -141,11 +141,10 @@ private:
     bool m_urlPrompt = false;
     std::string m_urlInput;
 
-    // The status bar starts hidden so the page gets every row it can, and is
-    // brought back with Ctrl-B. Hiding it is worth a row on its own, but the
-    // reason it defaults off is the image renderers: they letterbox, so a row
-    // spent on the bar can cost several more to the aspect fit above it.
-    bool m_statusVisible = false;
+    // The status bar is shown by default: it is where the viewer says what it
+    // is attached to, what it last forwarded, and how to leave — none of which
+    // a first-time reader can guess. Ctrl-B hides it for the one row back.
+    bool m_statusVisible = true;
     // CSS width handed to a resizable page. Fixed on purpose — only the height
     // tracks the terminal, so the page never drops into its mobile layout just
     // because the window is narrow in cells.

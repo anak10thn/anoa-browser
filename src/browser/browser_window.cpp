@@ -3,14 +3,19 @@
 #include <QAction>
 #include <QClipboard>
 #include <QColor>
+#include <QCursor>
 #include <QFont>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QKeySequence>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
 #include <QPixmap>
+#include <QPoint>
+#include <QResizeEvent>
+#include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -121,7 +126,8 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
 
     // A real widget rather than a bare layout, so the strip can carry its own
     // background and bottom rule. A QHBoxLayout has nothing to paint.
-    auto *toolbar = new QWidget(this);
+    m_toolbar = new QWidget(this);
+    QWidget *toolbar = m_toolbar;
     toolbar->setObjectName(QStringLiteral("anoaToolbar"));
     auto *bar = new QHBoxLayout(toolbar);
     bar->setContentsMargins(8, 6, 8, 6);
@@ -135,11 +141,21 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     bar->addWidget(m_menuButton);
     setStyleSheet(QString::fromLatin1(kToolbarStyle));
 
-    auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(0);
-    root->addWidget(toolbar);
-    root->addWidget(m_view, 1);
+    // The toolbar is deliberately NOT in the layout. Only the view is, and the
+    // toolbar is positioned by hand across the top with the layout's top margin
+    // reserving the space for it.
+    //
+    // That indirection is what makes auto-hide possible without touching the
+    // view's geometry: revealing the bar over the page must not resize the
+    // page. HttpServer reports the view's size as the viewport that
+    // /render/click coordinates are measured in, so a toolbar that pushed the
+    // view down and up again on every hover would move every click target with
+    // it and reflow the page twice a second.
+    m_root = new QVBoxLayout(this);
+    m_root->setContentsMargins(0, 0, 0, 0);
+    m_root->setSpacing(0);
+    m_root->addWidget(m_view, 1);
+    toolbar->raise();
 
     connect(m_back, &QToolButton::clicked, m_view, &AnoaBrowser::back);
     connect(m_forward, &QToolButton::clicked, m_view, &AnoaBrowser::forward);
@@ -154,8 +170,80 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     // The view keeps the size the config asked for; the window is whatever that
     // plus the toolbar comes to. Sizing the window to config.width/height
     // instead would quietly hand the page a shorter viewport than requested.
+    // Polls the pointer instead of filtering mouse events. Once the toolbar is
+    // hidden the whole window is the web view, and WebEngine delivers pointer
+    // events inside its own render widget rather than up the parent chain, so
+    // an event filter here would simply never see the pointer reach the top
+    // edge. Polling is immune to that, and at 16 Hz it costs nothing.
+    m_pointerTimer = new QTimer(this);
+    m_pointerTimer->setInterval(60);
+    connect(m_pointerTimer, &QTimer::timeout, this, &BrowserWindow::pollPointer);
+
     m_view->setMinimumSize(config.width, config.height);
     resize(config.width, config.height + toolbar->sizeHint().height());
+    layoutToolbar();
+}
+
+void BrowserWindow::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    layoutToolbar();
+}
+
+void BrowserWindow::layoutToolbar()
+{
+    if (!m_toolbar)
+        return;
+    const int barHeight = m_toolbar->sizeHint().height();
+    m_toolbar->setGeometry(0, 0, width(), barHeight);
+    // Overlaying costs the view nothing; docked, the margin is what keeps the
+    // page out from under the bar.
+    m_root->setContentsMargins(0, m_autoHide ? 0 : barHeight, 0, 0);
+    m_toolbar->raise();
+}
+
+void BrowserWindow::setAutoHide(bool on)
+{
+    m_autoHide = on;
+    if (on) {
+        m_toolbar->hide();
+        m_pointerTimer->start();
+    } else {
+        m_pointerTimer->stop();
+        m_toolbar->show();
+    }
+    layoutToolbar();
+}
+
+void BrowserWindow::pollPointer()
+{
+    if (!m_autoHide)
+        return;
+
+    const int barHeight = m_toolbar->sizeHint().height();
+    const QPoint local = mapFromGlobal(QCursor::pos());
+    const bool insideHorizontally = local.x() >= 0 && local.x() < width();
+
+    // Two different thresholds on purpose. Revealing takes a deliberate move
+    // into the top few pixels; hiding waits until the pointer is clear of the
+    // whole bar. One shared threshold would flicker the bar on and off while
+    // the pointer sat on the boundary.
+    static constexpr int kRevealZone = 3;
+    if (!m_toolbar->isVisible()) {
+        if (insideHorizontally && local.y() >= 0 && local.y() <= kRevealZone) {
+            m_toolbar->show();
+            m_toolbar->raise();
+        }
+        return;
+    }
+
+    // Keep it up while it is being used: the pointer is on it, a menu is open,
+    // or the address field has focus and is being typed into.
+    if (m_urlEdit->hasFocus() || (m_menu && m_menu->isVisible()))
+        return;
+    if (insideHorizontally && local.y() >= 0 && local.y() < barHeight)
+        return;
+    m_toolbar->hide();
 }
 
 // Session-only, and deliberately so: there is no bookmark store anywhere in
@@ -185,6 +273,15 @@ void BrowserWindow::rebuildMenu()
     m_menu->addAction(QStringLiteral("Copy address"), this, [this]() {
         QGuiApplication::clipboard()->setText(m_view->url().toString());
     });
+
+    m_menu->addSeparator();
+    // Rebuilt with the menu, so it has to carry its state rather than assume
+    // the fresh action's default.
+    m_autoHideAction = m_menu->addAction(QStringLiteral("Auto-hide toolbar"));
+    m_autoHideAction->setCheckable(true);
+    m_autoHideAction->setChecked(m_autoHide);
+    m_autoHideAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_H));
+    connect(m_autoHideAction, &QAction::toggled, this, &BrowserWindow::setAutoHide);
 
     m_menu->addSeparator();
     if (m_bookmarks.isEmpty()) {

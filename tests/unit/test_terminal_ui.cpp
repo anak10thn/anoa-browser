@@ -315,9 +315,9 @@ private:
         return ui.feedInput(bytes.constData(), static_cast<size_t>(bytes.size()));
     }
 
-    // The status bar defaults to hidden so the page gets every row, so any test
-    // that wants to read the row has to ask for it first. Ctrl-B is the toggle.
-    static void showStatusBar(TerminalUi &ui)
+    // Ctrl-B. The bar is shown by default, so this hides it on the first call
+    // and brings it back on the next.
+    static void toggleStatusBar(TerminalUi &ui)
     {
         feed(ui, QByteArray("\x02"));
     }
@@ -458,10 +458,10 @@ private slots:
         }
     }
 
-    // TERM-BAR-01: Ctrl-B toggles the status bar, and it starts hidden so the
-    // page gets every row. Hidden means *nothing drawn on that row* — leaving a
-    // blanked row behind would spend the row without showing anything.
-    void testStatusBarTogglesAndStartsHidden()
+    // TERM-BAR-01: the status bar is on by default, and Ctrl-B toggles it.
+    // Hidden means *nothing drawn on that row* — leaving a blanked row behind
+    // would spend the row without showing anything.
+    void testStatusBarStartsVisibleAndToggles()
     {
         CapturedStdout capture;
         RecordingBackend backend(QStringLiteral("h:1"));
@@ -470,28 +470,29 @@ private slots:
         capture.take();
 
         QVERIFY(feed(ui, QByteArray()));
-        QVERIFY2(statusRow(capture.take()).isEmpty(), "the bar drew while it was hidden");
-
-        showStatusBar(ui);
-        QVERIFY(feed(ui, QByteArray()));
         QVERIFY2(statusRow(capture.take()).contains("anoa-browser terminal"),
-                 "Ctrl-B did not bring the bar back");
+                 "the bar was missing on a fresh viewer");
 
-        showStatusBar(ui); // and away again
+        toggleStatusBar(ui); // away
         capture.take();
         QVERIFY(feed(ui, QByteArray()));
-        QVERIFY(statusRow(capture.take()).isEmpty());
+        QVERIFY2(statusRow(capture.take()).isEmpty(), "Ctrl-B did not hide the bar");
+
+        toggleStatusBar(ui); // and back
+        QVERIFY(feed(ui, QByteArray()));
+        QVERIFY(statusRow(capture.take()).contains("anoa-browser terminal"));
     }
 
     // TERM-BAR-02: the URL prompt outranks the setting. It is a reply the user
     // is waiting on, so it takes the row even with the bar switched off —
-    // otherwise Ctrl-L on a default install types into something invisible.
+    // otherwise Ctrl-L after a Ctrl-B types into something invisible.
     void testUrlPromptDrawsEvenWhenTheBarIsHidden()
     {
         CapturedStdout capture;
         RecordingBackend backend(QStringLiteral("h:1"));
         TerminalUi ui(terminalConfig("halfblock"), &backend);
         ui.onFrame(rgbFrame(40, 20, 40, 20));
+        toggleStatusBar(ui); // hide it first — that is the case at issue
         capture.take();
 
         QVERIFY(feed(ui, QByteArray("\x0c")));
@@ -515,9 +516,9 @@ private slots:
         QVERIFY(gfx.tick());
 
         QCOMPARE(backend.resizes.size(), 1);
-        // 80x24 cells at the 8x16 cell default: 640x384 px, so the page is
-        // asked for 1280 x round(1280 * 384/640) = 768.
-        QCOMPARE(backend.resizes[0], QSize(1280, 768));
+        // 80x24 cells at the 8x16 cell default, less the status bar's row:
+        // 640x368 px, so the page is asked for 1280 x round(1280 * 368/640).
+        QCOMPARE(backend.resizes[0], QSize(1280, 736));
 
         RecordingBackend halfblock;
         TerminalUi hb(terminalConfig("halfblock"), &halfblock);
@@ -901,9 +902,9 @@ private slots:
     }
 
     // The halfblock renderer asks for one pixel per column and two per row.
-    // How many rows it may use depends on the status bar: hidden — the default
-    // — the page gets all of them, and showing the bar costs it one. tick() is
-    // the only place that contract is expressed.
+    // How many rows it may use depends on the status bar: shown — the default —
+    // it costs the page one, and hiding it hands that row back. tick() is the
+    // only place that contract is expressed.
     void testHalfblockFrameGeometry()
     {
         CapturedStdout capture;
@@ -912,13 +913,13 @@ private slots:
 
         QVERIFY(ui.tick());
         QCOMPARE(backend.rgbRequests.size(), 1);
-        QCOMPARE(backend.rgbRequests[0], QSize(80, 24 * 2)); // the 80x24 default, bar hidden
+        QCOMPARE(backend.rgbRequests[0], QSize(80, (24 - 1) * 2)); // 80x24 default, bar shown
         QCOMPARE(backend.pngRequests, 0);
 
-        showStatusBar(ui);
+        toggleStatusBar(ui); // hidden — the page gets the row back
         QVERIFY(ui.tick());
         QCOMPARE(backend.rgbRequests.size(), 2);
-        QCOMPARE(backend.rgbRequests[1], QSize(80, (24 - 1) * 2)); // one row to the bar
+        QCOMPARE(backend.rgbRequests[1], QSize(80, 24 * 2));
 
         RecordingBackend gfxBackend;
         TerminalUi gfxUi(terminalConfig("kitty"), &gfxBackend);
@@ -942,7 +943,6 @@ private slots:
         RecordingBackend backend(QStringLiteral("h:1"));
         TerminalUi ui(terminalConfig("halfblock"), &backend);
         ui.setBackendLabel(QStringLiteral("cdp"));
-        showStatusBar(ui);
         ui.onFrame(rgbFrame(40, 20, 40, 20));
         QVERIFY(feed(ui, "a"));
         capture.take();
@@ -982,7 +982,6 @@ private slots:
         CapturedStdout capture;
         RecordingBackend backend(QStringLiteral("h:1"));
         TerminalUi ui(terminalConfig("halfblock"), &backend);
-        showStatusBar(ui);
         ui.onFrame(rgbFrame(40, 20, 40, 20));
         capture.take();
 
@@ -1019,7 +1018,6 @@ private slots:
         QCOMPARE(backend.description().size(), qsizetype(23));
 
         TerminalUi ui(terminalConfig("halfblock"), &backend);
-        showStatusBar(ui);
         ui.onFrameFailed(QStringLiteral("no response")); // m_connected = false
         capture.take();
 
@@ -1040,7 +1038,6 @@ private slots:
         CapturedStdout capture;
         RecordingBackend backend(QStringLiteral("h:1"));
         TerminalUi ui(terminalConfig("halfblock"), &backend);
-        showStatusBar(ui);
         ui.onFrame(rgbFrame(40, 20, 40, 20));
         QVERIFY(feed(ui, "a")); // the short tail, so the row fits at all
         capture.take();
@@ -1058,7 +1055,6 @@ private slots:
         CapturedStdout capture;
         RecordingBackend backend(QStringLiteral("h:1"));
         TerminalUi ui(terminalConfig("halfblock"), &backend);
-        showStatusBar(ui);
         ui.onFrame(rgbFrame(40, 20, 40, 20));
         capture.take();
 

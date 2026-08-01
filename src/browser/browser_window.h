@@ -28,7 +28,10 @@ class AnoaBrowser;
 class QAction;
 class QLineEdit;
 class QMenu;
+class QResizeEvent;
+class QTimer;
 class QToolButton;
+class QVBoxLayout;
 
 class BrowserWindow : public QWidget
 {
@@ -44,12 +47,21 @@ public:
     // here means the window can be destroyed in any order relative to it.
     ~BrowserWindow() override;
 
+protected:
+    // The toolbar is positioned by hand rather than by the layout, so it has to
+    // be repositioned whenever the window changes size. See setAutoHide().
+    void resizeEvent(QResizeEvent *event) override;
+
 private slots:
     void onUrlEntered();
     void onUrlChanged(const QUrl &url);
     void refreshHistoryButtons();
     // Stars the current page into the hamburger menu's list.
     void onBookmark();
+    // Auto-hide: turn the toolbar into an overlay that appears when the pointer
+    // reaches the top edge, the way the macOS menu bar does in full screen.
+    void setAutoHide(bool on);
+    void pollPointer();
 
 private:
     // Draws one character into an icon, for the two glyphs that have to live
@@ -59,12 +71,21 @@ private:
     QToolButton *makeGlyphButton(const QString &glyph, const QString &tip, int pointSize);
     void rebuildMenu();
 
+    // Places the toolbar across the top and, when it is not overlaying, leaves
+    // the view a top margin the same height so the two do not overlap.
+    void layoutToolbar();
+
     AnoaBrowser *m_view = nullptr;
+    QWidget *m_toolbar = nullptr;
+    QVBoxLayout *m_root = nullptr;
     QLineEdit *m_urlEdit = nullptr;
     QToolButton *m_back = nullptr;
     QToolButton *m_forward = nullptr;
     QToolButton *m_menuButton = nullptr;
     QMenu *m_menu = nullptr;
     QAction *m_star = nullptr;
+    QAction *m_autoHideAction = nullptr;
+    QTimer *m_pointerTimer = nullptr;
     QList<QPair<QString, QUrl>> m_bookmarks;
+    bool m_autoHide = false;
 };
