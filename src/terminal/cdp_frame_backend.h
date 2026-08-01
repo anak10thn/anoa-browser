@@ -26,6 +26,14 @@
 // "exactly one answer per request" rule does not hold. TerminalUi treats an
 // unanswered tick as "no new frame", which is exactly right.
 //
+// The input half is Input.dispatchMouseEvent / insertText / dispatchKeyEvent,
+// and every one of them is fire-and-forget: the command goes out, the frame
+// loop carries on, and only the error half of the reply is ever read (into the
+// status bar). Two things differ from what /render/* did on the server side and
+// have to be paid for here — the wheel delta sign, which CDP defines the
+// opposite way round from Qt's angleDelta, and the named-key table, which
+// anoa_browser.cpp expressed as Qt::Key values that mean nothing to CDP.
+//
 // POSIX only, like the rest of src/terminal (see CMakeLists.txt).
 
 #include <QByteArray>
@@ -70,6 +78,11 @@ private:
     void emitRgbFrame(const QByteArray &png, int targetW, int targetH);
     void emitPngFrame(const QByteArray &png);
 
+    // Every Input.* command goes out through here: sent and forgotten, with
+    // only the error half of the reply looked at. Nothing on the input path
+    // may make the frame loop wait.
+    void dispatchInput(const QString &method, const QJsonObject &params);
+
     void requestMetrics();
     void onMetricsReply(const CdpResult &result);
     // Image pixels -> the CSS-pixel viewport the click map runs in.
@@ -79,6 +92,8 @@ private:
 
     // Empty text means the last capture succeeded.
     void setCaptureError(const QString &text);
+    // Empty text means the last input dispatch was accepted.
+    void setInputError(const QString &text);
     void updateStatus();
 
     CdpClient *m_client = nullptr;
@@ -97,5 +112,6 @@ private:
     int m_lastTargetH = 0;
 
     QString m_captureError;
+    QString m_inputError;
     QString m_status; // last text handed to statusChanged(), to skip repeats
 };

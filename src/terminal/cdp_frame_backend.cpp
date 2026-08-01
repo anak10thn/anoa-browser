@@ -40,6 +40,90 @@ bool viewportSize(const QJsonObject &metrics, const char *key, int &w, int &h)
     return w > 0 && h > 0;
 }
 
+// CDP packs modifiers into one integer on every Input.* event, and the bit
+// order is its own — not Qt's, not the terminal's. Nothing sets them today:
+// terminal_ui.cpp drops an SGR mouse report whose button field carries the
+// shift/meta/ctrl bits (it only accepts 0-2, 64 and 65) and a modified key
+// reaches feedInput() as a bare control byte, so the seam has no modifier to
+// pass on. The names exist so the day it grows one there is a single place to
+// read the convention off.
+enum CdpModifier : int {
+    ModAlt = 1,
+    ModCtrl = 2,
+    ModMeta = 4,
+    ModShift = 8,
+};
+constexpr int kNoModifiers = 0;
+
+// CDP's "button" string. Same three the /render/click query string used, which
+// is not a coincidence — http_server.cpp took its spelling from the DOM too.
+const char *cdpButtonName(MouseButton button)
+{
+    switch (button) {
+    case MouseButton::Left:
+        break;
+    case MouseButton::Middle:
+        return "middle";
+    case MouseButton::Right:
+        return "right";
+    }
+    // Left, and the only path here for an out-of-range value. No default label:
+    // -Wswitch then turns a fourth button into a compile error instead of a
+    // silent "left", exactly as buttonName() in render_http_client.cpp does.
+    return "left";
+}
+
+// CDP's "buttons" field is the DOM MouseEvent.buttons bitmask — which is *not*
+// the same numbering as "button" (there right is 2 and middle is 1).
+int cdpButtonMask(MouseButton button)
+{
+    switch (button) {
+    case MouseButton::Left:
+        break;
+    case MouseButton::Middle:
+        return 4;
+    case MouseButton::Right:
+        return 2;
+    }
+    return 1;
+}
+
+// The 14 keys anoa_browser.cpp:220-258 accepts on /render/key, restated in
+// CDP's terms. Qt::Key values do not survive the trip: Chromium wants the DOM
+// triple (key, code, windowsVirtualKeyCode) and, for the keys that produce a
+// character, the character itself.
+//
+// A partial entry is the dangerous failure here — Chromium does not reject a
+// dispatchKeyEvent with a missing windowsVirtualKeyCode or an unknown code, it
+// accepts it and the page sees nothing. So every row is filled in, and `text`
+// is empty only for the keys that genuinely insert nothing.
+struct NamedKey {
+    const char *name; // what TerminalUi calls it, lowercase
+    const char *key;  // DOM KeyboardEvent.key
+    const char *code; // DOM KeyboardEvent.code, i.e. the physical key
+    int windowsVirtualKeyCode;
+    const char *text; // "" where the key produces no character
+};
+
+const NamedKey kNamedKeys[] = {
+    // "backspace" is also where the DEL byte (127) the terminal delivers ends
+    // up: terminal_ui.cpp maps both 127 and 8 onto this name.
+    {"enter", "Enter", "Enter", 13, "\r"},
+    {"tab", "Tab", "Tab", 9, "\t"},
+    {"backspace", "Backspace", "Backspace", 8, ""},
+    {"delete", "Delete", "Delete", 46, ""},
+    {"escape", "Escape", "Escape", 27, ""},
+    {"space", " ", "Space", 32, " "},
+    {"up", "ArrowUp", "ArrowUp", 38, ""},
+    {"down", "ArrowDown", "ArrowDown", 40, ""},
+    {"left", "ArrowLeft", "ArrowLeft", 37, ""},
+    {"right", "ArrowRight", "ArrowRight", 39, ""},
+    {"home", "Home", "Home", 36, ""},
+    {"end", "End", "End", 35, ""},
+    {"pageup", "PageUp", "PageUp", 33, ""},
+    {"pagedown", "PageDown", "PageDown", 34, ""},
+};
+
 } // namespace
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -64,6 +148,7 @@ CdpFrameBackend::CdpFrameBackend(const Config &config, QObject *parent)
         m_lastImageW = 0;
         m_lastImageH = 0;
         m_captureError.clear();
+        m_inputError.clear();
         requestMetrics(); // a round trip earlier than the first frame would
         updateStatus();
     });
@@ -85,12 +170,29 @@ void CdpFrameBackend::setCaptureError(const QString &text)
     updateStatus();
 }
 
+void CdpFrameBackend::setInputError(const QString &text)
+{
+    m_inputError = text;
+    updateStatus();
+}
+
 void CdpFrameBackend::updateStatus()
 {
     // While the transport is down its own words are the more urgent truth
     // ("reconnecting to host:port (attempt 3)"); a capture error only means
     // anything once there is a connection for it to have failed on.
-    const QString text = m_client->isConnected() ? m_captureError : m_client->stateText();
+    //
+    // An input error outranks a capture error because it is the rarer and more
+    // actionable one, and because it would otherwise be invisible: captures run
+    // 30 times a second and each success clears m_captureError, so the two
+    // sharing one slot would blink a rejected keystroke away inside 33 ms.
+    QString text;
+    if (!m_client->isConnected())
+        text = m_client->stateText();
+    else if (!m_inputError.isEmpty())
+        text = m_inputError;
+    else
+        text = m_captureError;
     if (text == m_status)
         return;
     m_status = text;
@@ -334,31 +436,138 @@ void CdpFrameBackend::viewportForImage(int imageW, int imageH, int &viewportW,
 
 // ── Input ───────────────────────────────────────────────────────────────────
 
-// Not implemented yet: Input.dispatchMouseEvent, Input.insertText and the
-// named-key table are the next task. They are no-ops rather than absent
-// because FrameBackend declares them pure virtual — until they land, --cdp
-// shows the page and forwards nothing.
+void CdpFrameBackend::dispatchInput(const QString &method, const QJsonObject &params)
+{
+    // Dropped rather than queued while the socket is down, for the same reason
+    // captureFrame() drops a tick: CdpClient would park the frame in its
+    // pre-open queue and fail it on the 5 s deadline, so the user would get an
+    // error about a keystroke made five seconds ago on a bar that is already
+    // saying "reconnecting". Silence is the honest answer — the transport words
+    // in the status bar already explain why nothing is happening.
+    if (!m_client->isConnected())
+        return;
+
+    m_client->send(method, params, [this, method](const CdpResult &result) {
+        // Fire-and-forget as far as the frame loop is concerned: nothing waited
+        // for this, and all it can do is change what the status bar says. The
+        // next accepted event clears it again.
+        if (result.ok)
+            setInputError(QString());
+        else
+            setInputError(QStringLiteral("%1 failed: %2").arg(method, result.errorMessage));
+    });
+}
 
 void CdpFrameBackend::sendClick(int pageX, int pageY, MouseButton button)
 {
-    Q_UNUSED(pageX)
-    Q_UNUSED(pageY)
-    Q_UNUSED(button)
+    // CDP has no "click" — press and release are two events, and Chromium
+    // synthesises the click from the pair. They must agree on the position, so
+    // both are built from one object.
+    QJsonObject params;
+    params[QStringLiteral("x")] = pageX;
+    params[QStringLiteral("y")] = pageY;
+    params[QStringLiteral("button")] = QString::fromLatin1(cdpButtonName(button));
+    params[QStringLiteral("clickCount")] = 1;
+    params[QStringLiteral("modifiers")] = kNoModifiers;
+
+    params[QStringLiteral("type")] = QStringLiteral("mousePressed");
+    params[QStringLiteral("buttons")] = cdpButtonMask(button);
+    dispatchInput(QStringLiteral("Input.dispatchMouseEvent"), params);
+
+    // "buttons" is the set of buttons held *after* the event, so it is empty on
+    // the release. Sending the mask again leaves Chromium believing the button
+    // is still down, which turns the next move into a drag.
+    params[QStringLiteral("type")] = QStringLiteral("mouseReleased");
+    params[QStringLiteral("buttons")] = 0;
+    dispatchInput(QStringLiteral("Input.dispatchMouseEvent"), params);
 }
 
 void CdpFrameBackend::sendScroll(int pageX, int pageY, int dy)
 {
-    Q_UNUSED(pageX)
-    Q_UNUSED(pageY)
-    Q_UNUSED(dy)
+    QJsonObject params;
+    params[QStringLiteral("type")] = QStringLiteral("mouseWheel");
+
+    // Negative coordinates mean the pointer was off the page image. /render/
+    // scroll expressed that by omitting x and y and http_server.cpp:433 filled
+    // in the viewport centre; CDP has no way to omit a position, so the same
+    // substitution happens here. Falling back to 0,0 when the metrics have not
+    // arrived yet is not equivalent — a wheel at the top-left corner lands in
+    // whatever pane happens to be there — but it is the best guess available
+    // and only applies for the first frame or two.
+    const bool onPage = pageX >= 0 && pageY >= 0;
+    params[QStringLiteral("x")] = onPage ? pageX : m_cssViewportW / 2;
+    params[QStringLiteral("y")] = onPage ? pageY : m_cssViewportH / 2;
+
+    // THE SIGN. `dy` is a Qt angleDelta, as /render/scroll takes it: +120 means
+    // one notch *up*, because Qt reports which way the wheel turned. CDP's
+    // deltaY is the DOM WheelEvent one, which reports how far the content
+    // should move — so +120 there scrolls *down*. Negating here is the whole
+    // difference, and getting it wrong produces no error anywhere: the page
+    // just scrolls the wrong way. task-016 pins it with an integration test.
+    params[QStringLiteral("deltaX")] = 0;
+    params[QStringLiteral("deltaY")] = -dy;
+    params[QStringLiteral("modifiers")] = kNoModifiers;
+    dispatchInput(QStringLiteral("Input.dispatchMouseEvent"), params);
 }
 
 void CdpFrameBackend::sendText(const QByteArray &utf8)
 {
-    Q_UNUSED(utf8)
+    if (utf8.isEmpty())
+        return;
+    // Input.insertText, not a key event per character: the burst is already
+    // batched by TerminalUi and this is the one CDP command that takes text
+    // without needing a key code for every character in it. It is also what
+    // makes pasted CJK and emoji work, which a virtual-key table cannot.
+    QJsonObject params;
+    params[QStringLiteral("text")] = QString::fromUtf8(utf8);
+    dispatchInput(QStringLiteral("Input.insertText"), params);
 }
 
 void CdpFrameBackend::sendKey(const QString &namedKey)
 {
-    Q_UNUSED(namedKey)
+    const QString wanted = namedKey.toLower();
+    const NamedKey *entry = nullptr;
+    for (const NamedKey &candidate : kNamedKeys) {
+        if (wanted == QLatin1String(candidate.name)) {
+            entry = &candidate;
+            break;
+        }
+    }
+    if (!entry) {
+        // /render/key answered an unknown name with 400 and anoa_browser.cpp's
+        // sendKey() returned false; the equivalent here is one line in the
+        // status bar. Nothing is dispatched — a made-up key code is worse than
+        // no key at all.
+        setInputError(QStringLiteral("unknown key: %1").arg(namedKey));
+        return;
+    }
+
+    const QString text = QString::fromLatin1(entry->text);
+
+    QJsonObject base;
+    base[QStringLiteral("key")] = QString::fromLatin1(entry->key);
+    base[QStringLiteral("code")] = QString::fromLatin1(entry->code);
+    base[QStringLiteral("windowsVirtualKeyCode")] = entry->windowsVirtualKeyCode;
+    base[QStringLiteral("modifiers")] = kNoModifiers;
+
+    // "keyDown" carries a character and is what makes Chromium insert one;
+    // "rawKeyDown" is the same event without one, and is what the keys that
+    // insert nothing must use. Sending keyDown with empty text instead is the
+    // quiet way to make Backspace and the arrows do nothing at all.
+    QJsonObject down = base;
+    if (text.isEmpty()) {
+        down[QStringLiteral("type")] = QStringLiteral("rawKeyDown");
+    } else {
+        down[QStringLiteral("type")] = QStringLiteral("keyDown");
+        down[QStringLiteral("text")] = text;
+        // With no modifiers held the unmodified character is the character.
+        down[QStringLiteral("unmodifiedText")] = text;
+    }
+    dispatchInput(QStringLiteral("Input.dispatchKeyEvent"), down);
+
+    // The release carries no text — the character was already delivered by the
+    // keyDown, and CDP has no "rawKeyUp" to distinguish the two cases with.
+    QJsonObject up = base;
+    up[QStringLiteral("type")] = QStringLiteral("keyUp");
+    dispatchInput(QStringLiteral("Input.dispatchKeyEvent"), up);
 }
