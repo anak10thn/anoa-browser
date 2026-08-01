@@ -2,8 +2,6 @@
   <img src="docs/anoa-logo.png" alt="Anoa Browser" width="420">
 </p>
 
-<h1 align="center">anoa</h1>
-
 <p align="center">
   A browser you drive from anywhere — a script, a terminal, or a window.<br>
   One self-contained binary. No Node.js, no npm, no separate driver.
