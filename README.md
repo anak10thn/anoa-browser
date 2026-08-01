@@ -1,4 +1,8 @@
-# anoa-browser
+<p align="center">
+  <img src="docs/anoa-logo.png" alt="Anoa Browser" width="420">
+</p>
+
+<h1 align="center">anoa-browser</h1>
 
 Headless browser built on Qt6/QWebEngine with full [Chrome DevTools Protocol (CDP)](https://chromedevtools.github.io/devtools-protocol/) support. Distributed as a single self-contained binary — no Node.js or npm required.
 
@@ -59,6 +63,27 @@ The formula creates exactly one symlink, `bin/anoa-browser` → `libexec/anoa-br
 ```bash
 brew update
 brew upgrade anoa-browser-linux
+```
+
+### Linux (install script — no root)
+
+Installs the portable bundle under your home directory and puts the launcher on your `PATH`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/porcupine-md/anoa-browser/master/scripts/install-linux.sh | bash
+```
+
+```
+~/.local/lib/anoa-browser/     the unpacked bundle (its own Qt — nothing system-wide)
+~/.local/bin/anoa-browser  ->  ../lib/anoa-browser/anoa-browser.sh
+```
+
+The symlink points at the *launcher*, never at the raw binary: the launcher is what sets `LD_LIBRARY_PATH`, `QT_PLUGIN_PATH` and the QtWebEngine paths that make the bundle self-contained. It tells you if `~/.local/bin` is not on your `PATH`, and re-running it upgrades in place.
+
+```bash
+install-linux.sh --version v0.4.0     # pin a release instead of taking the latest
+install-linux.sh --prefix /opt/anoa   # somewhere other than ~/.local
+install-linux.sh --uninstall          # remove it again
 ```
 
 ### Linux (portable tarball)
