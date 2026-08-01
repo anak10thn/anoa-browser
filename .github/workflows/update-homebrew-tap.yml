@@ -74,6 +74,18 @@ jobs:
               -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
               "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
 
+          # Retire the old names properly rather than leaving two of everything.
+          #
+          # Homebrew reads these maps from a tap root and follows them on
+          # upgrade, so someone who installed `anoa-browser` is carried to
+          # `anoa` instead of being told the cask no longer exists. Deleting the
+          # old files without the maps would strand them: `brew upgrade` reports
+          # "No available formula or cask" and their install just stops getting
+          # updates, silently.
+          printf '{\n  "anoa-browser": "anoa"\n}\n' > cask_renames.json
+          printf '{\n  "anoa-browser-linux": "anoa-linux"\n}\n' > formula_renames.json
+          rm -f Casks/anoa-browser.rb Formula/anoa-browser-linux.rb
+
           git add -A
           if git diff --cached --quiet; then
             echo "Tap already up to date with ${TAG} — nothing to push."

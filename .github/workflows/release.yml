@@ -349,7 +349,46 @@ jobs:
           kill $BROWSER_PID
 
       - name: Package
-        run: tar czf anoa-macos-universal.tar.gz -C build anoa.app
+        run: |
+          set -euo pipefail
+          APP=build/anoa.app
+
+          # Purge again, here, and verify what is about to be archived.
+          #
+          # The earlier purge and guard both ran and passed — the release log
+          # for v0.4.1 shows `spctl --assess` answering "accepted, source=
+          # Notarized Developer ID" — and the shipped tarball still contained
+          # QtWebEngineCore.framework/Versions/Resources. So the stray directory
+          # comes back after the guard, somewhere between it and this step, and
+          # every earlier check is therefore assurance about a bundle that is no
+          # longer the one being packaged.
+          #
+          # An empty Versions/Resources makes codesign report "embedded
+          # framework contains modified or invalid version", and Gatekeeper on
+          # current macOS does not merely refuse to launch it: it SIGKILLs the
+          # process and deletes the app, which is why v0.4.1 vanished from
+          # /Applications on first run. Removing the directory is safe after
+          # stapling because it is not part of the sealed resources — with it
+          # gone, `codesign --verify --deep --strict` passes on the very same
+          # stapled bundle.
+          find "$APP/Contents/Frameworks" -type d -path '*/Versions/Resources' -empty -print -delete
+
+          # The check that actually matters, on the bytes that actually ship.
+          # spctl alone was not enough: it passed on this release and the
+          # artifact was still broken.
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          tar czf anoa-macos-universal.tar.gz -C build anoa.app
+
+          # And once more against the archive, because packaging is the last
+          # thing that can reintroduce it.
+          rm -rf "$RUNNER_TEMP/pkgcheck" && mkdir -p "$RUNNER_TEMP/pkgcheck"
+          tar xzf anoa-macos-universal.tar.gz -C "$RUNNER_TEMP/pkgcheck"
+          if find "$RUNNER_TEMP/pkgcheck" -type d -path '*/Versions/Resources' | grep .; then
+            echo "::error::The archive contains a stray Versions/Resources — Gatekeeper will delete this app on first run."
+            exit 1
+          fi
+          codesign --verify --deep --strict "$RUNNER_TEMP/pkgcheck/anoa.app"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -474,6 +513,18 @@ jobs:
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
               "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
+
+          # Retire the old names properly rather than leaving two of everything.
+          #
+          # Homebrew reads these maps from a tap root and follows them on
+          # upgrade, so someone who installed `anoa-browser` is carried to
+          # `anoa` instead of being told the cask no longer exists. Deleting the
+          # old files without the maps would strand them: `brew upgrade` reports
+          # "No available formula or cask" and their install just stops getting
+          # updates, silently.
+          printf '{\n  "anoa-browser": "anoa"\n}\n' > cask_renames.json
+          printf '{\n  "anoa-browser-linux": "anoa-linux"\n}\n' > formula_renames.json
+          rm -f Casks/anoa-browser.rb Formula/anoa-browser-linux.rb
 
           git add -A
           git commit -m "anoa v${VERSION}"
