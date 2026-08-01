@@ -118,6 +118,10 @@ jobs:
           cp resources/anoa.sh "$bundle/anoa.sh"
           chmod +x "$bundle/anoa.sh"
 
+          # Same reason as the macOS bundle below: without this directory,
+          # every start logs a failed DIR_APP_DICTIONARIES override.
+          mkdir -p "$bundle/qtwebengine_dictionaries"
+
           # qt.conf: lets Qt resolve plugins/libexec/resources from the bundle
           # even without the wrapper's environment variables.
           cat > "$bundle/qt.conf" <<'QTCONF'
@@ -282,6 +286,20 @@ jobs:
           # before sealing; empty dirs are not part of the code seal.
           find "$APP/Contents/Frameworks" -type d -path '*/Versions/Resources' -empty -print -delete
 
+          # QtWebEngine points DIR_APP_DICTIONARIES at <exe dir>/qtwebengine_dictionaries
+          # unconditionally at startup, and Chromium logs the override failing
+          # at ERROR level when the directory is absent. Nothing breaks — a
+          # headless browser never spell-checks — but every single start printed
+          # two "Path override failed" lines, once for the app and once for the
+          # helper process, which reads as a broken install to anyone scanning
+          # a log to see whether the browser came up.
+          #
+          # Created before signing so they are inside the seal. Creating them
+          # afterwards would be the Versions/Resources mistake again.
+          mkdir -p "$APP/Contents/MacOS/qtwebengine_dictionaries"
+          HELPER_MACOS="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/MacOS"
+          [ -d "$HELPER_MACOS" ] && mkdir -p "$HELPER_MACOS/qtwebengine_dictionaries"
+
       # Re-sign the leaf executables with JIT entitlements (QtWebEngine's V8
       # needs them under the hardened runtime), then reseal the enclosing
       # framework and app. Only runs on the signed path.
@@ -377,6 +395,12 @@ jobs:
           # spctl alone was not enough: it passed on this release and the
           # artifact was still broken.
           codesign --verify --deep --strict --verbose=2 "$APP"
+
+          # And that the dictionaries directory survived. It is empty, which is
+          # exactly the kind of thing a copy or a repack drops silently — and
+          # its absence is only visible as two ERROR lines on every start.
+          test -d "$APP/Contents/MacOS/qtwebengine_dictionaries" \
+            || { echo "::error::qtwebengine_dictionaries missing from the app bundle"; exit 1; }
 
           tar czf anoa-macos-universal.tar.gz -C build anoa.app
 
