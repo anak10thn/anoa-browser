@@ -246,3 +246,43 @@
   Run" because only the terminal targets had been built there. `make test`
   builds everything; a hand-driven build dir may not. Build the target before
   believing a "Not Run".
+
+## Embedded terminal, navigation shortcuts, window chrome (2026-08-01)
+
+- `anoa-browser terminal` with no target now hosts its own browser in-process.
+  The decision is made by the argv pre-scan in main.cpp, not from Config: the
+  defaults of termHost/termPort are indistinguishable from a user typing them,
+  and `--term-port 9222` must keep meaning "connect to the browser already
+  there". Only this one case builds QApplication; --term-port and --cdp stay
+  QCoreApplication clients so they still work over SSH with no browser present.
+
+- The GUI chrome is a *wrapper* around AnoaBrowser, never a child of it.
+  http_server.cpp captures with `m_browser->grab()` and reports
+  `m_browser->width()/height()` as the viewport that /render/click coordinates
+  are measured in. A toolbar inside the view would appear in every screenshot
+  and shift every click by its own height. Verified after the change: row 0 of
+  a headed capture is a single colour and the viewport still reads 1280x720.
+
+- Alt-arrow parsing matches its prefix byte by byte against what has arrived,
+  rather than waiting for six bytes. "Wait for six" stalls the input buffer on
+  every other CSI beginning with '1' — Home is ESC [ 1 ~, four bytes — until the
+  user happens to press something else. Pinned by TERM-NAV-03.
+
+- Esc is deliberately not the URL prompt's cancel key. Distinguishing a lone Esc
+  from the start of an arrow or mouse report needs a timeout, and guessing is
+  exactly what caused bug-002. Ctrl-C/Ctrl-G cancel instead; Esc-led sequences
+  are swallowed whole with the same partial-buffering discipline as the main
+  path.
+
+- macOS cannot validate the pty suites. terminal_http.test.js and
+  terminal_cdp.test.js skip themselves because they call GNU `script -q -c` and
+  macOS ships BSD `script`; port_layout.test.sh fails several cases on
+  "extra_args[@]: unbound variable", which is bash 3.2 under nounset (macOS's
+  /bin/bash) and not a behaviour difference. Do not read either as a regression
+  on a Mac — check them on Linux/CI. build_shape, extensions, the unit suites
+  and vitest all run fine here.
+
+- bug-004 filed: /render/screenshot.ppm truncates responses over ~1 MB while
+  Content-Length declares the full size. Pre-existing and unrelated to this
+  work; invisible to every in-repo caller because they all request scaled
+  frames.

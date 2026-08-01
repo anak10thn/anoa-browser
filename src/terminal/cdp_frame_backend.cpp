@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QUrl>
@@ -556,4 +557,64 @@ void CdpFrameBackend::sendKey(const QString &namedKey)
     QJsonObject up = base;
     up[QStringLiteral("type")] = QStringLiteral("keyUp");
     dispatchInput(QStringLiteral("Input.dispatchKeyEvent"), up);
+}
+
+// ── Navigation ──────────────────────────────────────────────────────────────
+
+void CdpFrameBackend::navigate(const QString &url)
+{
+    QJsonObject params;
+    params[QStringLiteral("url")] = url;
+    dispatchInput(QStringLiteral("Page.navigate"), params);
+}
+
+void CdpFrameBackend::reloadPage()
+{
+    QJsonObject params;
+    params[QStringLiteral("ignoreCache")] = false;
+    dispatchInput(QStringLiteral("Page.reload"), params);
+}
+
+void CdpFrameBackend::goBack()
+{
+    historyStep(-1);
+}
+
+void CdpFrameBackend::goForward()
+{
+    historyStep(1);
+}
+
+// CDP has no back/forward verb. The history has to be fetched, the neighbour
+// picked by index, and the navigation issued by *entry id* — the ids are not
+// the indices and are not contiguous, so the index may only be used to choose
+// the entry, never as the entryId itself.
+void CdpFrameBackend::historyStep(int delta)
+{
+    if (!m_client->isConnected())
+        return;
+
+    m_client->send(QStringLiteral("Page.getNavigationHistory"), QJsonObject(),
+                   [this, delta](const CdpResult &result) {
+                       if (!result.ok) {
+                           setInputError(QStringLiteral("Page.getNavigationHistory failed: %1")
+                                             .arg(result.errorMessage));
+                           return;
+                       }
+                       const QJsonArray entries =
+                           result.result.value(QStringLiteral("entries")).toArray();
+                       const int current =
+                           result.result.value(QStringLiteral("currentIndex")).toInt(-1);
+                       const int target = current + delta;
+                       // Off either end of the history. This is what a browser's
+                       // greyed-out button does, so it is a no-op and not an
+                       // error: the status bar stays as it was.
+                       if (current < 0 || target < 0 || target >= entries.size())
+                           return;
+
+                       QJsonObject params;
+                       params[QStringLiteral("entryId")] =
+                           entries.at(target).toObject().value(QStringLiteral("id")).toInt();
+                       dispatchInput(QStringLiteral("Page.navigateToHistoryEntry"), params);
+                   });
 }

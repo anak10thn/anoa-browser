@@ -148,7 +148,7 @@ Config loadConfigFile(const QString &path)
     return cfg;
 }
 
-Config parseArgs(int /*argc*/, char * /*argv*/[])
+Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
 {
     // QCommandLineParser requires a QCoreApplication to exist.
     // Callers must construct QApplication before calling parseArgs.
@@ -282,7 +282,13 @@ Config parseArgs(int /*argc*/, char * /*argv*/[])
     validateGfxMode(cfg.gfxMode);
     validateCdpUrl(cfg.cdpUrl);
 
-    if (cfg.authToken.isEmpty()) {
+    cfg.terminalMode = terminalMode;
+
+    // Only browser mode serves a CDP WebSocket. Terminal mode is a viewer —
+    // embedded or not, it exposes nothing and demands no token — so warning
+    // about an unauthenticated endpoint there names a port that was never
+    // opened, and does it by writing over the viewer's first frame.
+    if (cfg.authToken.isEmpty() && !terminalMode) {
         QTextStream err(stderr);
         err << "Warning: --auth-token is not set; CDP WebSocket will be unauthenticated\n";
     }

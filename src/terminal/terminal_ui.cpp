@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "common/url_input.h"
 #include "config/config.h"
 
 namespace {
@@ -333,8 +334,74 @@ void TerminalUi::setBackendLabel(const QString &label)
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 
+void TerminalUi::feedUrlPrompt(char c)
+{
+    const auto u = static_cast<unsigned char>(c);
+
+    if (c == 3 || c == 7) { // Ctrl-C / Ctrl-G — abandon the line, stay in the viewer
+        m_urlPrompt = false;
+        m_urlInput.clear();
+        m_lastInput = "url cancelled";
+    } else if (c == '\r' || c == '\n') {
+        const std::string url =
+            normalizeUserUrl(QString::fromStdString(m_urlInput)).toStdString();
+        m_urlPrompt = false;
+        m_urlInput.clear();
+        if (url.empty()) {
+            m_lastInput = "url cancelled";
+        } else {
+            m_backend->navigate(QString::fromStdString(url));
+            m_lastInput = "navigate " + (url.size() > 32 ? url.substr(0, 32) + kEllipsis : url);
+        }
+    } else if (c == 127 || c == 8) { // DEL and BS both mean Backspace
+        if (!m_urlInput.empty()) {
+            // Step back over a whole UTF-8 character, not a byte: erasing one
+            // byte of a multi-byte character leaves the row unprintable.
+            size_t n = m_urlInput.size() - 1;
+            while (n > 0 && (static_cast<unsigned char>(m_urlInput[n]) & 0xC0) == 0x80)
+                --n;
+            m_urlInput.resize(n);
+        }
+    } else if (c == 21) { // Ctrl-U — clear the line, as in a shell
+        m_urlInput.clear();
+    } else if (u >= 32 || u >= 0x80) {
+        m_urlInput += c;
+    }
+    renderStatusBar();
+}
+
+void TerminalUi::renderUrlPrompt()
+{
+    static const char kPrompt[] = " URL: ";
+    static const char kHint[] = "  enter=go  ctrl-c=cancel";
+
+    // The caret is drawn rather than moved: the alt screen was entered with the
+    // real cursor hidden, and showing it here would leave it visible on every
+    // frame the renderer paints underneath.
+    std::string line = std::string(kPrompt) + m_urlInput + "_";
+    const auto cols = static_cast<size_t>(m_cols);
+    if (line.size() + sizeof(kHint) - 1 <= cols)
+        line += kHint;
+    // A url longer than the row keeps its tail visible, because the tail is
+    // what is being typed. Truncating the front is the only option that lets
+    // someone see the character they just pressed.
+    if (line.size() > cols)
+        line = line.substr(line.size() - cols);
+
+    std::string out = "\033[" + std::to_string(m_rows) + ";1H\033[7m" + line;
+    out.append(cols - line.size(), ' ');
+    out += "\033[0m";
+    fwrite(out.data(), 1, out.size(), stdout);
+    fflush(stdout);
+}
+
 void TerminalUi::renderStatusBar()
 {
+    if (m_urlPrompt) {
+        renderUrlPrompt();
+        return;
+    }
+
     std::string status = " anoa-browser terminal ";
     if (!m_backendLabel.empty())
         status += m_backendLabel + " ";
@@ -347,9 +414,15 @@ void TerminalUi::renderStatusBar()
     // Once the user has interacted, the last forwarded event replaces the
     // long usage hint so it survives narrow terminals. Built before the middle
     // field because it is what the middle field has to make room for.
-    const std::string tail = m_lastInput.empty()
-                                 ? " click/type/scroll drive the page, ctrl-c quits"
-                                 : " ctrl-c=quit | " + m_lastInput;
+    // The long form is the only place the shortcuts are discoverable from
+    // inside the viewer, so it lists them; it is also the state that ends at
+    // the first keystroke, which is why the row can afford it. On a narrow
+    // terminal the truncation below eats the tail of the list rather than the
+    // header, and README carries the full table either way.
+    const std::string tail =
+        m_lastInput.empty()
+            ? " click/type drive the page | ctrl-l=url ctrl-r=reload alt-arrows=history ctrl-c=quit"
+            : " ctrl-c=quit | " + m_lastInput;
 
     // One slot, three sources, worst news first: a backend complaint (which on
     // the CDP path is also where "connecting"/"reconnecting" arrives) beats
@@ -508,6 +581,55 @@ bool TerminalUi::processInput(std::string &buf)
         const char c = buf[i];
         const auto u = static_cast<unsigned char>(c);
 
+        // The URL prompt owns the keyboard while it is open, so this runs
+        // before the quit check: Ctrl-C cancels the prompt there rather than
+        // ending the session, the way it abandons a half-typed shell line.
+        if (m_urlPrompt) {
+            if (c == '\033') {
+                // Esc is deliberately *not* a cancel key. Telling a lone Esc
+                // from the start of an arrow or mouse report needs a timeout,
+                // and guessing is what made a split sequence type its letters
+                // into the page. The prompt swallows whole sequences instead
+                // and buffers a partial one, exactly like the main path.
+                if (i + 1 >= buf.size())
+                    break;
+                if (buf[i + 1] != '[') {
+                    i += 2;
+                    continue;
+                }
+                size_t j = i + 2;
+                while (j < buf.size()
+                       && !(static_cast<unsigned char>(buf[j]) >= 0x40
+                            && static_cast<unsigned char>(buf[j]) <= 0x7E))
+                    ++j;
+                if (j >= buf.size())
+                    break; // final byte has not arrived yet
+                i = j + 1;
+                continue;
+            }
+            feedUrlPrompt(c);
+            ++i;
+            continue;
+        }
+
+        if (c == 12) { // Ctrl-L — open the URL prompt
+            flushPending();
+            m_urlPrompt = true;
+            m_urlInput.clear();
+            renderStatusBar();
+            ++i;
+            continue;
+        }
+
+        if (c == 18) { // Ctrl-R — reload
+            flushPending();
+            m_backend->reloadPage();
+            m_lastInput = "reload";
+            renderStatusBar();
+            ++i;
+            continue;
+        }
+
         if (c == 3 || c == 17) { // Ctrl-C / Ctrl-Q (ISIG is off)
             flushPending();
             // Consume the quit byte too. anoa-term left it in the buffer and
@@ -553,6 +675,42 @@ bool TerminalUi::processInput(std::string &buf)
         // for its own longer partial; this is the two-byte tail it cannot see.
         if (i + 2 >= buf.size())
             break;
+
+        // Modified arrows arrive as ESC [ 1 ; <mod> <A-D>, so they reach here
+        // with '1' where a plain arrow has its letter. Alt-Left / Alt-Right are
+        // the viewer's history keys — the pair every browser binds — and are
+        // consumed rather than forwarded.
+        //
+        // The prefix is matched byte by byte against what has actually arrived,
+        // because "wait for six bytes" would stall the buffer on every other
+        // sequence that starts with '1' (Home is ESC [ 1 ~, four bytes): those
+        // must fall through to the resync below, not block input until the user
+        // happens to press something else.
+        if (buf[i + 2] == '1') {
+            static const char kAltPrefix[] = {'1', ';', '3'};
+            size_t k = 0;
+            while (k < sizeof(kAltPrefix) && i + 2 + k < buf.size()
+                   && buf[i + 2 + k] == kAltPrefix[k])
+                ++k;
+            if (k < sizeof(kAltPrefix)) {
+                if (i + 2 + k >= buf.size())
+                    break; // everything so far matches; the rest may still come
+                // A real mismatch: some other CSI. Fall through to the resync.
+            } else if (i + 5 >= buf.size()) {
+                break; // final letter has not arrived yet
+            } else if (buf[i + 5] == 'C' || buf[i + 5] == 'D') {
+                if (buf[i + 5] == 'D') {
+                    m_backend->goBack();
+                    m_lastInput = "back";
+                } else {
+                    m_backend->goForward();
+                    m_lastInput = "forward";
+                }
+                renderStatusBar();
+                i += 6;
+                continue;
+            }
+        }
 
         // Arrow keys → forwarded as key events. In a focused text field they
         // move the caret; otherwise Chromium scrolls the page — both natural.

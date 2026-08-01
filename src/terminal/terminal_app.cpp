@@ -20,6 +20,7 @@
 #include "terminal/cdp_client.h"
 #include "terminal/cdp_frame_backend.h"
 #include "terminal/frame_backend.h"
+#include "terminal/inprocess_frame_backend.h"
 #include "terminal/render_http_client.h"
 #include "terminal/terminal_ui.h"
 
@@ -176,15 +177,18 @@ void warnIgnoredRenderOptions(const Config &config, QTextStream &err)
 
 } // namespace
 
-int runTerminal(const Config &config)
+int runTerminal(const Config &config, AnoaBrowser *embedded)
 {
     QTextStream err(stderr);
 
     // The one mode decision in the whole viewer. Everything below this block
-    // holds a FrameBackend * and cannot tell the two apart; the CDP-only
+    // holds a FrameBackend * and cannot tell the three apart; the CDP-only
     // wiring further down reaches through `cdp`, never through a branch in
     // TerminalUi.
     const bool useCdp = !config.cdpUrl.isEmpty();
+    // main.cpp decided this from raw argv and built the browser to match, so a
+    // set flag without a browser is a wiring bug here, not a user error.
+    const bool useEmbedded = config.termEmbedded && embedded != nullptr;
 
     // Both directions are used: stdin for raw-mode key and mouse reports,
     // stdout for the escape sequences that draw the page.
@@ -195,7 +199,12 @@ int runTerminal(const Config &config)
 
     std::unique_ptr<FrameBackend> owned;
     CdpFrameBackend *cdp = nullptr;
-    if (useCdp) {
+    if (useEmbedded) {
+        // No probe and no retry budget: the browser is a pointer away, so the
+        // failures those guard against — wrong port, nothing listening, an
+        // endpoint that never answers — cannot happen here.
+        owned.reset(new InProcessFrameBackend(embedded));
+    } else if (useCdp) {
         warnIgnoredRenderOptions(config, err);
         cdp = new CdpFrameBackend(config); // dials config.cdpUrl in its ctor
         owned.reset(cdp);
@@ -218,7 +227,12 @@ int runTerminal(const Config &config)
     FrameBackend *backend = owned.get();
 
     TerminalUi ui(config, backend);
-    ui.setBackendLabel(useCdp ? QStringLiteral("cdp") : QStringLiteral("http"));
+    // The label names the transport and description() names the target. For the
+    // embedded backend those are one thing, so the label is left empty (which
+    // hides the field) rather than printing "embedded embedded".
+    ui.setBackendLabel(useEmbedded ? QString()
+                       : useCdp    ? QStringLiteral("cdp")
+                                   : QStringLiteral("http"));
     QObject::connect(backend, &FrameBackend::frameReady, &ui, &TerminalUi::onFrame);
     QObject::connect(backend, &FrameBackend::frameFailed, &ui, &TerminalUi::onFrameFailed);
     QObject::connect(backend, &FrameBackend::statusChanged, &ui, &TerminalUi::onStatus);

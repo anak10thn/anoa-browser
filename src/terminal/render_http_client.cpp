@@ -248,3 +248,27 @@ void RenderHttpClient::sendKey(const QString &namedKey)
 {
     post("/render/key?key=" + namedKey.toStdString());
 }
+
+// ── Navigation ──────────────────────────────────────────────────────────────
+
+void RenderHttpClient::navigate(const QString &url)
+{
+    // The url rides in the query string rather than the body: post() sends no
+    // body at all, and /render/navigate accepts either.
+    post("/render/navigate?url=" + urlEncode(url.toStdString()));
+}
+
+void RenderHttpClient::goBack()
+{
+    post("/render/back");
+}
+
+void RenderHttpClient::goForward()
+{
+    post("/render/forward");
+}
+
+void RenderHttpClient::reloadPage()
+{
+    post("/render/reload");
+}

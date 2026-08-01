@@ -62,6 +62,11 @@ public:
     void sendText(const QByteArray &utf8) override;
     void sendKey(const QString &namedKey) override;
 
+    void navigate(const QString &url) override;
+    void goBack() override;
+    void goForward() override;
+    void reloadPage() override;
+
     QString description() const override;
 
     // The transport, for the wiring in terminal_app.cpp (discoveryFailed) and
@@ -82,6 +87,9 @@ private:
     // only the error half of the reply looked at. Nothing on the input path
     // may make the frame loop wait.
     void dispatchInput(const QString &method, const QJsonObject &params);
+
+    // Shared by goBack()/goForward(): delta is -1 or +1 into the history list.
+    void historyStep(int delta);
 
     void requestMetrics();
     void onMetricsReply(const CdpResult &result);

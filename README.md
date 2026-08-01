@@ -14,6 +14,7 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 - **WebSocket CDP proxy** with session multiplexing and optional bearer token auth
 - **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation, click/scroll injection over plain HTTP (`/render/*`)
 - **Terminal viewer (`anoa-browser terminal`)** — a mode of the same binary, not a second executable: watch and control the browser from any terminal with live ANSI rendering, mouse clicks and scrolling forwarded to the page. `--cdp` points it at any external Chrome/Chromium/Playwright endpoint instead (POSIX only)
+- **Window chrome in headed mode** — running without `--headless` gives an address field with back / forward / reload and a menu. The chrome wraps the web view rather than living inside it, so `/render/*` still captures the page alone and click coordinates are unaffected; `--headless` builds no chrome at all
 - **Remote CDP friendly** — Chromium started with `--remote-allow-origins=*`, so clients behind tunnels/reverse proxies connect without Origin rejections (access control via `--auth-token`)
 - **`Page.printToPDF`** — intercepted and handled via `QWebEnginePage::printToPdf`
 - **Named browser profiles** — isolated cookie jars and localStorage per profile
@@ -270,7 +271,13 @@ curl -X POST "http://localhost:9222/render/scroll?dy=-120&token=mysecret"
 
 `anoa-browser terminal` renders a live browser view directly in your terminal and forwards terminal mouse and keyboard input back to the page — click a link in your terminal and the browser clicks it. It is a **mode of the `anoa-browser` binary**, not a separate program: the word `terminal` before any options selects it, and that mode never starts a browser window, an HTTP server, or a CDP proxy of its own.
 
-By default it views a running `anoa-browser` over the [`/render/*` endpoints](#web-render-endpoints). With [`--cdp`](#attaching-to-an-external-cdp-endpoint---cdp) it attaches to any external Chrome/Chromium/Playwright endpoint instead.
+**Given no target, it hosts its own browser.** Plain `anoa-browser terminal` — no `--term-host`, no `--term-port`, no `--cdp` — starts a browser inside the viewer process and renders it directly, with no port opened and nothing to start first:
+
+```bash
+anoa-browser terminal          # that is the whole setup
+```
+
+Naming any target switches it back to being a client: with `--term-host`/`--term-port` it views a running `anoa-browser` over the [`/render/*` endpoints](#web-render-endpoints), and with [`--cdp`](#attaching-to-an-external-cdp-endpoint---cdp) it attaches to any external Chrome/Chromium/Playwright endpoint. Those two remain thin clients that host nothing, which is what makes them usable over SSH on a machine with no browser at all. The embedded mode necessarily carries the WebEngine stack, and its status bar says `embedded` where the others name a host and port.
 
 **POSIX only.** The terminal sources are not compiled into the Windows build at all; there, `anoa-browser terminal` prints `Error: terminal mode is not supported on Windows` and exits non-zero.
 
@@ -287,6 +294,7 @@ Two rendering backends, auto-detected:
 anoa-browser terminal [options]
 
 Options:
+  (none)                 Host a browser in-process and view that
   --term-host <host>     Host of the anoa-browser to view (default: 127.0.0.1)
   --term-port <N>        HTTP port of the anoa-browser to view (1-65535, default: 9222)
   --term-token <secret>  Bearer token, if the viewed endpoint requires one
@@ -312,7 +320,14 @@ Mouse reporting uses the SGR extended protocol (`ESC [ < btn ; col ; row M`), wh
 | Typing (any text, incl. paste) | Typed into the focused element — a whole paste burst is forwarded as one event |
 | `Enter` / `Backspace` / `Tab` | Forwarded as key events (`Backspace` accepts both DEL and BS) |
 | Arrow keys | Forwarded to the page — they move the caret in a focused field, otherwise they scroll |
+| `Ctrl-L` | Open the address prompt on the status row |
+| `Ctrl-R` | Reload |
+| `Alt-Left` / `Alt-Right` | Back / forward through history |
 | `Ctrl-C` / `Ctrl-Q` | Quit and restore the terminal |
+
+While the address prompt is open it owns the keyboard — nothing reaches the page — and `Enter` navigates, `Ctrl-C` (or `Ctrl-G`) abandons the line without leaving the viewer, `Ctrl-U` clears it. A bare host is fine: `example.com` becomes `https://example.com`, while anything that already names a scheme (`http:`, `file:`, `about:`) is used as typed, and `localhost:8080` is read as a host and port rather than a scheme.
+
+`Esc` is deliberately *not* a cancel key. Telling a lone `Esc` from the start of an arrow or mouse report needs a timeout, and guessing is what made split escape sequences type their letters into the page (bug-002); the prompt swallows whole sequences instead.
 
 There is no single-letter quit: `q` is an ordinary printable character and is typed into the page, so you can fill in a search box without the viewer exiting. `Ctrl-C` is delivered as a keystroke rather than a signal (the terminal runs with `ISIG` off), so it quits immediately.
 

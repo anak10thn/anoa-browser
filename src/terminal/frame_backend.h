@@ -60,6 +60,16 @@ public:
     // Named control key: "enter", "backspace", "tab", "up", "down", …
     virtual void sendKey(const QString &namedKey) = 0;
 
+    // Navigation, driven by the viewer's own shortcuts rather than by the page.
+    // Same fire-and-forget contract as the input methods above: nothing is
+    // reported back directly, the next frame is the answer. A backend whose
+    // transport cannot express one of these leaves it a no-op rather than
+    // failing — the UI has no way to show an error for a keystroke.
+    virtual void navigate(const QString &url) = 0;
+    virtual void goBack() = 0;
+    virtual void goForward() = 0;
+    virtual void reloadPage() = 0;
+
     // Short description of the target for the status bar, e.g. "127.0.0.1:9222".
     virtual QString description() const = 0;
 

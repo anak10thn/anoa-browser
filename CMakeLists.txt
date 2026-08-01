@@ -53,7 +53,10 @@ endif()
 
 target_sources(anoa-browser PRIVATE
     src/config/config.cpp
+    src/common/url_input.cpp
     src/browser/anoa_browser.cpp
+    src/browser/browser_window.cpp
+    src/browser/browser_window.h
     src/http/http_server.cpp
     src/cdp/cdp_proxy.cpp
     src/cdp/cdp_extensions.cpp
@@ -71,6 +74,7 @@ if(NOT WIN32)
         src/terminal/render_http_client.cpp
         src/terminal/cdp_client.cpp
         src/terminal/cdp_frame_backend.cpp
+        src/terminal/inprocess_frame_backend.cpp
         # frame_backend.h has no .cpp of its own, so AUTOMOC only sees it (and
         # generates the FrameBackend metaobject) when it is listed here.
         src/terminal/frame_backend.h
@@ -78,6 +82,7 @@ if(NOT WIN32)
         src/terminal/render_http_client.h
         src/terminal/cdp_client.h
         src/terminal/cdp_frame_backend.h
+        src/terminal/inprocess_frame_backend.h
     )
 endif()
 

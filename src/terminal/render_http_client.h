@@ -41,6 +41,11 @@ public:
     void sendText(const QByteArray &utf8) override;
     void sendKey(const QString &namedKey) override;
 
+    void navigate(const QString &url) override;
+    void goBack() override;
+    void goForward() override;
+    void reloadPage() override;
+
     QString description() const override;
 
 private:

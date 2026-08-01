@@ -18,6 +18,13 @@ struct Config {
     // JSON/INI config file. terminalMode is set by the argv pre-scan in
     // main.cpp, not by parseArgs().
     bool terminalMode = false;
+    // Set by the same pre-scan when `terminal` was given with no target at all
+    // — no --term-host, no --term-port, no --cdp. The viewer then hosts its own
+    // browser in-process instead of connecting to one. It cannot be derived
+    // from the fields below: their defaults are indistinguishable from the user
+    // typing those same values, and `--term-port 9222` must still mean "connect
+    // to the anoa-browser already on 9222".
+    bool termEmbedded = false;
     QString termHost = "127.0.0.1";
     int termPort = 9222;
     QString termToken;
@@ -26,5 +33,9 @@ struct Config {
     QString cdpUrl; // empty = use the default /render/* HTTP backend
 };
 
-Config parseArgs(int argc, char *argv[]);
+// `terminalMode` is what the argv pre-scan in main.cpp already decided; it is
+// passed in rather than re-derived, because the `terminal` word has been
+// removed from argv by the time this runs. It lands in Config::terminalMode and
+// suppresses the browser-only warnings.
+Config parseArgs(int argc, char *argv[], bool terminalMode = false);
 Config loadConfigFile(const QString &path);

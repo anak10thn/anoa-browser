@@ -69,6 +69,13 @@ public:
     void sendScroll(int pageX, int pageY, int dy) override { scrolls.append({pageX, pageY, dy}); }
     void sendText(const QByteArray &utf8) override { texts.append(utf8); }
     void sendKey(const QString &namedKey) override { keys.append(namedKey); }
+    // Navigation is recorded as one ordered list rather than four counters:
+    // several of the tests below care that a key produced *only* the action it
+    // names, and an ordered log is the only shape that can show that.
+    void navigate(const QString &url) override { navActions.append(QStringLiteral("navigate ") + url); }
+    void goBack() override { navActions.append(QStringLiteral("back")); }
+    void goForward() override { navActions.append(QStringLiteral("forward")); }
+    void reloadPage() override { navActions.append(QStringLiteral("reload")); }
     QString description() const override { return m_description; }
 
     QList<QSize> rgbRequests;
@@ -77,6 +84,7 @@ public:
     QList<Scroll> scrolls;
     QList<QByteArray> texts;
     QList<QString> keys;
+    QList<QString> navActions;
 
 private:
     QString m_description;
@@ -303,6 +311,141 @@ private:
     }
 
 private slots:
+    // ── Viewer shortcuts and the URL prompt ─────────────────────────────────
+
+    // TERM-NAV-01: Ctrl-R and Alt-Left/Right drive history, and nothing else.
+    // The "nothing else" half is the point: they used to reach the page, so a
+    // regression here is silent — the page just receives keystrokes again.
+    void testHistoryShortcuts()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, QByteArray("\x12")));           // Ctrl-R
+        QVERIFY(feed(ui, QByteArray("\x1b[1;3D")));      // Alt-Left
+        QVERIFY(feed(ui, QByteArray("\x1b[1;3C")));      // Alt-Right
+
+        QCOMPARE(backend.navActions,
+                 QList<QString>({QStringLiteral("reload"), QStringLiteral("back"),
+                                 QStringLiteral("forward")}));
+        QVERIFY2(backend.texts.isEmpty(), "a shortcut leaked into the page as text");
+        QVERIFY2(backend.keys.isEmpty(), "a shortcut leaked into the page as a key event");
+    }
+
+    // TERM-NAV-02: the Alt-arrow prefix arriving in pieces. Same hazard as
+    // bug-002 — the half-matched sequence must be held, not resynced past and
+    // typed into the page.
+    void testAltArrowSplitAcrossReads()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, QByteArray("\x1b[1")));   // nothing decidable yet
+        QVERIFY(backend.navActions.isEmpty());
+        QVERIFY(feed(ui, QByteArray(";3")));       // still only a prefix
+        QVERIFY(backend.navActions.isEmpty());
+        QVERIFY(feed(ui, QByteArray("D")));        // now it is Alt-Left
+
+        QCOMPARE(backend.navActions, QList<QString>({QStringLiteral("back")}));
+        QVERIFY2(backend.texts.isEmpty(), "part of the sequence was typed into the page");
+    }
+
+    // TERM-NAV-03: a CSI that merely starts like Alt-arrow must not stall the
+    // buffer. Home is ESC [ 1 ~ and is complete in four bytes; the Alt-arrow
+    // matcher must not sit waiting for a fifth and freeze input until the user
+    // presses something else.
+    //
+    // What it resyncs *to* is the pre-existing behaviour TERM-INPUT-09 pins for
+    // every unknown CSI: "ESC [" is dropped and the body is typed into the page,
+    // so this expects "1~x" rather than "x". That is a defect of its own — it is
+    // how ESC [ H already behaves — and it is deliberately not changed here, so
+    // this case is asserted as it is rather than as it should be.
+    void testUnknownCsiStartingWithOneDoesNotStall()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, QByteArray("\x1b[1~x")));
+        QVERIFY2(backend.navActions.isEmpty(), "Home was mistaken for a history key");
+        // The trailing "x" is what proves the parser moved on rather than
+        // holding the buffer for a sixth byte that was never coming.
+        QCOMPARE(backend.texts, QList<QByteArray>({QByteArray("1~x")}));
+    }
+
+    // TERM-URL-01: Ctrl-L opens the prompt, typing goes to it instead of the
+    // page, and Enter navigates with the scheme filled in.
+    void testUrlPromptNavigates()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, QByteArray("\x0c")));            // Ctrl-L
+        QVERIFY(feed(ui, QByteArray("example.com")));
+        QVERIFY2(backend.texts.isEmpty(), "the prompt let keystrokes through to the page");
+        QVERIFY(feed(ui, QByteArray("\r")));
+
+        QCOMPARE(backend.navActions,
+                 QList<QString>({QStringLiteral("navigate https://example.com")}));
+        QVERIFY2(backend.keys.isEmpty(), "Enter reached the page as a key event");
+    }
+
+    // TERM-URL-02: Ctrl-C inside the prompt abandons the line and stays in the
+    // viewer; outside it, it still quits. Getting this backwards would either
+    // trap the user in the prompt or drop the session on a typo.
+    void testUrlPromptCancelDoesNotQuit()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, QByteArray("\x0c")));
+        QVERIFY(feed(ui, QByteArray("example.com")));
+        QVERIFY2(feed(ui, QByteArray("\x03")), "Ctrl-C in the prompt ended the session");
+        QVERIFY(backend.navActions.isEmpty());
+
+        // Prompt is closed, so the next Ctrl-C is a quit again.
+        QVERIFY(!feed(ui, QByteArray("\x03")));
+    }
+
+    // TERM-URL-03: backspace steps over a whole UTF-8 character. Erasing one
+    // byte of a multi-byte character leaves the status row unprintable.
+    void testUrlPromptBackspaceIsCharacterWise()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, QByteArray("\x0c")));
+        QVERIFY(feed(ui, QByteArray("a\xC3\xA9")));  // "aé"
+        QVERIFY(feed(ui, QByteArray("\x7f")));       // one Backspace
+        QVERIFY(feed(ui, QByteArray("\r")));
+
+        QCOMPARE(backend.navActions, QList<QString>({QStringLiteral("navigate https://a")}));
+    }
+
+    // TERM-URL-04: an address that already names a scheme is left alone, and a
+    // host:port is not mistaken for one.
+    void testUrlPromptSchemeHandling()
+    {
+        for (const auto &pair : QList<QPair<QByteArray, QString>>{
+                 {"http://x.test", QStringLiteral("navigate http://x.test")},
+                 {"about:blank", QStringLiteral("navigate about:blank")},
+                 {"localhost:8080", QStringLiteral("navigate https://localhost:8080")}}) {
+            CapturedStdout capture;
+            RecordingBackend backend;
+            TerminalUi ui(terminalConfig("halfblock"), &backend);
+    
+            QVERIFY(feed(ui, QByteArray("\x0c")));
+            QVERIFY(feed(ui, pair.first));
+            QVERIFY(feed(ui, QByteArray("\r")));
+            QCOMPARE(backend.navActions, QList<QString>({pair.second}));
+        }
+    }
+
     // ── The input parser ────────────────────────────────────────────────────
 
     // TERM-INPUT-01: bug-002. An up arrow is three bytes; a terminal is free to
@@ -756,13 +899,14 @@ private slots:
         ui.onFrame(rgbFrame(40, 20, 40, 20));
         capture.take();
 
-        // No input yet, so the tail is the 46-character usage hint and there
-        // is no room left for a link of any length.
+        // No input yet, so the tail is the usage hint — which now also lists the
+        // viewer's shortcuts, making it longer than it was and leaving even less
+        // room for a link.
         ui.onLink(QStringLiteral("attached to page ABC"));
         QVERIFY(feed(ui, QByteArray()));
         const QByteArray row = statusRow(capture.take());
         QVERIFY2(!row.contains("attached to page ABC"), row.constData());
-        QVERIFY2(row.contains("click/type/scroll drive the page"), row.constData());
+        QVERIFY2(row.contains("click/type drive the page"), row.constData());
     }
 
     // TERM-INPUT-08: the row is truncated to m_cols *bytes*, so a multibyte

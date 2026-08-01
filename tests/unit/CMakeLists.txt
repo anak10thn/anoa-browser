@@ -114,6 +114,10 @@ if(NOT WIN32)
         ${CMAKE_SOURCE_DIR}/src/terminal/terminal_ui.cpp
         ${CMAKE_SOURCE_DIR}/src/terminal/terminal_ui.h
         ${CMAKE_SOURCE_DIR}/src/terminal/frame_backend.h
+        # The Ctrl-L prompt hands what was typed to normalizeUserUrl(), which
+        # the GUI address field also uses, so it is its own translation unit
+        # rather than a copy in each.
+        ${CMAKE_SOURCE_DIR}/src/common/url_input.cpp
     )
     target_include_directories(anoa-terminal-ui-lib PUBLIC
         ${CMAKE_SOURCE_DIR}/src

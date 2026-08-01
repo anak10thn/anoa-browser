@@ -104,9 +104,16 @@ public slots:
 
 private:
     void renderStatusBar();
+    // The URL prompt takes over the status row while it is open. Drawn from
+    // renderStatusBar() rather than beside it, because there is one row and
+    // both want it.
+    void renderUrlPrompt();
     void renderHalfblock(const FrameData &frame);
     void renderGfx(const QByteArray &png);
     bool processInput(std::string &buf);
+    // Consumes one byte of the open URL prompt. Returns false when the prompt
+    // just closed, so the caller can redraw the row it was borrowing.
+    void feedUrlPrompt(char c);
 
     FrameBackend *m_backend = nullptr;
     GfxMode m_gfx = GfxMode::Auto;
@@ -123,5 +130,11 @@ private:
     std::string m_lastInput;    // last event forwarded, shown in the status bar
     std::string m_status;       // connection state reported by the backend
     std::string m_link;         // what the backend is attached to, when it is
-    std::string m_backendLabel; // "http" / "cdp"; empty hides the field
+    std::string m_backendLabel; // "http" / "cdp" / "embedded"; empty hides it
+
+    // URL prompt state. While m_urlPrompt is set the viewer swallows input
+    // instead of forwarding it: the whole point is to type an address without
+    // the page receiving the keystrokes.
+    bool m_urlPrompt = false;
+    std::string m_urlInput;
 };
