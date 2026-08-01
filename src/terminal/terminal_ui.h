@@ -77,6 +77,11 @@ public:
     GfxMode gfxMode() const { return m_gfx; }
     int framePeriodMs() const { return 1000 / m_fps; }
 
+    // Which transport is driving the page, as one word for the status bar
+    // ("http" or "cdp"). Set by terminal_app.cpp, which is the only place that
+    // knows there is more than one backend; this class never asks.
+    void setBackendLabel(const QString &label);
+
     // One frame tick: service the pending signals, then ask the backend for
     // the frame kind the active renderer needs. False means a signal asked the
     // process to quit.
@@ -91,6 +96,11 @@ public slots:
     void onFrame(const FrameData &frame);
     void onFrameFailed(const QString &reason);
     void onStatus(const QString &text);
+    // The other half of the connection story: what the viewer is attached to,
+    // e.g. "attached to page 4A1F...". onStatus() carries what is *wrong* and
+    // wins the slot when both are set; this one carries what is right, and is
+    // cleared (empty text) the moment the link is no longer up.
+    void onLink(const QString &text);
 
 private:
     void renderStatusBar();
@@ -110,6 +120,8 @@ private:
     DisplayMap m_map;
     QByteArray m_lastPng;  // last frame sent to a gfx terminal, to skip repeats
     std::string m_inputBuf;
-    std::string m_lastInput; // last event forwarded, shown in the status bar
-    std::string m_status;    // connection state reported by the backend
+    std::string m_lastInput;    // last event forwarded, shown in the status bar
+    std::string m_status;       // connection state reported by the backend
+    std::string m_link;         // what the backend is attached to, when it is
+    std::string m_backendLabel; // "http" / "cdp"; empty hides the field
 };

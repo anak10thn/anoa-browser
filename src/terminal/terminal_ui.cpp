@@ -317,25 +317,57 @@ void TerminalUi::onStatus(const QString &text)
         renderStatusBar();
 }
 
+void TerminalUi::onLink(const QString &text)
+{
+    m_link = text.toStdString();
+    if (m_started)
+        renderStatusBar();
+}
+
+void TerminalUi::setBackendLabel(const QString &label)
+{
+    m_backendLabel = label.toStdString();
+    if (m_started)
+        renderStatusBar();
+}
+
 // ── Rendering ───────────────────────────────────────────────────────────────
 
 void TerminalUi::renderStatusBar()
 {
-    std::string status = " anoa-browser terminal " + m_backend->description().toStdString()
-                         + " " + std::to_string(m_map.viewportW) + "x"
-                         + std::to_string(m_map.viewportH) + " ["
-                         + (m_gfx == GfxMode::Iterm    ? "iterm"
-                            : m_gfx == GfxMode::Kitty  ? "kitty"
-                                                       : "halfblock")
-                         + "]";
-    if (!m_status.empty())
-        status += " " + m_status;
-    else if (!m_connected)
-        status += std::string(" connection lost ") + kEmDash + " retrying" + kEllipsis;
+    std::string status = " anoa-browser terminal ";
+    if (!m_backendLabel.empty())
+        status += m_backendLabel + " ";
+    status += m_backend->description().toStdString() + " " + std::to_string(m_map.viewportW)
+              + "x" + std::to_string(m_map.viewportH) + " ["
+              + (m_gfx == GfxMode::Iterm    ? "iterm"
+                 : m_gfx == GfxMode::Kitty  ? "kitty"
+                                            : "halfblock")
+              + "]";
     // Once the user has interacted, the last forwarded event replaces the
-    // long usage hint so it survives narrow terminals.
-    status += m_lastInput.empty() ? " click/type/scroll drive the page, ctrl-c quits"
-                                  : " ctrl-c=quit | " + m_lastInput;
+    // long usage hint so it survives narrow terminals. Built before the middle
+    // field because it is what the middle field has to make room for.
+    const std::string tail = m_lastInput.empty()
+                                 ? " click/type/scroll drive the page, ctrl-c quits"
+                                 : " ctrl-c=quit | " + m_lastInput;
+
+    // One slot, three sources, worst news first: a backend complaint (which on
+    // the CDP path is also where "connecting"/"reconnecting" arrives) beats
+    // naming a link that is up, and both beat the frame-level fallback.
+    if (!m_status.empty()) {
+        status += " " + m_status;
+    } else if (!m_link.empty()) {
+        // The link is the one optional field on this row. It is steady state —
+        // "we are still attached to the thing the header already names" — and
+        // the row is routinely over budget at 80 columns, so letting it push
+        // the last-input echo off the end would cost the one signal that tells
+        // a user their terminal is delivering input at all. It yields instead.
+        if (status.size() + 1 + m_link.size() + tail.size() <= static_cast<size_t>(m_cols))
+            status += " " + m_link;
+    } else if (!m_connected) {
+        status += std::string(" connection lost ") + kEmDash + " retrying" + kEllipsis;
+    }
+    status += tail;
 
     std::string out = "\033[" + std::to_string(m_rows) + ";1H\033[7m";
     if (static_cast<int>(status.size()) > m_cols)
