@@ -1,7 +1,11 @@
 #include "terminal/render_http_client.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
+#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <cctype>
@@ -13,6 +17,12 @@
 #include "terminal/frame_bytes.h"
 
 namespace {
+
+// Every socket operation is bounded by this. Generous enough that a slow but
+// working endpoint is never mistaken for a dead one, short enough that a dead
+// one costs a couple of dropped frames rather than the session: the viewer just
+// reports a failed frame and the next tick tries again.
+constexpr int kTimeoutMs = 4000;
 
 std::string urlEncode(const std::string &in)
 {
@@ -86,10 +96,31 @@ bool RenderHttpClient::httpRequest(const char *method, const std::string &pathWi
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd < 0)
             continue;
-        // Qualified: this is a member function of a QObject subclass, so an
-        // unqualified connect() resolves to the static QObject::connect
-        // overloads and never reaches the one in <sys/socket.h>.
-        if (::connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
+
+        // Bound the connect. A peer that completes the TCP handshake and then
+        // says nothing used to wedge the whole viewer: this runs on the Qt
+        // event loop, so a blocking call here stops the frame tick, which is
+        // what polls the quit flags — the process then survived Ctrl-C, SIGINT
+        // and SIGTERM alike and needed SIGKILL, which skips the atexit() that
+        // hands the terminal back. The user was left on the alt screen in raw
+        // mode. (bug-003.)
+        const int flags = ::fcntl(fd, F_GETFL, 0);
+        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        bool connected = ::connect(fd, ai->ai_addr, ai->ai_addrlen) == 0;
+        if (!connected && errno == EINPROGRESS) {
+            fd_set w;
+            FD_ZERO(&w);
+            FD_SET(fd, &w);
+            timeval tv{kTimeoutMs / 1000, (kTimeoutMs % 1000) * 1000};
+            if (::select(fd + 1, nullptr, &w, nullptr, &tv) > 0) {
+                int soErr = 0;
+                socklen_t len = sizeof(soErr);
+                connected = ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soErr, &len) == 0
+                            && soErr == 0;
+            }
+        }
+        ::fcntl(fd, F_SETFL, flags); // back to blocking; the timeouts bound it now
+        if (connected)
             break;
         close(fd);
         fd = -1;
@@ -97,6 +128,12 @@ bool RenderHttpClient::httpRequest(const char *method, const std::string &pathWi
     freeaddrinfo(res);
     if (fd < 0)
         return false;
+
+    // And bound every read and write on it. Without these the read() loop below
+    // waits forever on a peer that accepted and went quiet.
+    const timeval tv{kTimeoutMs / 1000, (kTimeoutMs % 1000) * 1000};
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     std::string req = std::string(method) + " " + pathWithQuery + " HTTP/1.1\r\n"
                       "Host: " + m_host + ":" + portStr + "\r\n";
@@ -119,7 +156,12 @@ bool RenderHttpClient::httpRequest(const char *method, const std::string &pathWi
     ssize_t n;
     while ((n = read(fd, buf, sizeof(buf))) > 0)
         raw.append(buf, static_cast<size_t>(n));
+    // A timed-out read returns -1 with EAGAIN. Treat it as the failure it is
+    // rather than parsing whatever partial response arrived first.
+    const bool timedOut = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
     close(fd);
+    if (timedOut)
+        return false;
 
     const size_t headerEnd = raw.find("\r\n\r\n");
     if (headerEnd == std::string::npos)

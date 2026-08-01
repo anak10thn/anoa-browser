@@ -41,6 +41,29 @@ void HttpServer::stop()
     m_server->close();
 }
 
+// Close a response socket without losing what was just written to it.
+//
+// The old sequence — write, flush, disconnectFromHost, deleteLater — dropped
+// anything that did not fit in the kernel's send buffer. deleteLater() destroys
+// the socket on the next return to the event loop, which for a large body is
+// long before the write buffer has drained; the peer got a truncated response
+// while Content-Length still promised the whole thing. A 1280x720 PPM declared
+// 2.7 MB and delivered nothing at all. (bug-004.)
+//
+// disconnectFromHost() already defers the close until pending writes are done.
+// All that was missing is keeping the object alive that long, so deletion is
+// driven by `disconnected` instead of by the next event loop turn.
+static void closeWhenSent(QTcpSocket *socket)
+{
+    socket->flush();
+    QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+    // A peer that vanishes mid-write would otherwise leak the socket, since
+    // `disconnected` is not guaranteed to arrive.
+    QObject::connect(socket, &QAbstractSocket::errorOccurred, socket,
+                     [socket](QAbstractSocket::SocketError) { socket->deleteLater(); });
+    socket->disconnectFromHost();
+}
+
 static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &statusText,
                          const QByteArray &body,
                          const QByteArray &contentType = "application/json")
@@ -52,9 +75,7 @@ static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &s
         "Connection: close\r\n"
         "\r\n" + body;
     socket->write(response);
-    socket->flush();
-    socket->disconnectFromHost();
-    socket->deleteLater();
+    closeWhenSent(socket);
 }
 
 struct HtmlCaptureState {
@@ -134,9 +155,7 @@ void HttpServer::handleNewConnection()
             "Connection: close\r\n"
             "\r\n";
         socket->write(response);
-        socket->flush();
-        socket->disconnectFromHost();
-        socket->deleteLater();
+        closeWhenSent(socket);
         return;
     }
 
@@ -217,9 +236,7 @@ void HttpServer::handleNewConnection()
                 "\r\n";
             response += pngBytes;
             socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+            closeWhenSent(socket);
         }
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render/html")) {
         auto state = std::make_shared<HtmlCaptureState>();
@@ -257,9 +274,7 @@ void HttpServer::handleNewConnection()
                 "\r\n";
             response += htmlBytes;
             socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+            closeWhenSent(socket);
         }
     } else if (method == QLatin1String("POST") && path == QLatin1String("/render/navigate")) {
         // Prefer url from query string; fall back to plain-text request body.
@@ -356,9 +371,7 @@ setInterval(refresh,500);
             "\r\n";
         response += htmlBytes;
         socket->write(response);
-        socket->flush();
-        socket->disconnectFromHost();
-        socket->deleteLater();
+        closeWhenSent(socket);
     } else if (method == QLatin1String("GET")
                && path == QLatin1String("/render/screenshot.ppm")) {
         // Binary PPM (P6) frame, optionally scaled server-side via ?w=&h=.
@@ -402,9 +415,7 @@ setInterval(refresh,500);
                 "\r\n";
             response += ppmBytes;
             socket->write(response);
-            socket->flush();
-            socket->disconnectFromHost();
-            socket->deleteLater();
+            closeWhenSent(socket);
         }
     } else if (method == QLatin1String("POST") && path == QLatin1String("/render/click")) {
         bool okX = false, okY = false;

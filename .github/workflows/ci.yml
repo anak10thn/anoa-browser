@@ -226,10 +226,17 @@ jobs:
 
       - uses: jurplel/install-qt-action@v4
         with:
+          # Qt renamed the Linux desktop architecture between 6.4 and 6.7:
+          # 6.4.3 publishes `gcc_64`, 6.7.3 publishes `linux_gcc_64`. Asking for
+          # the new name at the old version made aqt report "The packages
+          # ['qt_base', 'qtwebsockets'] were not found", which reads as "Qt
+          # archived 6.4.3" — it has not; the tree is still published, under the
+          # other name. This job was red for that reason alone, and a floor
+          # check that cannot install its floor is not checking anything.
           version: "6.4.3"
           host: linux
           target: desktop
-          arch: linux_gcc_64
+          arch: gcc_64          # not linux_gcc_64 — see the note above
           modules: qtwebsockets
           install-deps: true
           cache: true
