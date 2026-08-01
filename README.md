@@ -4,27 +4,36 @@
 
 <h1 align="center">anoa-browser</h1>
 
-Headless browser built on Qt6/QWebEngine with full [Chrome DevTools Protocol (CDP)](https://chromedevtools.github.io/devtools-protocol/) support. Distributed as a single self-contained binary — no Node.js or npm required.
+<p align="center">
+  A browser you drive from anywhere — a script, a terminal, or a window.<br>
+  One self-contained binary. No Node.js, no npm, no separate driver.
+</p>
 
-Works with Playwright, Puppeteer, and any other CDP client that connects to a Chrome-compatible endpoint.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#terminal-viewer-anoa-browser-terminal">Terminal viewer</a> ·
+  <a href="docs/BUILDING.md">Building</a>
+</p>
 
 ---
 
+Full [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) support, so Playwright, Puppeteer and anything else that speaks CDP connect to it as they would to Chrome.
+
+```bash
+anoa-browser --headless --port 9222     # drive it from Playwright or Puppeteer
+anoa-browser terminal                   # or watch and click it, in your terminal
+anoa-browser                            # or just open a window
+```
+
 ## Features
 
-- **Full CDP support** via `--remote-debugging-port` passthrough to embedded Chromium
-- **Headless and headed modes** from the same binary
-- **HTTP discovery endpoints** — `/json`, `/json/version`, `/json/list` (Chrome-compatible)
-- **WebSocket CDP proxy** with session multiplexing and optional bearer token auth
-- **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation, click/scroll injection over plain HTTP (`/render/*`)
-- **Terminal viewer (`anoa-browser terminal`)** — a mode of the same binary, not a second executable: watch and control the browser from any terminal with live ANSI rendering, mouse clicks and scrolling forwarded to the page. `--cdp` points it at any external Chrome/Chromium/Playwright endpoint instead (POSIX only)
-- **Window chrome in headed mode** — running without `--headless` gives an address field with back / forward / reload and a menu, and an **auto-hide mode** (`Ctrl-Shift-H`, or the menu) where the toolbar disappears and comes back when the pointer touches the top edge, like the macOS menu bar in full screen. The chrome wraps the web view rather than living inside it, so `/render/*` still captures the page alone and click coordinates are unaffected; revealing an auto-hidden toolbar overlays the page instead of resizing it, so nothing reflows on hover. `--headless` builds no chrome at all
-- **Remote CDP friendly** — Chromium started with `--remote-allow-origins=*`, so clients behind tunnels/reverse proxies connect without Origin rejections (access control via `--auth-token`)
-- **`Page.printToPDF`** — intercepted and handled via `QWebEnginePage::printToPdf`
-- **Named browser profiles** — isolated cookie jars and localStorage per profile
-- **Extension loading** — unpacked Chromium extensions (manifest v2)
-- **CDP domain extensions** — Profiler, HeapProfiler, Security stubs so clients don't abort on unsupported commands
-- **Static linking support** — optional `STATIC_BUILD` for self-contained deployment
+- **Speaks CDP** — connect Playwright, Puppeteer or any Chrome-compatible client, with Chrome-compatible discovery endpoints (`/json`, `/json/version`, `/json/list`) and a WebSocket proxy with session multiplexing and optional bearer-token auth
+- **Drive it over plain HTTP** — live viewer, PNG screenshots, MJPEG stream, navigation and click/scroll injection through `/render/*`, no CDP client required
+- **See it in your terminal** — `anoa-browser terminal` renders the live page as ANSI or as real images in iTerm2/kitty, and forwards your clicks, scrolls and typing back to it. Point it at a running browser, at any external Chrome endpoint with `--cdp`, or at nothing at all and it hosts its own
+- **A window when you want one** — an address bar with back / forward / reload, and an auto-hiding toolbar that returns when the pointer reaches the top edge
+- **Works behind tunnels and proxies** — no Origin rejections, with `--auth-token` for access control
+- **Print to PDF, profiles, extensions** — `Page.printToPDF`, isolated cookie jars and localStorage per named profile, and unpacked Chromium extensions (manifest v2)
 
 ---
 
@@ -74,11 +83,11 @@ curl -fsSL https://raw.githubusercontent.com/porcupine-md/anoa-browser/master/sc
 ```
 
 ```
-~/.local/lib/anoa-browser/     the unpacked bundle (its own Qt — nothing system-wide)
+~/.local/lib/anoa-browser/     the unpacked bundle — self-contained, nothing system-wide
 ~/.local/bin/anoa-browser  ->  ../lib/anoa-browser/anoa-browser.sh
 ```
 
-The symlink points at the *launcher*, never at the raw binary: the launcher is what sets `LD_LIBRARY_PATH`, `QT_PLUGIN_PATH` and the QtWebEngine paths that make the bundle self-contained. It tells you if `~/.local/bin` is not on your `PATH`, and re-running it upgrades in place.
+The symlink points at the *launcher*, never at the raw binary — the launcher is what sets up the environment the bundled libraries need. It tells you if `~/.local/bin` is not on your `PATH`, and re-running it upgrades in place.
 
 ```bash
 install-linux.sh --version v0.4.0     # pin a release instead of taking the latest
@@ -88,7 +97,7 @@ install-linux.sh --uninstall          # remove it again
 
 ### Linux (portable tarball)
 
-The release tarball is self-contained: one executable (`anoa-browser`), every Qt/WebEngine shared library under `lib/`, plugins, `resources/`, `translations/`, a `qt.conf`, plus a launcher script that wires them together (`LD_LIBRARY_PATH`, `QTWEBENGINEPROCESS_PATH`, …). Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
+The release tarball is self-contained: one executable, every shared library it needs under `lib/`, its resources and translations, plus a launcher script that wires them together. Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
 
 ```bash
 tar xzf anoa-browser-linux-x86_64.tar.gz
@@ -96,7 +105,7 @@ tar xzf anoa-browser-linux-x86_64.tar.gz
 ./anoa-browser/anoa-browser.sh terminal                 # terminal viewer — same launcher
 ```
 
-Always go through `anoa-browser.sh`: the raw `anoa-browser` next to it has no Qt environment set up, in terminal mode as much as in browser mode.
+Always go through `anoa-browser.sh`: the raw executable next to it has none of that environment set up, in terminal mode as much as in browser mode.
 
 ### Windows
 
@@ -104,67 +113,9 @@ Download `anoa-browser-windows-x86_64.zip` from [Releases](https://github.com/po
 
 ---
 
-## Prerequisites (building from source)
+## Building from source
 
-| Dependency | Version | Notes |
-|---|---|---|
-| Qt6 | ≥ 6.4 | Modules: WebEngineWidgets, WebEngineCore, Network, WebSockets, Widgets |
-| CMake | ≥ 3.16 | Build system |
-| C++ compiler | C++17 | GCC ≥ 10, Clang ≥ 12, MSVC 2022 |
-
-**Install Qt6 on Ubuntu:**
-```bash
-apt install qt6-webengine-dev qt6-websockets-dev libqt6network6-dev
-```
-
-**Install Qt6 on macOS (Homebrew):**
-```bash
-brew install qt
-```
-
-**Install Qt6 on Windows:**
-Use the [Qt Online Installer](https://www.qt.io/download). Select Qt 6.4+ with WebEngine and MSVC 2022 components.
-
----
-
-## Build
-
-```bash
-# Clone
-git clone git@github.com:porcupine-md/anoa-browser.git
-cd anoa-browser
-
-# Debug build (dynamic linking)
-make
-
-# Release build (dynamic linking)
-make release
-
-# Release build (static linking)
-make release-static
-
-# Install to dist/
-make install
-```
-
-All available targets:
-
-```
-make                        # Debug build (dynamic)
-make static                 # Debug build (static)
-make release                # Release build (dynamic)
-make release-static         # Release build (static)
-make install                # Install release to INSTALL_PREFIX (default: dist/)
-make install-static         # Install static release to INSTALL_PREFIX
-make test                   # Build and run tests
-make clean-all              # Remove all build dirs and dist/
-make help                   # Show all targets
-```
-
-Override variables:
-```bash
-make release-static QT_PREFIX=/path/to/qt JOBS=8 INSTALL_PREFIX=/opt/anoa
-```
+Prebuilt packages are above. To build it yourself — prerequisites, targets, architecture and the release process — see **[docs/BUILDING.md](docs/BUILDING.md)**.
 
 ---
 
@@ -230,7 +181,7 @@ The binary uses 3 consecutive ports:
 | Port | Purpose |
 |---|---|
 | `N` (e.g. 9222) | HTTP discovery + WebSocket CDP proxy |
-| `N+1` (e.g. 9223) | Chromium internal DevTools (set via `QTWEBENGINE_CHROMIUM_FLAGS`) |
+| `N+1` (e.g. 9223) | Chromium's own DevTools endpoint, internal |
 | `N+2` (e.g. 9224) | Internal WebSocket proxy upstream |
 
 ### Remote CDP access
@@ -397,7 +348,7 @@ anoa-browser terminal --cdp ws://127.0.0.1:9222/devtools/page/ABC123 --gfx kitty
 
 **Auth token.** `--term-token` is *not* ignored under `--cdp` — it becomes the bearer token for the CDP endpoint, sent both as an `Authorization: Bearer <secret>` header and as a `?token=<secret>` query parameter, on the `/json/list` request and on the WebSocket dial. That is what anoa-browser's own `--auth-token` proxy expects, and endpoints that ignore an unexpected header or query parameter (plain Chrome) are unaffected. `--term-host` and `--term-port` *are* ignored under `--cdp`, and the viewer says so on stderr before it takes over the screen.
 
-**`wss://` is not supported.** TLS CDP endpoints are rejected at argument-parsing time, because Qt is not built with OpenSSL here. Use `ws://`, or `http://` and let discovery hand you the right `ws://` URL. Tunnel it (SSH port-forward, stunnel) if the endpoint is only reachable over TLS.
+**`wss://` is not supported.** TLS CDP endpoints are rejected at argument-parsing time, because the shipped build has no TLS backend. Use `ws://`, or `http://` and let discovery hand you the right `ws://` URL. Tunnel it (SSH port-forward, stunnel) if the endpoint is only reachable over TLS.
 
 Two things worth knowing when the endpoint is anoa-browser itself: it uses [three consecutive ports](#port-layout), so `--cdp http://127.0.0.1:9222` discovers on 9222 and then dials `ws://127.0.0.1:9224/…` — the port shown in the status bar changing mid-session is correct, not a fault. And a dropped connection is retried with an exponential backoff (250 ms doubling to 8 s) that the status bar reports as `connecting` / `reconnecting (attempt N)`; before the *first* successful connect the retries are capped, so a wrong URL fails with a message instead of spinning forever.
 
@@ -428,7 +379,7 @@ brew uninstall --zap --cask anoa-browser && brew install --cask anoa-browser   #
 | `Browser.getVersion` | Pass — Chromium passthrough |
 | `Target.getTargets` | Pass — returns active pages |
 | `Page.navigate` | Pass |
-| `Page.printToPDF` | Pass — handled via Qt API |
+| `Page.printToPDF` | Pass — intercepted and handled natively |
 | `Profiler.enable` | Pass — stub `{}` |
 | `HeapProfiler.enable` | Pass — stub `{}` |
 | `Security.enable` | Pass — stub `{}` |
@@ -442,7 +393,7 @@ brew uninstall --zap --cask anoa-browser && brew install --cask anoa-browser   #
 
 | Command | Reason |
 |---|---|
-| `Target.createTarget` | QtWebEngine does not support creating tabs via CDP |
+| `Target.createTarget` | the embedded engine cannot create tabs over CDP |
 
 **Playwright workaround:** use the existing page instead of `browser.newPage()`:
 ```js
@@ -451,53 +402,17 @@ const page = browser.contexts()[0].pages()[0];
 
 ---
 
-## Headless / CI notes
+## Running on CI
 
-On CI runners without a GPU, set these flags:
+`--headless` needs no display server on any platform, and `--version` and
+`--help` work on a machine with none either.
 
 ```bash
-export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox"
-./anoa-browser --headless --port 9222
+anoa-browser --headless --no-sandbox --port 9222
 ```
 
-On macOS, `DISPLAY` is not required. On Linux without a display server, `QPA_PLATFORM=offscreen` is set automatically when `--headless` is passed.
-
----
-
-## Releasing (maintainers)
-
-1. Create a tag `vX.Y.Z` — via GitHub (**Releases → Draft a new release → Choose a tag → Create new tag**) or CLI (`git tag vX.Y.Z && git push origin vX.Y.Z`). The tag name is the version: CI injects it into the build (`ANOA_VERSION_OVERRIDE`), so `CMakeLists.txt` never needs a manual bump.
-2. CI builds Linux / macOS / Windows, signs + notarizes the macOS app, publishes the GitHub Release, and updates the Homebrew tap automatically.
-
-Tag pushes require the macOS signing secrets (`MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) — CI fails fast if any are missing, so an unsigned build can never be released. Without `HOMEBREW_TAP_TOKEN` the tap update is skipped (warning only). To smoke-test the pipeline without publishing, run the Release workflow manually (`workflow_dispatch`) — artifacts only, no release, no tap update.
-
-If the tap update was skipped or failed, resync it without re-running the release: **Actions → Update Homebrew tap → Run workflow** (or `gh workflow run update-homebrew-tap.yml -f tag=vX.Y.Z`). Leave `tag` empty to sync the latest release; the run is idempotent and pushes nothing when the tap already matches.
-
----
-
-## Architecture
-
-```
-anoa-browser
-├── main.cpp                  # CLI parsing, QApplication bootstrap
-├── config/                   # Config struct from CLI flags + env vars
-├── browser/                  # QWebEngineView subclass, profiles, extensions
-├── http/                     # QTcpServer — /json, /json/version, /json/list
-├── cdp/
-│   ├── cdp_proxy             # QWebSocketServer bridge, session multiplexing, auth
-│   └── cdp_extensions        # Profiler / HeapProfiler / Security domain stubs
-├── terminal/                 # `anoa-browser terminal` — POSIX only, compiled out on Windows
-│   ├── terminal_app          # QCoreApplication loop — QSocketNotifier(stdin) + frame QTimer
-│   ├── terminal_ui           # termios raw mode, SIGWINCH, iTerm2/kitty image protocols or
-│   │                         # ANSI half-block fallback, status bar, SGR mouse/key parsing
-│   ├── frame_backend         # transport seam — frames out, input in
-│   ├── render_http_client    # default backend — /render/screenshot.ppm + click/scroll/type/key
-│   ├── cdp_client            # --cdp transport — QWebSocket, id/response correlation, discovery
-│   └── cdp_frame_backend     # --cdp backend — Page.captureScreenshot / getLayoutMetrics / Input.*
-└── pdf/                      # Page.printToPDF interceptor via QWebEnginePage::printToPdf
-```
-
-All subsystems are implemented with Qt built-in classes (no third-party dependencies beyond Qt6).
+On a runner with no GPU, add `--no-sandbox` as above; the extra flags some
+environments want are in [docs/BUILDING.md](docs/BUILDING.md#headless-machines).
 
 ---
 
