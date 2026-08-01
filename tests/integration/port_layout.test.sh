@@ -184,6 +184,100 @@ else
 fi
 rm -f "$TMPOUT"
 
+# ── Mode dispatch (TERM-MODE-01..05) ────────────────────────────────────────
+#
+# `terminal` is a bare positional word consumed by a raw-argv pre-scan in
+# main.cpp, before any application object exists — it is what selects
+# QCoreApplication over QApplication, so it cannot be a QCommandLineParser
+# positional. None of that is reachable from the pty suites: they all get past
+# dispatch before their first assertion, so a regression in the pre-scan would
+# show up there as "everything times out" and nowhere as a diagnosis.
+#
+# These cases live here rather than in a vitest file because none of them needs
+# a pty — they are exit codes and one-line messages, which is what this suite
+# already owns.
+
+run_cli() {
+  # Run the binary, capture stdout+stderr into $CLI_OUT and the status into
+  # $CLI_CODE without tripping `set -e`. stdin is /dev/null on purpose: it is
+  # what makes TERM-MODE-01 a pipe rather than whatever this script inherited.
+  CLI_OUT=$("$@" </dev/null 2>&1) && CLI_CODE=0 || CLI_CODE=$?
+}
+
+echo "=== TERM-MODE-01: terminal mode refuses a non-tty ==="
+run_cli "$BINARY" terminal
+if [ "$CLI_CODE" -eq 1 ] && grep -q "stdin/stdout must be a terminal" <<<"$CLI_OUT"; then
+  assert_pass "TERM-MODE-01: terminal over a pipe exits 1 with the documented message"
+else
+  assert_fail "TERM-MODE-01: exit $CLI_CODE, output: $(head -c 200 <<<"$CLI_OUT")"
+fi
+
+echo "=== TERM-MODE-02: terminal --help does not echo the subcommand back ==="
+run_cli "$BINARY" terminal --help
+USAGE_LINE=$(head -1 <<<"$CLI_OUT")
+# The pre-scan shifts `terminal` out of argv, so QCommandLineParser never sees
+# it and the usage line ends at [options]. Left in, process() would list it as
+# a positional argument nobody can pass twice.
+if [ "$CLI_CODE" -eq 0 ] && [[ "$USAGE_LINE" == *"[options]" ]]; then
+  assert_pass "TERM-MODE-02a: usage line ends at [options] ($USAGE_LINE)"
+else
+  assert_fail "TERM-MODE-02a: exit $CLI_CODE, usage line: $USAGE_LINE"
+fi
+
+# Both modes share one QCommandLineParser, so every flag is listed in both
+# --help outputs. That is the price of never overloading a flag by mode, and it
+# only stays true if something checks.
+TERM_FLAGS=(--term-host --term-port --term-token --fps --gfx --cdp)
+MISSING=""
+for flag in "${TERM_FLAGS[@]}"; do
+  grep -q -- "$flag" <<<"$CLI_OUT" || MISSING="$MISSING $flag"
+done
+if [ -z "$MISSING" ]; then
+  assert_pass "TERM-MODE-02b: terminal --help lists all ${#TERM_FLAGS[@]} terminal options"
+else
+  assert_fail "TERM-MODE-02b: missing from terminal --help:$MISSING"
+fi
+
+echo "=== TERM-MODE-03: browser --help lists the same terminal options ==="
+# QT_QPA_PLATFORM, not the QPA_PLATFORM this file uses elsewhere: browser mode
+# constructs a QApplication before parseArgs runs, and without a display or the
+# real Qt variable that aborts before --help is ever printed.
+run_cli env QT_QPA_PLATFORM=offscreen "$BINARY" --help
+MISSING=""
+for flag in "${TERM_FLAGS[@]}"; do
+  grep -q -- "$flag" <<<"$CLI_OUT" || MISSING="$MISSING $flag"
+done
+if [ "$CLI_CODE" -eq 0 ] && [ -z "$MISSING" ]; then
+  assert_pass "TERM-MODE-03: browser --help lists the terminal options too"
+else
+  assert_fail "TERM-MODE-03: exit $CLI_CODE, missing:$MISSING"
+fi
+
+echo "=== TERM-MODE-04: --cdp wss:// is rejected by the shipped binary ==="
+# TERM-CFG-09 covers this through the parse_args test harness; this covers the
+# binary a user actually runs, which is a different code path into the same
+# validation only as long as nobody moves the check.
+run_cli "$BINARY" terminal --cdp wss://example.invalid/devtools/page/X
+if [ "$CLI_CODE" -eq 1 ] && grep -q "wss://" <<<"$CLI_OUT"; then
+  assert_pass "TERM-MODE-04: --cdp wss:// exits 1 naming the scheme"
+else
+  assert_fail "TERM-MODE-04: exit $CLI_CODE, output: $(head -c 200 <<<"$CLI_OUT")"
+fi
+
+echo "=== TERM-MODE-05: the accepted pre-scan limitation ==="
+# Known and accepted: the pre-scan has no option-arity knowledge, so the word
+# `terminal` is taken as the subcommand wherever it appears — including as the
+# value of an option. `--profile terminal` therefore loses its value and the
+# parser reports a missing one. This is a limitation with a test rather than a
+# limitation someone rediscovers as a bug; if the pre-scan ever learns arity,
+# this case is the one to delete.
+run_cli env QT_QPA_PLATFORM=offscreen "$BINARY" --profile terminal
+if [ "$CLI_CODE" -eq 1 ] && grep -qi "missing value" <<<"$CLI_OUT"; then
+  assert_pass "TERM-MODE-05: a profile named 'terminal' is eaten by the pre-scan, as documented"
+else
+  assert_fail "TERM-MODE-05: exit $CLI_CODE, output: $(head -c 200 <<<"$CLI_OUT")"
+fi
+
 # Summary
 echo ""
 echo "Port Layout Tests: $PASS passed, $FAIL failed"

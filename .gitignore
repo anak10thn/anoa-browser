@@ -3,6 +3,11 @@ build/
 build-static/
 build-release/
 build-release-static/
+build-asan/
+build-coverage/
+*.gcov
+*.gcda
+*.gcno
 dist/
 *.o
 *.a
@@ -38,3 +43,7 @@ node_modules
 # Jonggrang ephemeral state
 .jonggrang/.ephemeral/
 .jonggrang/locks/
+
+# clangd's index, created by any editor using the compile_commands.json that
+# CMAKE_EXPORT_COMPILE_COMMANDS writes into build/
+.cache/

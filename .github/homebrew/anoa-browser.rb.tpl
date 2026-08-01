@@ -12,10 +12,10 @@ cask "anoa-browser" do
 
   app "anoa-browser.app"
 
-  # Both binaries live inside the bundle so they are covered by the app's
-  # signature and notarization ticket.
+  # The binary lives inside the bundle so it is covered by the app's signature
+  # and notarization ticket. The terminal viewer is a subcommand of it
+  # (`anoa-browser terminal`), so one shim covers both entry points.
   binary "#{appdir}/anoa-browser.app/Contents/MacOS/anoa-browser"
-  binary "#{appdir}/anoa-browser.app/Contents/MacOS/anoa-term"
 
   # Safety net: strip com.apple.quarantine before the app is ever launched.
   # For a properly notarized+stapled release this is a harmless no-op (Gatekeeper

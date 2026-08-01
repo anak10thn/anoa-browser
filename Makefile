@@ -18,7 +18,11 @@ BUILD_DIR        ?= build
 BUILD_DIR_STATIC ?= build-static
 BUILD_DIR_REL    ?= build-release
 BUILD_DIR_RELST  ?= build-release-static
+BUILD_DIR_COV    ?= build-coverage
 INSTALL_PREFIX   ?= $(PWD)/dist
+
+# Line-coverage floor enforced by `make coverage`, per file.
+COVERAGE_MIN     ?= 80
 
 # ── CMake flags ──────────────────────────────────────────────────────────────
 CMAKE_BASE_FLAGS := \
@@ -33,7 +37,7 @@ JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo
 .PHONY: all build configure static release release-static \
         clean clean-static clean-release clean-release-static clean-all \
         install install-static \
-        test lint help
+        test coverage lint help
 
 # ── Default ──────────────────────────────────────────────────────────────────
 all: build
@@ -79,6 +83,13 @@ test: configure
 	cmake --build $(BUILD_DIR) -- -j$(JOBS)
 	cd $(BUILD_DIR) && ctest --output-on-failure
 
+# ── Coverage ─────────────────────────────────────────────────────────────────
+# gcov over the three Qt6::Core-only unit libraries. Its own build dir, because
+# the instrumented objects are not the ones `make test` should be running.
+coverage:
+	BUILD_DIR=$(PWD)/$(BUILD_DIR_COV) QT_PREFIX=$(QT_PREFIX) \
+	  COVERAGE_MIN=$(COVERAGE_MIN) bash tests/coverage.sh
+
 # ── Lint / compile-commands symlink ──────────────────────────────────────────
 lint: configure
 	@if command -v clang-tidy >/dev/null 2>&1; then \
@@ -101,7 +112,8 @@ clean-release-static:
 	rm -rf $(BUILD_DIR_RELST)
 
 clean-all:
-	rm -rf $(BUILD_DIR) $(BUILD_DIR_STATIC) $(BUILD_DIR_REL) $(BUILD_DIR_RELST) dist
+	rm -rf $(BUILD_DIR) $(BUILD_DIR_STATIC) $(BUILD_DIR_REL) $(BUILD_DIR_RELST) \
+	       $(BUILD_DIR_COV) dist
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:
@@ -118,6 +130,7 @@ help:
 	@echo "  make install-static         Install static release build to INSTALL_PREFIX"
 	@echo ""
 	@echo "  make test                   Build and run tests"
+	@echo "  make coverage               gcov the unit libraries, fail under COVERAGE_MIN%"
 	@echo "  make lint                   Run clang-tidy (requires compile_commands.json)"
 	@echo ""
 	@echo "  make clean                  Remove debug build dir"

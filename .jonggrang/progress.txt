@@ -150,3 +150,139 @@
 - anoa-term relocated INTO the .app bundle (Contents/MacOS/) so it is covered by the app signature + staple (a standalone Mach-O cannot be stapled). This also fixes the ad-hoc anoa-term quarantine SIGKILL for free (postflight now de-quarantines it inside the bundle).
 - Entitlements required for QtWebEngine V8 under hardened runtime: allow-jit, allow-unsigned-executable-memory, disable-library-validation. Applied to the leaf executables + helper, then reseal QtWebEngineCore + the app.
 - Secrets needed: MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, MACOS_NOTARY_KEY_P8_BASE64, MACOS_NOTARY_KEY_ID, MACOS_NOTARY_ISSUER_ID.
+
+## 2026-08-01 — phase 15 (coverage)
+
+- Threshold is 80 (.jonggrang/jonggrang.json testing.coverage_threshold). First
+  measurement: config.cpp 70.09%, terminal_ui.cpp 76.32%, frame_bytes.cpp 100%.
+  TWO OF THREE WERE UNDER THE GATE — phase 14's behavioural checklist was
+  complete and the code under it still failed a numeric gate. Worth remembering:
+  a green checklist is not a coverage result.
+- Final: config.cpp 100% (210/210), frame_bytes.cpp 100% (54/54),
+  terminal_ui.cpp 92.68% (367/396). Aggregate 631/660 = 95.61%.
+- gcov gotcha #1: libgcov MERGES into an existing .gcda. Stale files must be
+  deleted before the run or the number is a function of how many times the suite
+  has been run. tests/coverage.sh does this; do not remove it.
+- gcov gotcha #2: gcov's "Lines executed:N% of M" summary counts Qt template
+  instantiations (QArrayDataPointer<QString> etc.) that land in the TU but are
+  not source lines. config.cpp reads 93.75% of 224 by that measure and 100% of
+  210 by the per-line .gcov listing. The listing is the honest one.
+- gcov gotcha #3: a line can show ##### because one *instantiation* never ran.
+  terminal_ui.cpp:219 (the destructor) was "uncovered" only because the virtual
+  DELETING dtor (_ZN10TerminalUiD0Ev) never ran while the base dtor ran 26x.
+  Deleting through a QObject* covers it. Look for the `26*` marker.
+- The QProcess parse_args harness DOES merge its coverage back: the child is the
+  same instrumented binary and ::exit(1) still flushes .gcda. Verified before
+  trusting any config.cpp gap (config.cpp:66, the wss:// exit, showed count 1 —
+  only a child can produce that).
+- config.cpp's biggest single gap was the INI branch of loadConfigFile(): any
+  --config suffix that is not .json goes through QSettings, twelve lines with
+  zero tests. Its defaults differ IN KIND from the JSON branch (QSettings
+  substitutes a default for an absent key; the JSON branch leaves the Config
+  member untouched).
+- To reach loadConfigFile's "cannot open" branch you need a path that EXISTS but
+  will not open — it checks exists() first and exits. Use a directory named
+  *.json, not chmod 000: these tests run as root and a mode-000 file still opens.
+- Unit-testing the term:: helpers without a terminal: put a temp file on fd 0
+  (RedirectedStdin). select() always reports a regular file ready and read()
+  returns bytes then 0, so queryCellSize() both parses a planted XTWINOPS reply
+  and hits its silent-terminal fallback fast. A pipe would block the full 500 ms.
+- XTWINOPS replies HEIGHT FIRST: ESC [ 6 ; <h> ; <w> t. The fixture uses 32/14
+  on purpose so a swap fails loudly.
+- The flag is --profile, not --profile-name; the Config field is profileName.
+  That was the one test that failed on first run this phase.
+- 29 lines of terminal_ui.cpp stay uncovered and should: enterRawMode's success
+  path, begin() past raw mode, end(), terminalSize's TIOCGWINSZ branch, and the
+  three m_started repaint lines. The pty suites cover them through a separate,
+  UNINSTRUMENTED anoa-browser process. Adding a pty to the QTest binary to chase
+  them would break the 80x24-constant invariant the whole suite rests on.
+- The gate is scoped to the three Qt6::Core-only unit libs on purpose. Folding
+  in browser/http/cdp would report ~0% for code the vitest suites cover well,
+  because that binary is not instrumented. Widening it = instrument the main
+  binary + preserve its .gcda from the integration suites. Separate piece of work.
+- Verified the gate fails, not just passes: COVERAGE_MIN=95 exits 1 naming
+  terminal_ui.cpp. Also verified SANITIZE+COVERAGE together is a CMake FATAL_ERROR.
+- Sandbox: gcov 13.3.0 present, lcov/gcovr NOT installed — hence the hand-rolled
+  awk table in tests/coverage.sh rather than a gcovr dependency.
+
+## Phase 16 — test quality
+
+- The one test that was actually broken: build_shape.test.sh TERM-BUILD-02b
+  only looked for src/terminal/ refs BEFORE `if(NOT WIN32)`, never past
+  `endif()`. A source appended to the bottom of tests/unit/CMakeLists.txt --
+  the realistic regression -- sailed through. TERM-BUILD-02 already got this
+  right; the two now share one assert_guarded function. Verified negatively.
+- Same file, same trap TERM-BUILD-01's comment warns about: a "no strays"
+  check passes vacuously when the grep finds nothing. Both cases now require
+  count >= 1.
+- CFG-13/CFG-14 asserted exit code 1 only, but loadConfigFile has THREE
+  exit(1) branches and CFG-23 drives the very same bad_json harness mode down
+  a different one. Exit-code-only assertions on a function with multiple exit
+  paths are worth almost nothing -- assert the message.
+- TERM-CFG-10 and -11 were each used twice (phase 15 reused IDs the plan had
+  already assigned to the ws:// / http:// cases). Renumbered to 12/13 and
+  synced phase-15-coverage.md. Check the plan's ID range before adding a case.
+- Two derived assertions removed (Math.sign of a value already compared to
+  -120; parseInt of a string already compared to '120'). They cannot fail
+  independently of the line above them. The real pin in both suites is the
+  opposite-notch assertion that follows.
+- Kept TERM-GUI-01 even though it asserts what this test file's own main()
+  builds -- it is the premise guard for TERM-GUI-02/03, which stop proving
+  anything headless if the harness silently becomes a QApplication.
+- CORRECTED in phase 17. The earlier note here said port_layout.test.sh fails
+  6/14 in this sandbox because "no GL, no GPU, so WebEngine cannot start", and
+  told the next agent not to chase it. That diagnosis was wrong and the advice
+  was dangerous -- it would have hidden a real regression. The actual cause is
+  that `nc` is not installed: wait_for_port() is `while ! nc -z ...`, so with no
+  nc every readiness probe fails and every browser-launching case reports
+  "Browser failed to start". WebEngine starts fine here despite the QRhiGles2 /
+  Vulkan noise on stderr -- /json/version answers in about 2 seconds. After
+  `apt-get install -y netcat-openbsd`: port_layout 14/14, smoke.sh 4/4,
+  extensions.test.sh 4/4, vitest 103/103. Same trap in tests/regression/smoke.sh
+  and tests/integration/extensions.test.sh, which use the same probe.
+  Lesson: when a readiness probe fails, prove the service is down before
+  blaming the environment -- curl it by hand.
+- build-asan/ on disk can be STALE-partial: ctest reported ConfigTests "Not
+  Run" because only the terminal targets had been built there. `make test`
+  builds everything; a hand-driven build dir may not. Build the target before
+  believing a "Not Run".
+
+## Embedded terminal, navigation shortcuts, window chrome (2026-08-01)
+
+- `anoa-browser terminal` with no target now hosts its own browser in-process.
+  The decision is made by the argv pre-scan in main.cpp, not from Config: the
+  defaults of termHost/termPort are indistinguishable from a user typing them,
+  and `--term-port 9222` must keep meaning "connect to the browser already
+  there". Only this one case builds QApplication; --term-port and --cdp stay
+  QCoreApplication clients so they still work over SSH with no browser present.
+
+- The GUI chrome is a *wrapper* around AnoaBrowser, never a child of it.
+  http_server.cpp captures with `m_browser->grab()` and reports
+  `m_browser->width()/height()` as the viewport that /render/click coordinates
+  are measured in. A toolbar inside the view would appear in every screenshot
+  and shift every click by its own height. Verified after the change: row 0 of
+  a headed capture is a single colour and the viewport still reads 1280x720.
+
+- Alt-arrow parsing matches its prefix byte by byte against what has arrived,
+  rather than waiting for six bytes. "Wait for six" stalls the input buffer on
+  every other CSI beginning with '1' — Home is ESC [ 1 ~, four bytes — until the
+  user happens to press something else. Pinned by TERM-NAV-03.
+
+- Esc is deliberately not the URL prompt's cancel key. Distinguishing a lone Esc
+  from the start of an arrow or mouse report needs a timeout, and guessing is
+  exactly what caused bug-002. Ctrl-C/Ctrl-G cancel instead; Esc-led sequences
+  are swallowed whole with the same partial-buffering discipline as the main
+  path.
+
+- macOS cannot validate the pty suites. terminal_http.test.js and
+  terminal_cdp.test.js skip themselves because they call GNU `script -q -c` and
+  macOS ships BSD `script`; port_layout.test.sh fails several cases on
+  "extra_args[@]: unbound variable", which is bash 3.2 under nounset (macOS's
+  /bin/bash) and not a behaviour difference. Do not read either as a regression
+  on a Mac — check them on Linux/CI. build_shape, extensions, the unit suites
+  and vitest all run fine here.
+
+- bug-004 filed: /render/screenshot.ppm truncates responses over ~1 MB while
+  Content-Length declares the full size. Pre-existing and unrelated to this
+  work; invisible to every in-repo caller because they all request scaled
+  frames.

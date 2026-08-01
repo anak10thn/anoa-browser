@@ -13,10 +13,24 @@ env:
 
 jobs:
   # ── 1. Unit Tests (QTest, no binary needed) ────────────────────────────────
+  # Runs on both Linux and macOS: the QTest suite carries the check that QImage
+  # decodes PNG under a plain QCoreApplication (no GUI application object),
+  # which terminal mode depends on and which is platform-specific.
   unit-tests:
-    name: Unit Tests (QTest)
-    runs-on: ubuntu-22.04
+    name: Unit Tests (QTest, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            qt_host: linux
+            qt_arch: linux_gcc_64
+          - os: macos-14
+            qt_host: mac
+            qt_arch: clang_64
 
     steps:
       - uses: actions/checkout@v4
@@ -24,15 +38,18 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          host: linux
+          host: ${{ matrix.qt_host }}
           target: desktop
-          arch: linux_gcc_64
+          arch: ${{ matrix.qt_arch }}
           modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
+          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ matrix.os }}
 
+      # Only Linux needs this; the top-level find_package pulls in WebEngine,
+      # which wants CUPS headers there.
       - name: Install system dependencies
+        if: runner.os == 'Linux'
         run: sudo apt-get install -y libcups2-dev
 
       - name: Configure (BUILD_TESTS=ON)
@@ -42,11 +59,62 @@ jobs:
             -DBUILD_TESTS=ON \
             -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
-      - name: Build test target
-        run: cmake --build build --target anoa-browser-test-config --parallel
+      # Three targets, three libraries, no WebEngine in any of them:
+      # anoa-config-lib (config.cpp against Qt6::Core), anoa-terminal-bytes-lib
+      # (the wire-facing PPM/PNG parsers) and anoa-terminal-ui-lib (the input
+      # parser, cell map and image-protocol renderers).
+      - name: Build test targets
+        run: |
+          cmake --build build --parallel \
+            --target anoa-browser-test-config \
+                     anoa-browser-test-frame-bytes \
+                     anoa-browser-test-terminal-ui
 
       - name: Run unit tests (CTest)
         run: ctest --test-dir build -V --output-on-failure
+
+      # Linux only, and only the two terminal targets. frame_bytes.cpp sizes a
+      # copy from numbers a peer chose off the wire — an out-of-bounds read and
+      # an unsigned wrap are exactly what these sanitizers exist for, and the
+      # bug they were added for (bug-001) was a guard that wrapped to SIZE_MAX.
+      # Cheap because neither target links WebEngine: it is a rebuild of two
+      # small libraries, not of the browser.
+      - name: Run unit tests under ASan + UBSan
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DANOA_TEST_SANITIZE=ON \
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+          cmake --build build-asan --parallel \
+            --target anoa-browser-test-frame-bytes anoa-browser-test-terminal-ui
+          ./build-asan/tests/unit/anoa-browser-test-frame-bytes
+          ./build-asan/tests/unit/anoa-browser-test-terminal-ui
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+      # Linux only, and a third build of the same three libraries — gcov and
+      # ASan want different instrumentation, so tests/unit/CMakeLists.txt
+      # refuses to enable both at once.
+      #
+      # The gate covers what the unit targets link and nothing else. The
+      # browser/http/cdp sources are driven only by the integration and e2e
+      # suites, which talk to a separate anoa-browser process; that process is
+      # not instrumented, so folding those files in here would report 0% for
+      # code those suites cover well. See the header of tests/coverage.sh.
+      - name: Check unit-test line coverage
+        if: runner.os == 'Linux'
+        run: QT_PREFIX=$QT_ROOT_DIR COVERAGE_MIN=80 bash tests/coverage.sh
+
+      - name: Upload coverage listings
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-gcov
+          path: build-coverage/.coverage-report/*.gcov
+          if-no-files-found: warn
+          retention-days: 7
 
   # ── 2. Integration Tests (Node.js + running binary) ───────────────────────
   integration-tests:
@@ -135,6 +203,42 @@ jobs:
         run: bash tests/integration/extensions.test.sh
         env:
           ANOA_BINARY: ./build/anoa-browser
+
+      # Reads the tree, not the binary: terminal mode is compiled out on
+      # Windows and there is no Windows job, so the only available check that
+      # it stays compiled out is a negative one.
+      - name: Run build shape tests
+        run: bash tests/integration/build_shape.test.sh
+
+  # ── 3b. Qt API Floor ───────────────────────────────────────────────────────
+  # CMakeLists.txt says the floor is Qt 6.4; every other job pins 6.7.3, so
+  # without this nothing between the two numbers is ever exercised and a
+  # \since 6.5 API reaches a distro user before it reaches CI. Syntax-only
+  # against QtCore/Gui/Network/WebSockets — no WebEngine, no link step, which
+  # is what makes a second Qt version affordable to install.
+  qt-floor:
+    name: Qt 6.4 API Floor
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.4.3"
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebsockets
+          install-deps: true
+          cache: true
+          cache-key-prefix: qt-6.4.3-floor
+
+      # QT_FLOOR_PREFIX is unset here on purpose: the script falls back to
+      # QT_ROOT_DIR, which install-qt-action exports into the job environment.
+      - name: Syntax-check src/terminal against the declared floor
+        run: bash tests/integration/qt_floor.test.sh
 
   # ── 4. E2E Tests (Playwright + Puppeteer) ─────────────────────────────────
   e2e-tests:

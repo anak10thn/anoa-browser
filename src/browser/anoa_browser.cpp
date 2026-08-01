@@ -18,6 +18,38 @@
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
 
+namespace {
+
+// QWebEnginePage's default javaScriptConsoleMessage() writes every console
+// message the page produces to stderr. In terminal mode stderr *is* the screen
+// the viewer is painting: a single "js: Unrecognized feature: 'web-share'." from
+// an ordinary site scrolls the alt screen, which pushes the status bar up and
+// leaves a copy of it stranded mid-page. Browser mode keeps the messages, where
+// they are a debugging aid and land on a terminal nobody is drawing into.
+class AnoaPage : public QWebEnginePage
+{
+public:
+    AnoaPage(bool silenceConsole, QWebEngineProfile *profile, QObject *parent)
+        : QWebEnginePage(profile, parent)
+        , m_silenceConsole(silenceConsole)
+    {
+    }
+
+protected:
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString &message,
+                                  int lineNumber, const QString &sourceId) override
+    {
+        if (m_silenceConsole)
+            return;
+        QWebEnginePage::javaScriptConsoleMessage(level, message, lineNumber, sourceId);
+    }
+
+private:
+    bool m_silenceConsole;
+};
+
+} // namespace
+
 AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     : QWebEngineView(parent)
     , m_config(config)
@@ -27,12 +59,23 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     // profile/page. Setting it here, before creating QWebEngineProfile and
     // calling setPage(), ensures Chromium picks up the remote-debugging port.
     // Chromium DevTools runs on port+1; our HTTP/WS proxy layer listens on port.
-    QByteArray flags = "--remote-debugging-port=" + QByteArray::number(m_config.port + 1);
-    // Chromium 111+ rejects DevTools WebSocket connections whose Origin header
-    // is not allowlisted. Remote CDP clients (tunnels, reverse proxies, browser
-    // frontends) connect from arbitrary origins, so allow all; access control
-    // is enforced by our own auth-token proxy layer instead.
-    flags += " --remote-allow-origins=*";
+    QByteArray flags;
+    if (m_config.termEmbedded) {
+        // The embedded viewer reaches this browser through a pointer, so there
+        // is nothing for a debugging port to serve — and opening one would both
+        // collide with the anoa-browser the user may already be running on the
+        // default port and print "DevTools listening on ..." onto the alt
+        // screen the viewer is drawing. Chromium's own logging goes for the
+        // same reason: stderr is the terminal the UI owns.
+        flags = "--disable-logging --log-level=3";
+    } else {
+        flags = "--remote-debugging-port=" + QByteArray::number(m_config.port + 1);
+        // Chromium 111+ rejects DevTools WebSocket connections whose Origin
+        // header is not allowlisted. Remote CDP clients (tunnels, reverse
+        // proxies, browser frontends) connect from arbitrary origins, so allow
+        // all; access control is enforced by our own auth-token proxy layer.
+        flags += " --remote-allow-origins=*";
+    }
     if (m_config.noSandbox)
         flags += " --no-sandbox";
     if (m_config.headless)
@@ -43,7 +86,7 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
     m_profile = QWebEngineProfile::defaultProfile();
-    setPage(new QWebEnginePage(m_profile, this));
+    setPage(new AnoaPage(m_config.terminalMode, m_profile, this));
 }
 
 void AnoaBrowser::init()

@@ -295,6 +295,26 @@ void HttpServer::handleNewConnection()
             m_browser->load(parsedUrl);
 
         sendResponse(socket, 200, "OK", "navigating", "text/plain");
+    } else if (method == QLatin1String("POST")
+               && (path == QLatin1String("/render/back")
+                   || path == QLatin1String("/render/forward")
+                   || path == QLatin1String("/render/reload"))) {
+        // History control. Deliberately not one endpoint with a direction
+        // parameter: these are three verbs a caller either has or does not,
+        // and a typo in a parameter would silently do the wrong one.
+        //
+        // back/forward at the end of history are no-ops in Chromium, so there
+        // is nothing to report but acceptance — answering 200 for a request
+        // that changed nothing is the honest description of what happened.
+        if (m_browser) {
+            if (path.endsWith(QLatin1String("back")))
+                m_browser->back();
+            else if (path.endsWith(QLatin1String("forward")))
+                m_browser->forward();
+            else
+                m_browser->reload();
+        }
+        sendResponse(socket, 200, "OK", "ok", "text/plain");
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render")) {
         QString screenshotUrl = QStringLiteral("/render/screenshot.png");
         if (!m_authToken.isEmpty()) {

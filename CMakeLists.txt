@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(anoa-browser VERSION 0.3.1 LANGUAGES CXX)
+project(anoa-browser VERSION 0.4.0 LANGUAGES CXX)
 
 # CI injects the git tag here so the tag is the single source of truth for the
 # version — CMakeLists.txt never needs a manual bump for releases. The value
@@ -53,12 +53,38 @@ endif()
 
 target_sources(anoa-browser PRIVATE
     src/config/config.cpp
+    src/common/url_input.cpp
     src/browser/anoa_browser.cpp
+    src/browser/browser_window.cpp
+    src/browser/browser_window.h
     src/http/http_server.cpp
     src/cdp/cdp_proxy.cpp
     src/cdp/cdp_extensions.cpp
     src/pdf/pdf_handler.cpp
 )
+
+# Terminal mode (`anoa-browser terminal`) is POSIX-only — termios, select() on
+# STDIN and SIGWINCH have no MSVC equivalent. On Windows the sources are left
+# out entirely and main.cpp reports the unsupported platform at runtime.
+if(NOT WIN32)
+    target_sources(anoa-browser PRIVATE
+        src/terminal/terminal_app.cpp
+        src/terminal/terminal_ui.cpp
+        src/terminal/frame_bytes.cpp
+        src/terminal/render_http_client.cpp
+        src/terminal/cdp_client.cpp
+        src/terminal/cdp_frame_backend.cpp
+        src/terminal/inprocess_frame_backend.cpp
+        # frame_backend.h has no .cpp of its own, so AUTOMOC only sees it (and
+        # generates the FrameBackend metaobject) when it is listed here.
+        src/terminal/frame_backend.h
+        src/terminal/terminal_ui.h
+        src/terminal/render_http_client.h
+        src/terminal/cdp_client.h
+        src/terminal/cdp_frame_backend.h
+        src/terminal/inprocess_frame_backend.h
+    )
+endif()
 
 target_include_directories(anoa-browser PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -123,12 +149,6 @@ else()
     target_compile_options(anoa-browser PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# ── anoa-term: terminal viewer client (POSIX only, no Qt dependency) ────────
-if(NOT WIN32)
-    add_executable(anoa-term tools/anoa-term/anoa_term.cpp)
-    target_compile_options(anoa-term PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
 # RPATH for portable Linux distribution (binary finds ./lib at runtime)
 if(UNIX AND NOT APPLE)
     set_target_properties(anoa-browser PROPERTIES
@@ -156,12 +176,6 @@ if(APPLE)
     )
 else()
     install(TARGETS anoa-browser
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
-endif()
-
-if(NOT WIN32)
-    install(TARGETS anoa-term
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()

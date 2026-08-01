@@ -13,7 +13,8 @@ Works with Playwright, Puppeteer, and any other CDP client that connects to a Ch
 - **HTTP discovery endpoints** — `/json`, `/json/version`, `/json/list` (Chrome-compatible)
 - **WebSocket CDP proxy** with session multiplexing and optional bearer token auth
 - **Web render endpoints** — live viewer, PNG screenshots, MJPEG stream, navigation, click/scroll injection over plain HTTP (`/render/*`)
-- **Terminal viewer (`anoa-term`)** — watch and control the browser from any terminal: live ANSI rendering, mouse clicks and scrolling forwarded to the page
+- **Terminal viewer (`anoa-browser terminal`)** — a mode of the same binary, not a second executable: watch and control the browser from any terminal with live ANSI rendering, mouse clicks and scrolling forwarded to the page. `--cdp` points it at any external Chrome/Chromium/Playwright endpoint instead (POSIX only)
+- **Window chrome in headed mode** — running without `--headless` gives an address field with back / forward / reload and a menu, and an **auto-hide mode** (`Ctrl-Shift-H`, or the menu) where the toolbar disappears and comes back when the pointer touches the top edge, like the macOS menu bar in full screen. The chrome wraps the web view rather than living inside it, so `/render/*` still captures the page alone and click coordinates are unaffected; revealing an auto-hidden toolbar overlays the page instead of resizing it, so nothing reflows on hover. `--headless` builds no chrome at all
 - **Remote CDP friendly** — Chromium started with `--remote-allow-origins=*`, so clients behind tunnels/reverse proxies connect without Origin rejections (access control via `--auth-token`)
 - **`Page.printToPDF`** — intercepted and handled via `QWebEnginePage::printToPdf`
 - **Named browser profiles** — isolated cookie jars and localStorage per profile
@@ -35,7 +36,7 @@ brew trust porcupine-md/tap        # tap ships a cask + formula
 brew install --cask anoa-browser
 ```
 
-Installs `anoa-browser` and `anoa-term` into your `PATH`. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
+Installs a single `anoa-browser` shim into your `PATH`, pointing at `anoa-browser.app/Contents/MacOS/anoa-browser`. That one executable is the whole product — the terminal viewer is the `anoa-browser terminal` subcommand of it, not a separate file in the bundle. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
 
 **Upgrade** — `brew update` first, so the tap picks up the newest release:
 
@@ -51,6 +52,8 @@ brew tap porcupine-md/tap
 brew install anoa-browser-linux
 ```
 
+The formula creates exactly one symlink, `bin/anoa-browser` → `libexec/anoa-browser.sh`, and terminal mode is reached through it as `anoa-browser terminal`. If you are upgrading from a release that installed a second command, read the breaking-change note at the end of [Terminal Viewer](#terminal-viewer-anoa-browser-terminal).
+
 **Upgrade:**
 
 ```bash
@@ -60,13 +63,15 @@ brew upgrade anoa-browser-linux
 
 ### Linux (portable tarball)
 
-The release tarball is self-contained: the binary, every Qt/WebEngine shared library, plugins, and resources, plus a launcher script that wires them together (`LD_LIBRARY_PATH`, `QTWEBENGINEPROCESS_PATH`, …).
+The release tarball is self-contained: one executable (`anoa-browser`), every Qt/WebEngine shared library under `lib/`, plugins, `resources/`, `translations/`, a `qt.conf`, plus a launcher script that wires them together (`LD_LIBRARY_PATH`, `QTWEBENGINEPROCESS_PATH`, …). Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
 
 ```bash
 tar xzf anoa-browser-linux-x86_64.tar.gz
 ./anoa-browser/anoa-browser.sh --headless --port 9222   # launcher, not the raw binary
-./anoa-browser/anoa-term
+./anoa-browser/anoa-browser.sh terminal                 # terminal viewer — same launcher
 ```
+
+Always go through `anoa-browser.sh`: the raw `anoa-browser` next to it has no Qt environment set up, in terminal mode as much as in browser mode.
 
 ### Windows
 
@@ -262,9 +267,19 @@ curl -X POST "http://localhost:9222/render/scroll?dy=-120&token=mysecret"
 
 ---
 
-## Terminal Viewer (`anoa-term`)
+## Terminal Viewer (`anoa-browser terminal`)
 
-`anoa-term` renders the live browser view directly in your terminal and forwards terminal mouse input back to the page — click a link in your terminal and the browser clicks it. Built automatically alongside `anoa-browser` on Linux/macOS (POSIX only, no Qt dependency).
+`anoa-browser terminal` renders a live browser view directly in your terminal and forwards terminal mouse and keyboard input back to the page — click a link in your terminal and the browser clicks it. It is a **mode of the `anoa-browser` binary**, not a separate program: the word `terminal` before any options selects it, and that mode never starts a browser window, an HTTP server, or a CDP proxy of its own.
+
+**Given no target, it hosts its own browser.** Plain `anoa-browser terminal` — no `--term-host`, no `--term-port`, no `--cdp` — starts a browser inside the viewer process and renders it directly, with no port opened and nothing to start first:
+
+```bash
+anoa-browser terminal          # that is the whole setup
+```
+
+Naming any target switches it back to being a client: with `--term-host`/`--term-port` it views a running `anoa-browser` over the [`/render/*` endpoints](#web-render-endpoints), and with [`--cdp`](#attaching-to-an-external-cdp-endpoint---cdp) it attaches to any external Chrome/Chromium/Playwright endpoint. Those two remain thin clients that host nothing, which is what makes them usable over SSH on a machine with no browser at all. The embedded mode necessarily carries the WebEngine stack, and its status bar says `embedded` where the others name a host and port.
+
+**POSIX only.** The terminal sources are not compiled into the Windows build at all; there, `anoa-browser terminal` prints `Error: terminal mode is not supported on Windows` and exits non-zero.
 
 Two rendering backends, auto-detected:
 
@@ -273,30 +288,55 @@ Two rendering backends, auto-detected:
 | `iterm` / `kitty` | Full-resolution PNG (crisp) | iTerm2, WezTerm (`iterm`); kitty, Ghostty (`kitty`) |
 | `halfblock` | ANSI truecolor ▀ cells (1 cell = 1×2 px, pixelated) | Everything else with truecolor support |
 
+### Invocation
+
 ```
-anoa-term [options]
+anoa-browser terminal [options]
 
 Options:
-  --host <host>     anoa-browser host (default: 127.0.0.1)
-  --port <N>        anoa-browser HTTP port (default: 9222)
-  --token <secret>  Bearer token if the server was started with --auth-token
-  --fps <N>         Refresh rate, 1-30 (default: 10)
-  --gfx <mode>      auto | halfblock | iterm | kitty (default: auto)
+  (none)                 Host a browser in-process and view that
+  --term-host <host>     Host of the anoa-browser to view (default: 127.0.0.1)
+  --term-port <N>        HTTP port of the anoa-browser to view (1-65535, default: 9222)
+  --term-token <secret>  Bearer token, if the viewed endpoint requires one
+  --fps <N>              Refresh rate, 1-120 (default: 30)
+  --gfx <mode>           auto | halfblock | iterm | kitty (default: auto)
+  --cdp <url>            Attach to an external CDP endpoint instead of /render/*
 ```
+
+The connection flags are spelled `--term-*` deliberately. `--port` and `--auth-token` keep their browser meaning on the same shared parser (the port *this* process listens on, the token *it* demands), so no flag changes meaning between modes.
+
+**Terminal options are CLI-only.** `--config` reads the browser options from a JSON or INI file, but nothing in that file is consulted for terminal mode — `--term-host`, `--term-port`, `--term-token`, `--fps`, `--gfx` and `--cdp` must be passed on the command line.
 
 `--gfx auto` picks the image protocol from `TERM`/`TERM_PROGRAM`; pass `--gfx iterm` or `--gfx kitty` explicitly if detection misses (e.g. inside tmux, which hides the outer terminal — image protocols need tmux ≥ 3.4 with `allow-passthrough`, otherwise use `--gfx halfblock`).
 
-Controls:
+### Controls
+
+Mouse reporting uses the SGR extended protocol (`ESC [ < btn ; col ; row M`), which every modern terminal emits; cells are mapped back to page coordinates using the viewport size the endpoint reports, so clicks land where you see them even on a HiDPI page.
 
 | Input | Action |
 |---|---|
 | Left/right/middle mouse click | Click at that position in the page |
 | Mouse wheel | Scroll the page under the pointer |
-| Typing (any text, incl. paste) | Typed into the focused element |
-| `Enter` / `Backspace` / `Tab` / arrows | Forwarded to the page (arrows scroll when no field is focused) |
+| Typing (any text, incl. paste) | Typed into the focused element — a whole paste burst is forwarded as one event |
+| `Enter` / `Backspace` / `Tab` | Forwarded as key events (`Backspace` accepts both DEL and BS) |
+| Arrow keys | Forwarded to the page — they move the caret in a focused field, otherwise they scroll |
+| `Ctrl-L` | Open the address prompt on the status row |
+| `Ctrl-R` | Reload |
+| `Alt-Left` / `Alt-Right` | Back / forward through history |
+| `Ctrl-B` | Show or hide the status bar |
 | `Ctrl-C` / `Ctrl-Q` | Quit and restore the terminal |
 
-The status bar shows the last event forwarded to the browser (`click 640,360`, `typed "hello"`, …). If it doesn't change when you click, your terminal isn't delivering mouse reports — check its mouse-reporting setting, or in tmux enable `set -g mouse on`.
+**The status bar starts hidden**, so the page gets every row of the terminal; `Ctrl-B` brings it back. The address prompt ignores the setting and takes the row whenever it is open, so `Ctrl-L` is never typing into something invisible.
+
+The image backends (`iterm`, `kitty`) fit the frame into the cell grid with its aspect ratio kept, so a page shaped differently from the terminal is letterboxed — visible as unused rows below the page. In embedded mode the viewer removes the cause rather than the symptom: it asks its own browser for a viewport with the terminal's proportions, keeping the width from `--width` and deriving only the height, so the frame fills the grid. Over `--term-port` and `--cdp` the page belongs to somebody else and is left alone, so the letterbox stays. Halfblock never letterboxes at all — it asks for exactly the grid it has.
+
+While the address prompt is open it owns the keyboard — nothing reaches the page — and `Enter` navigates, `Ctrl-C` (or `Ctrl-G`) abandons the line without leaving the viewer, `Ctrl-U` clears it. A bare host is fine: `example.com` becomes `https://example.com`, while anything that already names a scheme (`http:`, `file:`, `about:`) is used as typed, and `localhost:8080` is read as a host and port rather than a scheme.
+
+`Esc` is deliberately *not* a cancel key. Telling a lone `Esc` from the start of an arrow or mouse report needs a timeout, and guessing is what made split escape sequences type their letters into the page (bug-002); the prompt swallows whole sequences instead.
+
+There is no single-letter quit: `q` is an ordinary printable character and is typed into the page, so you can fill in a search box without the viewer exiting. `Ctrl-C` is delivered as a keystroke rather than a signal (the terminal runs with `ISIG` off), so it quits immediately.
+
+The status bar shows the last event forwarded to the browser (`click 640,360`, `typed "hello"`, `key backspace`, …) alongside the backend, endpoint and viewport size. If it doesn't change when you click, your terminal isn't delivering mouse reports — check its mouse-reporting setting, or in tmux enable `set -g mouse on`.
 
 ```bash
 # 1. Start the browser (any machine, headless or headed)
@@ -306,10 +346,51 @@ The status bar shows the last event forwarded to the browser (`click 640,360`, `
 curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycombinator.com&token=mysecret"
 
 # 3. Watch and control it from your terminal (works over SSH too)
-./anoa-term --host localhost --port 9222 --token mysecret
+./anoa-browser terminal --term-host localhost --term-port 9222 --term-token mysecret
 ```
 
-Requires a terminal with SGR mouse support; the halfblock fallback additionally needs truecolor (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …).
+Requires a terminal with SGR mouse support; the halfblock fallback additionally needs truecolor (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …). Both stdin and stdout must be a terminal — piping either one is refused, since there is nothing to drive and nothing to paint.
+
+### Attaching to an external CDP endpoint (`--cdp`)
+
+`--cdp <url>` replaces the `/render/*` transport with a CDP WebSocket client (`Page.captureScreenshot` for frames, `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText` for input), so the viewer can drive any Chrome, Chromium, Edge or Playwright/Puppeteer-launched browser — not just anoa-browser.
+
+Two URL forms are accepted:
+
+| Form | Behaviour |
+|---|---|
+| `http://host:port` or `https://host:port` | Fetches `/json/list` and attaches to the **first `type: "page"` target**, dialling that target's `webSocketDebuggerUrl`. A URL with a path keeps it verbatim (`http://host/proxy/devtools` fetches exactly that), which is what makes reverse-proxied endpoints work; an empty path or a bare `/` becomes `/json/list`. |
+| `ws://host:port/devtools/page/<id>` | Dialled directly — no discovery request, and the target you name is the target you get. |
+
+```bash
+# Attach to a Chrome started with --remote-debugging-port=9222
+anoa-browser terminal --cdp http://127.0.0.1:9222
+
+# Attach to one specific page target, skipping discovery
+anoa-browser terminal --cdp ws://127.0.0.1:9222/devtools/page/ABC123 --gfx kitty
+```
+
+**Auth token.** `--term-token` is *not* ignored under `--cdp` — it becomes the bearer token for the CDP endpoint, sent both as an `Authorization: Bearer <secret>` header and as a `?token=<secret>` query parameter, on the `/json/list` request and on the WebSocket dial. That is what anoa-browser's own `--auth-token` proxy expects, and endpoints that ignore an unexpected header or query parameter (plain Chrome) are unaffected. `--term-host` and `--term-port` *are* ignored under `--cdp`, and the viewer says so on stderr before it takes over the screen.
+
+**`wss://` is not supported.** TLS CDP endpoints are rejected at argument-parsing time, because Qt is not built with OpenSSL here. Use `ws://`, or `http://` and let discovery hand you the right `ws://` URL. Tunnel it (SSH port-forward, stunnel) if the endpoint is only reachable over TLS.
+
+Two things worth knowing when the endpoint is anoa-browser itself: it uses [three consecutive ports](#port-layout), so `--cdp http://127.0.0.1:9222` discovers on 9222 and then dials `ws://127.0.0.1:9224/…` — the port shown in the status bar changing mid-session is correct, not a fault. And a dropped connection is retried with an exponential backoff (250 ms doubling to 8 s) that the status bar reports as `connecting` / `reconnecting (attempt N)`; before the *first* successful connect the retries are capped, so a wrong URL fails with a message instead of spinning forever.
+
+### Breaking change: `anoa-term` is gone
+
+The standalone `anoa-term` binary no longer exists and ships **no compatibility shim, symlink, or wrapper** — a shim would either be the second binary this merge removed, or a symlink whose `argv[0]` sniffing outlives its usefulness. Type `anoa-browser terminal` instead; every flag it used has a `--term-*` equivalent listed above (`--host` → `--term-host`, `--port` → `--term-port`, `--token` → `--term-token`; `--fps` and `--gfx` are unchanged, though `--fps` now defaults to 30 and accepts up to 120).
+
+Upgrading in place can leave a stale `anoa-term` on your `PATH` that no longer resolves. Two hazards:
+
+- **Linux (Homebrew):** `brew upgrade` unlinks the old keg before linking the new one, which normally takes `bin/anoa-term` with it — but it does not do so reliably if the link was force-linked, hand-created, or left behind by a partially failed unlink. The symptom is a *dangling* symlink into the new keg's `libexec/anoa-term`, so you get "No such file or directory" rather than "command not found".
+- **macOS (cask):** the cask's `binary` shim for `anoa-term` is removed on **reinstall**, not on upgrade, so the old shim can survive a `brew upgrade --cask`.
+
+If `anoa-term` still appears on your `PATH` after upgrading, uninstall and reinstall:
+
+```bash
+brew uninstall anoa-browser-linux && brew install anoa-browser-linux   # Linux
+brew uninstall --zap --cask anoa-browser && brew install --cask anoa-browser   # macOS
+```
 
 ---
 
@@ -380,11 +461,15 @@ anoa-browser
 ├── cdp/
 │   ├── cdp_proxy             # QWebSocketServer bridge, session multiplexing, auth
 │   └── cdp_extensions        # Profiler / HeapProfiler / Security domain stubs
+├── terminal/                 # `anoa-browser terminal` — POSIX only, compiled out on Windows
+│   ├── terminal_app          # QCoreApplication loop — QSocketNotifier(stdin) + frame QTimer
+│   ├── terminal_ui           # termios raw mode, SIGWINCH, iTerm2/kitty image protocols or
+│   │                         # ANSI half-block fallback, status bar, SGR mouse/key parsing
+│   ├── frame_backend         # transport seam — frames out, input in
+│   ├── render_http_client    # default backend — /render/screenshot.ppm + click/scroll/type/key
+│   ├── cdp_client            # --cdp transport — QWebSocket, id/response correlation, discovery
+│   └── cdp_frame_backend     # --cdp backend — Page.captureScreenshot / getLayoutMetrics / Input.*
 └── pdf/                      # Page.printToPDF interceptor via QWebEnginePage::printToPdf
-
-anoa-term (tools/anoa-term/)  # POSIX terminal viewer — iTerm2/kitty image protocols
-                              # or ANSI half-block fallback; SGR mouse →
-                              # /render/click + /render/scroll
 ```
 
 All subsystems are implemented with Qt built-in classes (no third-party dependencies beyond Qt6).

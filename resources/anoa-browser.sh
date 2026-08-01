@@ -2,8 +2,8 @@
 # Launcher for the portable Linux bundle.
 #
 # Layout (relative to this script):
-#   anoa-browser                       main binary (RPATH $ORIGIN/lib)
-#   anoa-term                          terminal viewer client
+#   anoa-browser                       single binary; `anoa-browser terminal`
+#                                      is the viewer subcommand (RPATH $ORIGIN/lib)
 #   lib/                               bundled shared libraries + Qt plugins
 #   lib/qt6/libexec/QtWebEngineProcess Chromium helper process
 #   resources/                         QtWebEngine .pak resource files
