@@ -95,7 +95,7 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     : QWidget(parent)
     , m_view(view)
 {
-    setWindowTitle(QStringLiteral("anoa-browser"));
+    setWindowTitle(QStringLiteral("anoa"));
 
     m_back = makeGlyphButton(QStringLiteral("‹"), // SINGLE LEFT-POINTING QUOTATION MARK
                              QStringLiteral("Back (Alt+Left)"), 26);

@@ -470,7 +470,7 @@ private slots:
         capture.take();
 
         QVERIFY(feed(ui, QByteArray()));
-        QVERIFY2(statusRow(capture.take()).contains("anoa-browser terminal"),
+        QVERIFY2(statusRow(capture.take()).contains("anoa terminal"),
                  "the bar was missing on a fresh viewer");
 
         toggleStatusBar(ui); // away
@@ -480,7 +480,7 @@ private slots:
 
         toggleStatusBar(ui); // and back
         QVERIFY(feed(ui, QByteArray()));
-        QVERIFY(statusRow(capture.take()).contains("anoa-browser terminal"));
+        QVERIFY(statusRow(capture.take()).contains("anoa terminal"));
     }
 
     // TERM-BAR-02: the URL prompt outranks the setting. It is a reply the user
@@ -1008,14 +1008,18 @@ private slots:
     void testStatusBarTruncatesOnByteBoundary()
     {
         CapturedStdout capture;
-        // 23 characters, chosen so the em dash in " connection lost <em> "
+        // 31 characters, chosen so the em dash in " connection lost <em> "
         // straddles column 80:
-        //   " anoa-browser terminal "        23
-        //   description                      23
+        //   " anoa terminal "                15
+        //   description                      31
         //   " 0x0 [halfblock]"               16   -> em dash begins at byte 79
         //   " connection lost "              17
-        RecordingBackend backend(QStringLiteral("terminal.example.com:80"));
-        QCOMPARE(backend.description().size(), qsizetype(23));
+        //
+        // The description carries the slack because it is the only field here
+        // whose length the test controls; the header shrank when the command
+        // was renamed from anoa-browser to anoa, and this number absorbed it.
+        RecordingBackend backend(QStringLiteral("terminal-host.example.com:18080"));
+        QCOMPARE(backend.description().size(), qsizetype(31));
 
         TerminalUi ui(terminalConfig("halfblock"), &backend);
         ui.onFrameFailed(QStringLiteral("no response")); // m_connected = false

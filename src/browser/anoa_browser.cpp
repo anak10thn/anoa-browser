@@ -63,7 +63,7 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     if (m_config.termEmbedded) {
         // The embedded viewer reaches this browser through a pointer, so there
         // is nothing for a debugging port to serve — and opening one would both
-        // collide with the anoa-browser the user may already be running on the
+        // collide with the anoa the user may already be running on the
         // default port and print "DevTools listening on ..." onto the alt
         // screen the viewer is drawing. Chromium's own logging goes for the
         // same reason: stderr is the terminal the UI owns.

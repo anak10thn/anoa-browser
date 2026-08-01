@@ -1,7 +1,7 @@
 #pragma once
 
 // The default FrameBackend: the /render/* HTTP endpoints of a local
-// anoa-browser, carried over verbatim from tools/anoa-term/anoa_term.cpp.
+// anoa, carried over verbatim from tools/anoa-term/anoa_term.cpp.
 //
 // This path is deliberately the known-good control for CDP mode — endpoints,
 // query strings, headers and the token handling are unchanged, so a behaviour

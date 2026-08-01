@@ -8,10 +8,10 @@
 
 ## Project Overview
 
-- **Name**: anoa (binary: `anoa-browser`)
+- **Name**: anoa (binary: `anoa`)
 - **Type**: native desktop/CLI binary — a browser automation host, not a Node service
 - **Stack**: C++17 + Qt 6 (Widgets, WebEngineWidgets, WebEngineCore, Network, WebSockets), built with CMake ≥ 3.16. `find_package(Qt6 6.4 REQUIRED ...)` is the floor; CI pins 6.7.3. Node is used **only** for the test suites under `tests/`.
-- **Description**: A Qt WebEngine browser that exposes the live page over an HTTP `/render/*` + screenshot API and an authenticated CDP WebSocket proxy, and can render that page into a terminal via `anoa-browser terminal`.
+- **Description**: A Qt WebEngine browser that exposes the live page over an HTTP `/render/*` + screenshot API and an authenticated CDP WebSocket proxy, and can render that page into a terminal via `anoa terminal`.
 
 ---
 
@@ -26,8 +26,8 @@ src/
 ├── config/         # Config struct, parseArgs(), loadConfigFile() — shared by both modes
 ├── http/           # HttpServer — /json/*, /render/*, screenshot and input endpoints
 ├── pdf/            # PdfHandler — print-to-PDF
-└── terminal/       # `anoa-browser terminal`: viewer UI, HTTP transport, CDP transport
-resources/          # .desktop file, SVG icon, anoa-browser.sh bundle launcher
+└── terminal/       # `anoa terminal`: viewer UI, HTTP transport, CDP transport
+resources/          # .desktop file, SVG icon, anoa.sh bundle launcher
 tests/
 ├── unit/           # QTest + CTest (test_config.cpp, its own CMakeLists.txt)
 ├── integration/    # vitest (*.test.js) + two bash suites (*.test.sh)
@@ -35,8 +35,8 @@ tests/
 └── regression/     # smoke.sh — fast post-commit check of the 5 critical paths
 .github/
 ├── workflows/      # ci.yml, release.yml, update-homebrew-tap.yml
-├── homebrew/       # anoa-browser.rb.tpl (cask), anoa-browser-linux.rb.tpl (formula)
-└── entitlements/   # anoa-browser.entitlements for macOS codesigning
+├── homebrew/       # anoa.rb.tpl (cask), anoa-linux.rb.tpl (formula)
+└── entitlements/   # anoa.entitlements for macOS codesigning
 ```
 
 ### Naming Conventions
@@ -76,15 +76,15 @@ tests/
   off stdout.
 - **Integration (vitest)**: `cd tests/integration && npm install && npx vitest run`.
   `vitest.config.js` sets `fileParallelism: false` on purpose — each file spawns its
-  own `anoa-browser` on the same port triplet, so concurrent files would bind-clash
+  own `anoa` on the same port triplet, so concurrent files would bind-clash
   or silently talk to the wrong instance. Binary and port come from `ANOA_BINARY` /
   `ANOA_PORT`.
 - **Integration (bash)**: `bash tests/integration/port_layout.test.sh` and
   `bash tests/integration/extensions.test.sh`, both taking
-  `ANOA_BINARY=./build/anoa-browser`.
+  `ANOA_BINARY=./build/anoa`.
 - **E2E**: `cd tests/e2e && npm install`, then `npx playwright test` (needs
   `npx playwright install --with-deps chromium`) and `node --test puppeteer.test.js`.
-  Both attach to an already-running `anoa-browser`; the test does not start it.
+  Both attach to an already-running `anoa`; the test does not start it.
 - **Regression**: `bash tests/regression/smoke.sh` — same `ANOA_BINARY`/`ANOA_PORT`
   contract.
 - Tests run against a **real browser process**, never a mock. Each vitest and bash
@@ -117,7 +117,7 @@ tests/
   against `Qt6::Core` only.** Never add terminal (or browser, or http) sources to
   that target, and never make `config.cpp` depend on QtGui/QtNetwork/QtWebSockets —
   the unit test job builds no WebEngine.
-- **`anoa-browser` uses three ports, not one.** `--port 9222` means HTTP on 9222,
+- **`anoa` uses three ports, not one.** `--port 9222` means HTTP on 9222,
   Chromium's internal DevTools on 9223 and the `CdpProxy` on 9224; `HttpServer`
   rewrites `webSocketDebuggerUrl` from +1 to +2 so clients land on the authenticated
   proxy. A terminal session started with `--cdp http://host:9222` therefore ends up
@@ -127,8 +127,8 @@ tests/
   catch the regression. `QWebSocket::errorOccurred` (6.5+) already needed a
   `QT_VERSION_CHECK` fallback.
 - `parseArgs()` prints `Warning: --auth-token is not set; ...` unconditionally, so
-  `anoa-browser terminal` prints it too even though terminal mode starts no CDP
-  server. Known noise — tests filter stderr on the `anoa-browser terminal: ` prefix
+  `anoa terminal` prints it too even though terminal mode starts no CDP
+  server. Known noise — tests filter stderr on the `anoa terminal: ` prefix
   rather than counting lines.
 - **"Browser failed to start" from a bash suite usually means `nc` is missing, not
   that the browser is broken.** `wait_for_port()` is `while ! nc -z ...` in
@@ -148,7 +148,7 @@ tests/
 
 ### One binary, two modes (the merged-binary convention)
 
-- **There is exactly one executable, `anoa-browser`.** The terminal viewer used to be
+- **There is exactly one executable, `anoa`.** The terminal viewer used to be
   a second binary (`anoa-term`); it was merged in and the separate target is gone.
   `add_executable` appears once in the top-level `CMakeLists.txt`.
 - **`terminal` is a bare positional word, detected by a raw-argv pre-scan in
@@ -209,7 +209,7 @@ tests/
   exactly like a product failure and is not one. See *Known Gotchas*.
 - **Homebrew** is the distribution channel: `.github/homebrew/*.tpl` are rendered by
   `update-homebrew-tap.yml` on release. macOS builds are codesigned/notarized using
-  `.github/entitlements/anoa-browser.entitlements`.
+  `.github/entitlements/anoa.entitlements`.
 
 ---
 
@@ -219,7 +219,7 @@ tests/
 # Qt 6 + CMake must be installed first (Homebrew on macOS, aqtinstall or the
 # distro packages on Linux). On Linux also: sudo apt-get install libcups2-dev
 
-make build                       # Debug build -> build/anoa-browser
+make build                       # Debug build -> build/anoa
 make release                     # Release build -> build-release/
 make release-static QT_PREFIX=/opt/Qt/6.7.3/gcc_64   # what the release job runs
 make test                        # re-configures with -DBUILD_TESTS=ON, runs ctest
@@ -227,8 +227,8 @@ make coverage                    # gcov the unit libs, fail under COVERAGE_MIN (
 make lint                        # clang-tidy over src/ (skipped if not installed)
 make help                        # every target and the QT_PREFIX in effect
 
-./build/anoa-browser --headless --no-sandbox --port 9222   # run the browser
-./build/anoa-browser terminal --term-port 9222             # view it in a terminal
+./build/anoa --headless --no-sandbox --port 9222   # run the browser
+./build/anoa terminal --term-port 9222             # view it in a terminal
 ```
 
 ---
@@ -463,14 +463,14 @@ Human should review and curate periodically.
   `enterRawMode()`'s success path, `begin()` past raw mode, `end()`,
   `terminalSize()`'s `TIOCGWINSZ` branch and the three "repaint once started"
   lines are 29 of `terminal_ui.cpp`'s lines and they will never show as covered:
-  the pty suites reach them through a *separate, uninstrumented* `anoa-browser`
+  the pty suites reach them through a *separate, uninstrumented* `anoa`
   process. Do not add a pty to the unit target to chase them — the invariant
   that this suite never calls `begin()` is what keeps its 80x24 geometry a
   constant rather than a property of the CI runner.
 - **The quit flag has no reset**, so `testQuitSignalStopsTheFrameLoop` must stay
   the last slot in `test_terminal_ui.cpp`. Every `tick()` after it returns false.
   New cases go above it.
-- **`anoa-browser --help` aborts without a display.** Browser mode constructs a
+- **`anoa --help` aborts without a display.** Browser mode constructs a
   `QApplication` before `parseArgs()` runs, so `--help` needs `QT_QPA_PLATFORM=offscreen`
   (the real Qt variable — `port_layout.test.sh` uses a misspelt `QPA_PLATFORM`
   elsewhere and gets away with it only because those cases also pass `--headless`).

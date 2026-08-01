@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Suite 11 — Regression Smoke Tests
 # Fast post-commit check for the 5 critical paths.
-# Usage: ANOA_BINARY=./build/anoa-browser bash tests/regression/smoke.sh
+# Usage: ANOA_BINARY=./build/anoa bash tests/regression/smoke.sh
 set -euo pipefail
 
-BINARY="${ANOA_BINARY:-./build/anoa-browser}"
+BINARY="${ANOA_BINARY:-./build/anoa}"
 PORT="${ANOA_PORT:-9222}"
 WS_PORT=$((PORT + 2))
 PASS=0
@@ -53,7 +53,7 @@ stop_browser() {
 assert_pass() { echo "  PASS  $1"; PASS=$((PASS + 1)); }
 assert_fail() { echo "  FAIL  $1${2:+ — $2}"; FAIL=$((FAIL + 1)); }
 
-echo "Starting anoa-browser smoke tests..."
+echo "Starting anoa smoke tests..."
 if ! start_browser; then
   echo "FATAL: Could not start $BINARY on port $PORT" >&2
   exit 1

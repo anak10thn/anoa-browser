@@ -205,7 +205,7 @@ private slots:
     // parseArgs which requires the full binary CLI pipeline; see
     // tests/integration/port_layout.test.sh PORT-INVALID-* cases).
 
-    // ── Terminal mode options (`anoa-browser terminal`) ────────────────────
+    // ── Terminal mode options (`anoa terminal`) ────────────────────
     // These live on the shared parser, so an unregistered flag would make
     // QCommandLineParser::process() hard-exit with "Unknown option".
 

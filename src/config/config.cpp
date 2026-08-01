@@ -168,11 +168,11 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     QCommandLineOption widthOpt(QStringList{"width"}, "Browser viewport/window width in pixels (default 1280)", "width");
     QCommandLineOption heightOpt(QStringList{"height"}, "Browser viewport/window height in pixels (default 720)", "height");
 
-    // Terminal mode (`anoa-browser terminal`). Registered on the same parser so
+    // Terminal mode (`anoa terminal`). Registered on the same parser so
     // process() accepts them; deliberately named apart from --port/--auth-token,
     // which keep their browser meaning in every mode.
-    QCommandLineOption termHostOpt("term-host", "Terminal mode: host of the anoa-browser to view (default 127.0.0.1)", "host");
-    QCommandLineOption termPortOpt("term-port", "Terminal mode: port of the anoa-browser to view (1-65535, default 9222)", "port");
+    QCommandLineOption termHostOpt("term-host", "Terminal mode: host of the anoa to view (default 127.0.0.1)", "host");
+    QCommandLineOption termPortOpt("term-port", "Terminal mode: port of the anoa to view (1-65535, default 9222)", "port");
     QCommandLineOption termTokenOpt("term-token", "Terminal mode: bearer token for the viewed endpoint", "token");
     QCommandLineOption fpsOpt("fps", "Terminal mode: frame rate (1-120, default 30)", "n");
     QCommandLineOption gfxOpt("gfx", "Terminal mode: rendering backend (auto|halfblock|iterm|kitty, default auto)", "mode");

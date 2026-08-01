@@ -60,20 +60,20 @@ target_link_libraries(anoa-config-lib PUBLIC
 set_target_properties(anoa-config-lib PROPERTIES AUTOMOC ON)
 anoa_test_target_coverage(anoa-config-lib)
 
-add_executable(anoa-browser-test-config test_config.cpp)
-target_include_directories(anoa-browser-test-config PRIVATE
+add_executable(anoa-test-config test_config.cpp)
+target_include_directories(anoa-test-config PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
-target_link_libraries(anoa-browser-test-config PRIVATE
+target_link_libraries(anoa-test-config PRIVATE
     Qt6::Test
     Qt6::Core
     Qt6::Gui
     anoa-config-lib
 )
-set_target_properties(anoa-browser-test-config PROPERTIES AUTOMOC ON)
-anoa_test_target_coverage(anoa-browser-test-config)
+set_target_properties(anoa-test-config PROPERTIES AUTOMOC ON)
+anoa_test_target_coverage(anoa-test-config)
 
-add_test(NAME ConfigTests COMMAND anoa-browser-test-config)
+add_test(NAME ConfigTests COMMAND anoa-test-config)
 
 # ── terminal ───────────────────────────────────────────────────────────────
 # Both libraries below are separate targets on purpose: anoa-config-lib is
@@ -94,17 +94,17 @@ if(NOT WIN32)
     anoa_test_target_flags(anoa-terminal-bytes-lib)
     anoa_test_target_coverage(anoa-terminal-bytes-lib)
 
-    add_executable(anoa-browser-test-frame-bytes test_frame_bytes.cpp)
-    target_link_libraries(anoa-browser-test-frame-bytes PRIVATE
+    add_executable(anoa-test-frame-bytes test_frame_bytes.cpp)
+    target_link_libraries(anoa-test-frame-bytes PRIVATE
         Qt6::Test
         Qt6::Core
         anoa-terminal-bytes-lib
     )
-    set_target_properties(anoa-browser-test-frame-bytes PROPERTIES AUTOMOC ON)
-    anoa_test_target_flags(anoa-browser-test-frame-bytes)
-    anoa_test_target_coverage(anoa-browser-test-frame-bytes)
+    set_target_properties(anoa-test-frame-bytes PROPERTIES AUTOMOC ON)
+    anoa_test_target_flags(anoa-test-frame-bytes)
+    anoa_test_target_coverage(anoa-test-frame-bytes)
 
-    add_test(NAME FrameBytesTests COMMAND anoa-browser-test-frame-bytes)
+    add_test(NAME FrameBytesTests COMMAND anoa-test-frame-bytes)
 
     # The viewer UI: the input parser, the cell map and the two image-protocol
     # renderers. frame_backend.h and terminal_ui.h are listed as sources
@@ -127,15 +127,15 @@ if(NOT WIN32)
     anoa_test_target_flags(anoa-terminal-ui-lib)
     anoa_test_target_coverage(anoa-terminal-ui-lib)
 
-    add_executable(anoa-browser-test-terminal-ui test_terminal_ui.cpp)
-    target_link_libraries(anoa-browser-test-terminal-ui PRIVATE
+    add_executable(anoa-test-terminal-ui test_terminal_ui.cpp)
+    target_link_libraries(anoa-test-terminal-ui PRIVATE
         Qt6::Test
         Qt6::Core
         anoa-terminal-ui-lib
     )
-    set_target_properties(anoa-browser-test-terminal-ui PROPERTIES AUTOMOC ON)
-    anoa_test_target_flags(anoa-browser-test-terminal-ui)
-    anoa_test_target_coverage(anoa-browser-test-terminal-ui)
+    set_target_properties(anoa-test-terminal-ui PROPERTIES AUTOMOC ON)
+    anoa_test_target_flags(anoa-test-terminal-ui)
+    anoa_test_target_coverage(anoa-test-terminal-ui)
 
-    add_test(NAME TerminalUiTests COMMAND anoa-browser-test-terminal-ui)
+    add_test(NAME TerminalUiTests COMMAND anoa-test-terminal-ui)
 endif()

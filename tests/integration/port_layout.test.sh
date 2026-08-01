@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Suite 10 — Port Layout & Startup Tests
-# Usage: ANOA_BINARY=./build/anoa-browser bash tests/integration/port_layout.test.sh
+# Usage: ANOA_BINARY=./build/anoa bash tests/integration/port_layout.test.sh
 set -euo pipefail
 
-BINARY="${ANOA_BINARY:-./build/anoa-browser}"
+BINARY="${ANOA_BINARY:-./build/anoa}"
 PORT="${ANOA_PORT:-9222}"
 WS_PORT=$((PORT + 2))
 PASS=0

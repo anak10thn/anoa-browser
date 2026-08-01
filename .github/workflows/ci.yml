@@ -66,9 +66,9 @@ jobs:
       - name: Build test targets
         run: |
           cmake --build build --parallel \
-            --target anoa-browser-test-config \
-                     anoa-browser-test-frame-bytes \
-                     anoa-browser-test-terminal-ui
+            --target anoa-test-config \
+                     anoa-test-frame-bytes \
+                     anoa-test-terminal-ui
 
       - name: Run unit tests (CTest)
         run: ctest --test-dir build -V --output-on-failure
@@ -88,9 +88,9 @@ jobs:
             -DANOA_TEST_SANITIZE=ON \
             -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
           cmake --build build-asan --parallel \
-            --target anoa-browser-test-frame-bytes anoa-browser-test-terminal-ui
-          ./build-asan/tests/unit/anoa-browser-test-frame-bytes
-          ./build-asan/tests/unit/anoa-browser-test-terminal-ui
+            --target anoa-test-frame-bytes anoa-test-terminal-ui
+          ./build-asan/tests/unit/anoa-test-frame-bytes
+          ./build-asan/tests/unit/anoa-test-terminal-ui
         env:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
@@ -100,7 +100,7 @@ jobs:
       #
       # The gate covers what the unit targets link and nothing else. The
       # browser/http/cdp sources are driven only by the integration and e2e
-      # suites, which talk to a separate anoa-browser process; that process is
+      # suites, which talk to a separate anoa process; that process is
       # not instrumented, so folding those files in here would report 0% for
       # code those suites cover well. See the header of tests/coverage.sh.
       - name: Check unit-test line coverage
@@ -155,7 +155,7 @@ jobs:
         working-directory: tests/integration
         run: npm install
 
-      # Do NOT start a shared anoa-browser here: every integration test file
+      # Do NOT start a shared anoa here: every integration test file
       # spawns (and stops) its own instance on the same port triplet. A shared
       # instance on 9222 makes those spawns fail to bind, so auth suites end up
       # talking to the shared no-auth browser and fail with 200-instead-of-401.
@@ -197,12 +197,12 @@ jobs:
       - name: Run port layout tests
         run: bash tests/integration/port_layout.test.sh
         env:
-          ANOA_BINARY: ./build/anoa-browser
+          ANOA_BINARY: ./build/anoa
 
       - name: Run extension loading tests
         run: bash tests/integration/extensions.test.sh
         env:
-          ANOA_BINARY: ./build/anoa-browser
+          ANOA_BINARY: ./build/anoa
 
       # Reads the tree, not the binary: terminal mode is compiled out on
       # Windows and there is no Windows job, so the only available check that
@@ -283,9 +283,9 @@ jobs:
         working-directory: tests/e2e
         run: npx playwright install --with-deps chromium
 
-      - name: Start anoa-browser
+      - name: Start anoa
         run: |
-          ./build/anoa-browser --headless --port 9222 &
+          ./build/anoa --headless --port 9222 &
           echo "BROWSER_PID=$!" >> $GITHUB_ENV
           timeout 30 bash -c 'until nc -z 127.0.0.1 9222; do sleep 0.5; done'
 
@@ -297,7 +297,7 @@ jobs:
         working-directory: tests/e2e
         run: node --test puppeteer.test.js
 
-      - name: Stop anoa-browser
+      - name: Stop anoa
         if: always()
         run: kill ${{ env.BROWSER_PID }} || true
 
@@ -346,4 +346,4 @@ jobs:
       - name: Run smoke tests
         run: bash tests/regression/smoke.sh
         env:
-          ANOA_BINARY: ./build/anoa-browser
+          ANOA_BINARY: ./build/anoa

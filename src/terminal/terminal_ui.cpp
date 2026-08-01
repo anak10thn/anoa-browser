@@ -444,7 +444,7 @@ void TerminalUi::renderStatusBar()
     if (!m_statusVisible)
         return;
 
-    std::string status = " anoa-browser terminal ";
+    std::string status = " anoa terminal ";
     if (!m_backendLabel.empty())
         status += m_backendLabel + " ";
     status += m_backend->description().toStdString() + " " + std::to_string(m_map.viewportW)

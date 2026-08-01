@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstring>
 #include <memory>
 
@@ -5,8 +6,12 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QString>
+#include <QStringList>
 #include <QTextStream>
 
+#include "agent/agent_cli.h"
+#include "agent/agent_help.h"
 #include "browser/anoa_browser.h"
 #include "browser/browser_window.h"
 #include "cdp/cdp_proxy.h"
@@ -15,6 +20,49 @@
 
 #ifndef Q_OS_WIN
 #include "terminal/terminal_app.h"
+#endif
+
+#ifndef Q_OS_WIN
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+namespace {
+
+// Is something already listening there? A bounded, non-blocking connect,
+// because this runs before any application object exists and must not be able
+// to hang the process on a host that swallows SYNs.
+bool portIsOpen(quint16 port, int timeoutMs)
+{
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return false;
+    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    bool open = ::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0;
+    if (!open && errno == EINPROGRESS) {
+        fd_set w;
+        FD_ZERO(&w);
+        FD_SET(fd, &w);
+        timeval tv{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
+        if (::select(fd + 1, nullptr, &w, nullptr, &tv) > 0) {
+            int soErr = 0;
+            socklen_t len = sizeof(soErr);
+            open = ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soErr, &len) == 0 && soErr == 0;
+        }
+    }
+    ::close(fd);
+    return open;
+}
+
+} // namespace
 #endif
 
 int main(int argc, char *argv[])
@@ -33,6 +81,10 @@ int main(int argc, char *argv[])
     // only has to agree with QCommandLineParser about which words are options,
     // including the --opt=value spelling it accepts.
     bool hasTarget = false;
+    // Set when the line is a statement against a running browser rather than an
+    // instruction to start one. Everything after the verb belongs to it.
+    QString agentVerb;
+    QStringList agentArgs;
     const auto isOption = [](const char *arg, const char *name) {
         const size_t n = std::strlen(name);
         return std::strncmp(arg, name, n) == 0 && (arg[n] == '\0' || arg[n] == '=');
@@ -44,7 +96,7 @@ int main(int argc, char *argv[])
                    || std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             // QCommandLineParser handles both of these, and it needs a live
             // application object — which on a machine with no display aborts
-            // before it can print anything. `anoa-browser --version` therefore
+            // before it can print anything. `anoa --version` therefore
             // died with SIGABRT on any headless Linux box, which is also the
             // one command the Homebrew Linux formula runs as its test.
             //
@@ -64,9 +116,60 @@ int main(int argc, char *argv[])
                 argv[j] = argv[j + 1];
             argv[--argc] = nullptr;
             --i; // re-examine the argument shifted into this slot
+        } else if (isAgentCommand(QString::fromLocal8Bit(argv[i]))) {
+            // An agent verb takes the rest of the line with it — arguments and
+            // flags alike. Splitting them between this pre-scan and
+            // QCommandLineParser is what would go wrong: `anoa open a.com
+            // --port 9222` has a bare "9222" that belongs to --port, and
+            // `anoa snapshot --json` has a flag the browser parser has never
+            // heard of. Neither can be classified without knowing every
+            // option's arity, which is precisely what a subcommand boundary
+            // exists to avoid.
+            agentVerb = QString::fromLocal8Bit(argv[i]);
+            for (int j = i + 1; j < argc; ++j)
+                agentArgs << QString::fromLocal8Bit(argv[j]);
+            argc = i;
+            argv[argc] = nullptr;
+            break;
         }
     }
-    const bool embeddedTerminal = terminalMode && !hasTarget;
+    bool embeddedTerminal = terminalMode && !hasTarget;
+#ifndef Q_OS_WIN
+    // A bare `anoa terminal` prefers a browser that is already running.
+    //
+    // Hosting its own was the fallback for "there is nothing to attach to", not
+    // a preference: starting a second browser beside a live one gives the user
+    // a viewer showing a blank page next to the session they meant to watch,
+    // and doubles the memory for it. Anything that names a target
+    // (--term-port, --cdp) has already opted out of both behaviours above.
+    if (embeddedTerminal && portIsOpen(9222, 300))
+        embeddedTerminal = false;
+#endif
+
+    // `anoa help [group]` and a bare `anoa --help`: the grouped command list,
+    // not the browser's flag table. Someone typing `anoa --help` is far more
+    // likely to be looking for `click` than for `--profile-dir`, and the flag
+    // table is one line away under `anoa help browser`.
+    if (!agentVerb.isEmpty() && agentVerb == QLatin1String("help")) {
+        if (agentArgs.isEmpty()) {
+            printAgentHelp();
+            return 0;
+        }
+        if (printAgentHelpGroup(agentArgs.first()))
+            return 0;
+        QTextStream(stderr) << "anoa: no help group '" << agentArgs.first()
+                            << "' — try: anoa help" << Qt::endl;
+        return 2;
+    }
+
+    if (!agentVerb.isEmpty()) {
+        // QCoreApplication is enough: an agent command speaks JSON over a
+        // WebSocket and never touches the widget stack.
+        QCoreApplication app(argc, argv);
+        app.setApplicationVersion(QStringLiteral(ANOA_VERSION));
+        Config config = parseArgs(argc, argv, /*terminalMode=*/true);
+        return runAgentCommand(config, agentVerb, agentArgs);
+    }
 
     if (terminalMode) {
 #ifdef Q_OS_WIN

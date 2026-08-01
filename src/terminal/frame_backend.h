@@ -2,7 +2,7 @@
 
 // The seam between the terminal UI and whatever is actually driving the page.
 // Two transports implement it: the /render/* HTTP endpoints of a local
-// anoa-browser (the default) and a remote CDP endpoint (`--cdp`). Nothing
+// anoa (the default) and a remote CDP endpoint (`--cdp`). Nothing
 // HTTP- or CDP-specific may appear in this file — terminal_ui.cpp is written
 // against this interface alone and never opens a connection itself.
 

@@ -1,4 +1,4 @@
-// `anoa-browser terminal --cdp <url>` against a fake CDP endpoint.
+// `anoa terminal --cdp <url>` against a fake CDP endpoint.
 //
 // Why a fake endpoint: the four capability gaps between /render/* and CDP
 // (inverted wheel sign, CSS-pixel vs image-pixel click coordinates under a

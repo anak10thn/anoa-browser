@@ -2,7 +2,7 @@
 # Launcher for the portable Linux bundle.
 #
 # Layout (relative to this script):
-#   anoa-browser                       single binary; `anoa-browser terminal`
+#   anoa                       single binary; `anoa terminal`
 #                                      is the viewer subcommand (RPATH $ORIGIN/lib)
 #   lib/                               bundled shared libraries + Qt plugins
 #   lib/qt6/libexec/QtWebEngineProcess Chromium helper process
@@ -12,7 +12,7 @@
 set -u
 
 # Resolve the real script location through any chain of symlinks
-# (e.g. Homebrew installs bin/anoa-browser -> libexec/anoa-browser.sh).
+# (e.g. Homebrew installs bin/anoa -> libexec/anoa.sh).
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
   DIR="$(cd "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
@@ -36,4 +36,4 @@ export QTWEBENGINEPROCESS_PATH="${DIR}/lib/qt6/libexec/QtWebEngineProcess"
 export QTWEBENGINE_RESOURCES_PATH="${DIR}/resources"
 export QTWEBENGINE_LOCALES_PATH="${DIR}/translations/qtwebengine_locales"
 
-exec "${DIR}/anoa-browser" "$@"
+exec "${DIR}/anoa" "$@"

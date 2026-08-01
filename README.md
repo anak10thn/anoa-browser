@@ -10,7 +10,7 @@
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#usage">Usage</a> ·
-  <a href="#terminal-viewer-anoa-browser-terminal">Terminal viewer</a> ·
+  <a href="#terminal-viewer-anoa-terminal">Terminal viewer</a> ·
   <a href="docs/BUILDING.md">Building</a>
 </p>
 
@@ -19,16 +19,23 @@
 Full [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) support, so Playwright, Puppeteer and anything else that speaks CDP connect to it as they would to Chrome.
 
 ```bash
-anoa-browser --headless --port 9222     # drive it from Playwright or Puppeteer
-anoa-browser terminal                   # or watch and click it, in your terminal
-anoa-browser                            # or just open a window
+anoa --headless --port 9222     # start it once, leave it running
+anoa open example.com           # then talk to it
+anoa snapshot -i                # see what is on the page, with refs
+anoa click @e2                  # act on it
+anoa terminal                   # or watch it happen, in your terminal
 ```
+
+The browser is the session. Every command above is a separate process that
+attaches, does one thing and exits — the page, the cookies and the scroll
+position survive between them, so commands chain with `&&` for free.
 
 ## Features
 
+- **A command per action, for agents** — `open`, `snapshot`, `click`, `fill`, `get`, `eval`, `wait`, `screenshot`. `snapshot` hands back refs (`@e1`, `@e2`) that later commands target, and clicks are hit-tested, so a button under a consent banner is reported rather than clicked through. `anoa help` groups them; `anoa skills get core` prints the workflow for an agent to read
 - **Speaks CDP** — connect Playwright, Puppeteer or any Chrome-compatible client, with Chrome-compatible discovery endpoints (`/json`, `/json/version`, `/json/list`) and a WebSocket proxy with session multiplexing and optional bearer-token auth
 - **Drive it over plain HTTP** — live viewer, PNG screenshots, MJPEG stream, navigation and click/scroll injection through `/render/*`, no CDP client required
-- **See it in your terminal** — `anoa-browser terminal` renders the live page as ANSI or as real images in iTerm2/kitty, and forwards your clicks, scrolls and typing back to it. Point it at a running browser, at any external Chrome endpoint with `--cdp`, or at nothing at all and it hosts its own
+- **See it in your terminal** — `anoa terminal` renders the live page as ANSI or as real images in iTerm2/kitty, and forwards your clicks, scrolls and typing back to it. Point it at a running browser, at any external Chrome endpoint with `--cdp`, or at nothing at all and it hosts its own
 - **A window when you want one** — an address bar with back / forward / reload, and an auto-hiding toolbar that returns when the pointer reaches the top edge
 - **Works behind tunnels and proxies** — no Origin rejections, with `--auth-token` for access control
 - **Print to PDF, profiles, extensions** — `Page.printToPDF`, isolated cookie jars and localStorage per named profile, and unpacked Chromium extensions (manifest v2)
@@ -44,32 +51,32 @@ One universal (x86_64 + arm64) build serves both architectures:
 ```bash
 brew tap porcupine-md/tap
 brew trust porcupine-md/tap        # tap ships a cask + formula
-brew install --cask anoa-browser
+brew install --cask anoa
 ```
 
-Installs a single `anoa-browser` shim into your `PATH`, pointing at `anoa-browser.app/Contents/MacOS/anoa-browser`. That one executable is the whole product — the terminal viewer is the `anoa-browser terminal` subcommand of it, not a separate file in the bundle. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
+Installs a single `anoa` shim into your `PATH`, pointing at `anoa.app/Contents/MacOS/anoa`. That one executable is the whole product — the terminal viewer is the `anoa terminal` subcommand of it, not a separate file in the bundle. The app is Developer ID signed and notarized by Apple, so it opens with no Gatekeeper warnings. (The cask still clears the quarantine flag on install — a harmless no-op safety net.)
 
 **Upgrade** — `brew update` first, so the tap picks up the newest release:
 
 ```bash
 brew update
-brew upgrade --cask anoa-browser
+brew upgrade --cask anoa
 ```
 
 ### Linux (Homebrew)
 
 ```bash
 brew tap porcupine-md/tap
-brew install anoa-browser-linux
+brew install anoa-linux
 ```
 
-The formula creates exactly one symlink, `bin/anoa-browser` → `libexec/anoa-browser.sh`, and terminal mode is reached through it as `anoa-browser terminal`. If you are upgrading from a release that installed a second command, read the breaking-change note at the end of [Terminal Viewer](#terminal-viewer-anoa-browser-terminal).
+The formula creates exactly one symlink, `bin/anoa` → `libexec/anoa.sh`, and terminal mode is reached through it as `anoa terminal`. If you are upgrading from a release that installed a second command, read the breaking-change note at the end of [Terminal Viewer](#terminal-viewer-anoa-terminal).
 
 **Upgrade:**
 
 ```bash
 brew update
-brew upgrade anoa-browser-linux
+brew upgrade anoa-linux
 ```
 
 ### Linux (install script — no root)
@@ -81,8 +88,8 @@ curl -fsSL https://raw.githubusercontent.com/porcupine-md/anoa-browser/master/sc
 ```
 
 ```
-~/.local/lib/anoa-browser/     the unpacked bundle — self-contained, nothing system-wide
-~/.local/bin/anoa-browser  ->  ../lib/anoa-browser/anoa-browser.sh
+~/.local/lib/anoa/     the unpacked bundle — self-contained, nothing system-wide
+~/.local/bin/anoa  ->  ../lib/anoa/anoa.sh
 ```
 
 The symlink points at the *launcher*, never at the raw binary — the launcher is what sets up the environment the bundled libraries need. It tells you if `~/.local/bin` is not on your `PATH`, and re-running it upgrades in place.
@@ -98,16 +105,16 @@ install-linux.sh --uninstall          # remove it again
 The release tarball is self-contained: one executable, every shared library it needs under `lib/`, its resources and translations, plus a launcher script that wires them together. Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
 
 ```bash
-tar xzf anoa-browser-linux-x86_64.tar.gz
-./anoa-browser/anoa-browser.sh --headless --port 9222   # launcher, not the raw binary
-./anoa-browser/anoa-browser.sh terminal                 # terminal viewer — same launcher
+tar xzf anoa-linux-x86_64.tar.gz
+./anoa/anoa.sh --headless --port 9222   # launcher, not the raw binary
+./anoa/anoa.sh terminal                 # terminal viewer — same launcher
 ```
 
-Always go through `anoa-browser.sh`: the raw executable next to it has none of that environment set up, in terminal mode as much as in browser mode.
+Always go through `anoa.sh`: the raw executable next to it has none of that environment set up, in terminal mode as much as in browser mode.
 
 ### Windows
 
-Download `anoa-browser-windows-x86_64.zip` from [Releases](https://github.com/porcupine-md/anoa-browser/releases) and run `anoa-browser.exe`.
+Download `anoa-windows-x86_64.zip` from [Releases](https://github.com/porcupine-md/anoa-browser/releases) and run `anoa.exe`.
 
 ---
 
@@ -120,7 +127,7 @@ Prebuilt packages are above. To build it yourself — prerequisites, targets, ar
 ## Usage
 
 ```
-anoa-browser [options]
+anoa [options]
 
 Options:
   -p, --port <N>        CDP HTTP/WebSocket port (default: 9222)
@@ -139,13 +146,13 @@ Options:
 
 ```bash
 # Headless on port 9222 (default)
-./anoa-browser --headless --port 9222
+./anoa --headless --port 9222
 
 # Headed with a named profile
-./anoa-browser --port 9222 --profile myprofile
+./anoa --port 9222 --profile myprofile
 
 # With bearer token auth
-./anoa-browser --headless --port 9222 --auth-token mysecret
+./anoa --headless --port 9222 --auth-token mysecret
 
 # Connect Playwright
 node -e "
@@ -184,7 +191,58 @@ The binary uses 3 consecutive ports:
 
 ### Remote CDP access
 
-Chromium 111+ rejects DevTools WebSocket connections whose `Origin` header is not allowlisted. anoa-browser starts Chromium with `--remote-allow-origins=*` so remote CDP clients (tunnels, reverse proxies, browser-based frontends) can connect from arbitrary origins. Access control is enforced by the proxy layer via `--auth-token` instead.
+Chromium 111+ rejects DevTools WebSocket connections whose `Origin` header is not allowlisted. anoa starts Chromium with `--remote-allow-origins=*` so remote CDP clients (tunnels, reverse proxies, browser-based frontends) can connect from arbitrary origins. Access control is enforced by the proxy layer via `--auth-token` instead.
+
+---
+
+## Agent commands
+
+Everything here attaches to a browser that is already running and leaves it
+running. Start one first:
+
+```bash
+anoa --headless --port 9222 &
+```
+
+```bash
+anoa open example.com                 # navigate (scheme optional)
+anoa snapshot -i                      # interactive elements, with refs
+anoa click @e2                        # act by ref, or by any CSS selector
+anoa fill @e3 "user@example.com"
+anoa get text                         # the page's visible text
+anoa get attr @e1 href
+anoa eval "document.title"
+anoa wait --selector ".results"
+anoa screenshot page.png
+anoa status                           # what it is attached to right now
+```
+
+`snapshot` prints one line per element, refs first, because the ref is what the
+next command needs:
+
+```
+  @e1   link       Documentation
+  @e3   textbox    Search  [required]
+  @e7   button     Sign in
+```
+
+Refs are written onto the DOM nodes, which is what lets a ref minted by one
+process be used by the next. They stay valid until the page replaces those
+nodes — **re-snapshot after anything that changes the page**. A ref that no
+longer resolves says so rather than acting on the wrong element.
+
+Clicks are hit-tested against the point they land on:
+
+```
+anoa: @e7 is covered by <div> Accept cookies — dismiss it, then re-snapshot
+```
+
+Add `--json` to any command for structured output. Exit codes are meaningful:
+`0` success, `1` the command failed, `2` bad usage, `3` no browser is listening.
+
+`anoa help` lists every command grouped by what it does; `anoa help interact`
+prints one group. For agents, `anoa skills get core` prints the full workflow
+straight from the binary, so instructions can never drift from the CLI.
 
 ---
 
@@ -213,7 +271,7 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 
 ```bash
 # 1. Start anoa with a token
-./anoa-browser --headless --port 9222 --auth-token mysecret
+./anoa --headless --port 9222 --auth-token mysecret
 
 # 2. Navigate the browser to a page
 curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fexample.com&token=mysecret"
@@ -241,19 +299,19 @@ curl -X POST "http://localhost:9222/render/scroll?dy=-120&token=mysecret"
 
 ---
 
-## Terminal Viewer (`anoa-browser terminal`)
+## Terminal Viewer (`anoa terminal`)
 
-`anoa-browser terminal` renders a live browser view directly in your terminal and forwards terminal mouse and keyboard input back to the page — click a link in your terminal and the browser clicks it. It is a **mode of the `anoa-browser` binary**, not a separate program: the word `terminal` before any options selects it, and that mode never starts a browser window, an HTTP server, or a CDP proxy of its own.
+`anoa terminal` renders a live browser view directly in your terminal and forwards terminal mouse and keyboard input back to the page — click a link in your terminal and the browser clicks it. It is a **mode of the `anoa` binary**, not a separate program: the word `terminal` before any options selects it, and that mode never starts a browser window, an HTTP server, or a CDP proxy of its own.
 
-**Given no target, it hosts its own browser.** Plain `anoa-browser terminal` — no `--term-host`, no `--term-port`, no `--cdp` — starts a browser inside the viewer process and renders it directly, with no port opened and nothing to start first:
+**Given no target, it hosts its own browser.** Plain `anoa terminal` — no `--term-host`, no `--term-port`, no `--cdp` — starts a browser inside the viewer process and renders it directly, with no port opened and nothing to start first:
 
 ```bash
-anoa-browser terminal          # that is the whole setup
+anoa terminal          # that is the whole setup
 ```
 
-Naming any target switches it back to being a client: with `--term-host`/`--term-port` it views a running `anoa-browser` over the [`/render/*` endpoints](#web-render-endpoints), and with [`--cdp`](#attaching-to-an-external-cdp-endpoint---cdp) it attaches to any external Chrome/Chromium/Playwright endpoint. Those two remain thin clients that host nothing, which is what makes them usable over SSH on a machine with no browser at all. The embedded mode necessarily carries the WebEngine stack, and its status bar says `embedded` where the others name a host and port.
+Naming any target switches it back to being a client: with `--term-host`/`--term-port` it views a running `anoa` over the [`/render/*` endpoints](#web-render-endpoints), and with [`--cdp`](#attaching-to-an-external-cdp-endpoint---cdp) it attaches to any external Chrome/Chromium/Playwright endpoint. Those two remain thin clients that host nothing, which is what makes them usable over SSH on a machine with no browser at all. The embedded mode necessarily carries the WebEngine stack, and its status bar says `embedded` where the others name a host and port.
 
-**POSIX only.** The terminal sources are not compiled into the Windows build at all; there, `anoa-browser terminal` prints `Error: terminal mode is not supported on Windows` and exits non-zero.
+**POSIX only.** The terminal sources are not compiled into the Windows build at all; there, `anoa terminal` prints `Error: terminal mode is not supported on Windows` and exits non-zero.
 
 Two rendering backends, auto-detected:
 
@@ -265,12 +323,12 @@ Two rendering backends, auto-detected:
 ### Invocation
 
 ```
-anoa-browser terminal [options]
+anoa terminal [options]
 
 Options:
   (none)                 Host a browser in-process and view that
-  --term-host <host>     Host of the anoa-browser to view (default: 127.0.0.1)
-  --term-port <N>        HTTP port of the anoa-browser to view (1-65535, default: 9222)
+  --term-host <host>     Host of the anoa to view (default: 127.0.0.1)
+  --term-port <N>        HTTP port of the anoa to view (1-65535, default: 9222)
   --term-token <secret>  Bearer token, if the viewed endpoint requires one
   --fps <N>              Refresh rate, 1-120 (default: 30)
   --gfx <mode>           auto | halfblock | iterm | kitty (default: auto)
@@ -314,20 +372,20 @@ The status bar shows the last event forwarded to the browser (`click 640,360`, `
 
 ```bash
 # 1. Start the browser (any machine, headless or headed)
-./anoa-browser --headless --port 9222 --auth-token mysecret
+./anoa --headless --port 9222 --auth-token mysecret
 
 # 2. Point it somewhere
 curl -X POST "http://localhost:9222/render/navigate?url=https%3A%2F%2Fnews.ycombinator.com&token=mysecret"
 
 # 3. Watch and control it from your terminal (works over SSH too)
-./anoa-browser terminal --term-host localhost --term-port 9222 --term-token mysecret
+./anoa terminal --term-host localhost --term-port 9222 --term-token mysecret
 ```
 
 Requires a terminal with SGR mouse support; the halfblock fallback additionally needs truecolor (iTerm2, kitty, Alacritty, WezTerm, GNOME Terminal, tmux ≥ 3.2, …). Both stdin and stdout must be a terminal — piping either one is refused, since there is nothing to drive and nothing to paint.
 
 ### Attaching to an external CDP endpoint (`--cdp`)
 
-`--cdp <url>` replaces the `/render/*` transport with a CDP WebSocket client (`Page.captureScreenshot` for frames, `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText` for input), so the viewer can drive any Chrome, Chromium, Edge or Playwright/Puppeteer-launched browser — not just anoa-browser.
+`--cdp <url>` replaces the `/render/*` transport with a CDP WebSocket client (`Page.captureScreenshot` for frames, `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText` for input), so the viewer can drive any Chrome, Chromium, Edge or Playwright/Puppeteer-launched browser — not just anoa.
 
 Two URL forms are accepted:
 
@@ -338,21 +396,21 @@ Two URL forms are accepted:
 
 ```bash
 # Attach to a Chrome started with --remote-debugging-port=9222
-anoa-browser terminal --cdp http://127.0.0.1:9222
+anoa terminal --cdp http://127.0.0.1:9222
 
 # Attach to one specific page target, skipping discovery
-anoa-browser terminal --cdp ws://127.0.0.1:9222/devtools/page/ABC123 --gfx kitty
+anoa terminal --cdp ws://127.0.0.1:9222/devtools/page/ABC123 --gfx kitty
 ```
 
-**Auth token.** `--term-token` is *not* ignored under `--cdp` — it becomes the bearer token for the CDP endpoint, sent both as an `Authorization: Bearer <secret>` header and as a `?token=<secret>` query parameter, on the `/json/list` request and on the WebSocket dial. That is what anoa-browser's own `--auth-token` proxy expects, and endpoints that ignore an unexpected header or query parameter (plain Chrome) are unaffected. `--term-host` and `--term-port` *are* ignored under `--cdp`, and the viewer says so on stderr before it takes over the screen.
+**Auth token.** `--term-token` is *not* ignored under `--cdp` — it becomes the bearer token for the CDP endpoint, sent both as an `Authorization: Bearer <secret>` header and as a `?token=<secret>` query parameter, on the `/json/list` request and on the WebSocket dial. That is what anoa's own `--auth-token` proxy expects, and endpoints that ignore an unexpected header or query parameter (plain Chrome) are unaffected. `--term-host` and `--term-port` *are* ignored under `--cdp`, and the viewer says so on stderr before it takes over the screen.
 
 **`wss://` is not supported.** TLS CDP endpoints are rejected at argument-parsing time, because the shipped build has no TLS backend. Use `ws://`, or `http://` and let discovery hand you the right `ws://` URL. Tunnel it (SSH port-forward, stunnel) if the endpoint is only reachable over TLS.
 
-Two things worth knowing when the endpoint is anoa-browser itself: it uses [three consecutive ports](#port-layout), so `--cdp http://127.0.0.1:9222` discovers on 9222 and then dials `ws://127.0.0.1:9224/…` — the port shown in the status bar changing mid-session is correct, not a fault. And a dropped connection is retried with an exponential backoff (250 ms doubling to 8 s) that the status bar reports as `connecting` / `reconnecting (attempt N)`; before the *first* successful connect the retries are capped, so a wrong URL fails with a message instead of spinning forever.
+Two things worth knowing when the endpoint is anoa itself: it uses [three consecutive ports](#port-layout), so `--cdp http://127.0.0.1:9222` discovers on 9222 and then dials `ws://127.0.0.1:9224/…` — the port shown in the status bar changing mid-session is correct, not a fault. And a dropped connection is retried with an exponential backoff (250 ms doubling to 8 s) that the status bar reports as `connecting` / `reconnecting (attempt N)`; before the *first* successful connect the retries are capped, so a wrong URL fails with a message instead of spinning forever.
 
 ### Breaking change: `anoa-term` is gone
 
-The standalone `anoa-term` binary no longer exists and ships **no compatibility shim, symlink, or wrapper** — a shim would either be the second binary this merge removed, or a symlink whose `argv[0]` sniffing outlives its usefulness. Type `anoa-browser terminal` instead; every flag it used has a `--term-*` equivalent listed above (`--host` → `--term-host`, `--port` → `--term-port`, `--token` → `--term-token`; `--fps` and `--gfx` are unchanged, though `--fps` now defaults to 30 and accepts up to 120).
+The standalone `anoa-term` binary no longer exists and ships **no compatibility shim, symlink, or wrapper** — a shim would either be the second binary this merge removed, or a symlink whose `argv[0]` sniffing outlives its usefulness. Type `anoa terminal` instead; every flag it used has a `--term-*` equivalent listed above (`--host` → `--term-host`, `--port` → `--term-port`, `--token` → `--term-token`; `--fps` and `--gfx` are unchanged, though `--fps` now defaults to 30 and accepts up to 120).
 
 Upgrading in place can leave a stale `anoa-term` on your `PATH` that no longer resolves. Two hazards:
 
@@ -362,8 +420,8 @@ Upgrading in place can leave a stale `anoa-term` on your `PATH` that no longer r
 If `anoa-term` still appears on your `PATH` after upgrading, uninstall and reinstall:
 
 ```bash
-brew uninstall anoa-browser-linux && brew install anoa-browser-linux   # Linux
-brew uninstall --zap --cask anoa-browser && brew install --cask anoa-browser   # macOS
+brew uninstall anoa-linux && brew install anoa-linux   # Linux
+brew uninstall --zap --cask anoa && brew install --cask anoa   # macOS
 ```
 
 ---
@@ -406,7 +464,7 @@ const page = browser.contexts()[0].pages()[0];
 `--help` work on a machine with none either.
 
 ```bash
-anoa-browser --headless --no-sandbox --port 9222
+anoa --headless --no-sandbox --port 9222
 ```
 
 On a runner with no GPU, add `--no-sandbox` as above; the extra flags some
