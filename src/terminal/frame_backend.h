@@ -70,6 +70,15 @@ public:
     virtual void goForward() = 0;
     virtual void reloadPage() = 0;
 
+    // Ask the page to adopt a viewport of this pixel size.
+    //
+    // Not pure, and a no-op by default: only the embedded backend owns the
+    // browser and can honour it. Over /render/* and CDP the page belongs to
+    // somebody else — resizing it under them would be the viewer reaching past
+    // its own window — so those two ignore it and keep the letterboxing that
+    // comes with a page shaped differently from the terminal.
+    virtual void resizeViewport(int width, int height) { Q_UNUSED(width) Q_UNUSED(height) }
+
     // Short description of the target for the status bar, e.g. "127.0.0.1:9222".
     virtual QString description() const = 0;
 

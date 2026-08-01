@@ -323,7 +323,12 @@ Mouse reporting uses the SGR extended protocol (`ESC [ < btn ; col ; row M`), wh
 | `Ctrl-L` | Open the address prompt on the status row |
 | `Ctrl-R` | Reload |
 | `Alt-Left` / `Alt-Right` | Back / forward through history |
+| `Ctrl-B` | Show or hide the status bar |
 | `Ctrl-C` / `Ctrl-Q` | Quit and restore the terminal |
+
+**The status bar starts hidden**, so the page gets every row of the terminal; `Ctrl-B` brings it back. The address prompt ignores the setting and takes the row whenever it is open, so `Ctrl-L` is never typing into something invisible.
+
+The image backends (`iterm`, `kitty`) fit the frame into the cell grid with its aspect ratio kept, so a page shaped differently from the terminal is letterboxed — visible as unused rows below the page. In embedded mode the viewer removes the cause rather than the symptom: it asks its own browser for a viewport with the terminal's proportions, keeping the width from `--width` and deriving only the height, so the frame fills the grid. Over `--term-port` and `--cdp` the page belongs to somebody else and is left alone, so the letterbox stays. Halfblock never letterboxes at all — it asks for exactly the grid it has.
 
 While the address prompt is open it owns the keyboard — nothing reaches the page — and `Enter` navigates, `Ctrl-C` (or `Ctrl-G`) abandons the line without leaving the viewer, `Ctrl-U` clears it. A bare host is fine: `example.com` becomes `https://example.com`, while anything that already names a scheme (`http:`, `file:`, `about:`) is used as typed, and `localhost:8080` is read as a host and port rather than a scheme.
 

@@ -111,6 +111,9 @@ private:
     void renderHalfblock(const FrameData &frame);
     void renderGfx(const QByteArray &png);
     bool processInput(std::string &buf);
+    // Terminal rows the page may draw into: all of them, less the status bar's
+    // when it is showing.
+    int pageRows() const;
     // Consumes one byte of the open URL prompt. Returns false when the prompt
     // just closed, so the caller can redraw the row it was borrowing.
     void feedUrlPrompt(char c);
@@ -137,4 +140,14 @@ private:
     // the page receiving the keystrokes.
     bool m_urlPrompt = false;
     std::string m_urlInput;
+
+    // The status bar starts hidden so the page gets every row it can, and is
+    // brought back with Ctrl-B. Hiding it is worth a row on its own, but the
+    // reason it defaults off is the image renderers: they letterbox, so a row
+    // spent on the bar can cost several more to the aspect fit above it.
+    bool m_statusVisible = false;
+    // CSS width handed to a resizable page. Fixed on purpose — only the height
+    // tracks the terminal, so the page never drops into its mobile layout just
+    // because the window is narrow in cells.
+    int m_viewportWidth = 1280;
 };

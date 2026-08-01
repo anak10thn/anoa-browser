@@ -18,6 +18,38 @@
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
 
+namespace {
+
+// QWebEnginePage's default javaScriptConsoleMessage() writes every console
+// message the page produces to stderr. In terminal mode stderr *is* the screen
+// the viewer is painting: a single "js: Unrecognized feature: 'web-share'." from
+// an ordinary site scrolls the alt screen, which pushes the status bar up and
+// leaves a copy of it stranded mid-page. Browser mode keeps the messages, where
+// they are a debugging aid and land on a terminal nobody is drawing into.
+class AnoaPage : public QWebEnginePage
+{
+public:
+    AnoaPage(bool silenceConsole, QWebEngineProfile *profile, QObject *parent)
+        : QWebEnginePage(profile, parent)
+        , m_silenceConsole(silenceConsole)
+    {
+    }
+
+protected:
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString &message,
+                                  int lineNumber, const QString &sourceId) override
+    {
+        if (m_silenceConsole)
+            return;
+        QWebEnginePage::javaScriptConsoleMessage(level, message, lineNumber, sourceId);
+    }
+
+private:
+    bool m_silenceConsole;
+};
+
+} // namespace
+
 AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     : QWebEngineView(parent)
     , m_config(config)
@@ -54,7 +86,7 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
     m_profile = QWebEngineProfile::defaultProfile();
-    setPage(new QWebEnginePage(m_profile, this));
+    setPage(new AnoaPage(m_config.terminalMode, m_profile, this));
 }
 
 void AnoaBrowser::init()

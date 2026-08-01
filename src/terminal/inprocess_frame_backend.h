@@ -48,6 +48,10 @@ public:
     void goForward() override;
     void reloadPage() override;
 
+    // Honoured here, and only here: this backend owns the browser, so it can
+    // reshape the page to the terminal instead of letterboxing it.
+    void resizeViewport(int width, int height) override;
+
     QString description() const override;
 
 private:

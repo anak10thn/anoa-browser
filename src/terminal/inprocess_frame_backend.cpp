@@ -164,6 +164,15 @@ void InProcessFrameBackend::reloadPage()
         m_browser->reload();
 }
 
+void InProcessFrameBackend::resizeViewport(int width, int height)
+{
+    if (!m_browser || width <= 0 || height <= 0)
+        return;
+    if (m_browser->width() == width && m_browser->height() == height)
+        return; // resizing to the size it already has costs a relayout for nothing
+    m_browser->resize(width, height);
+}
+
 QString InProcessFrameBackend::description() const
 {
     // The other two backends name a host:port here. There is no endpoint to

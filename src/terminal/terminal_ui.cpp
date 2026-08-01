@@ -215,6 +215,12 @@ TerminalUi::TerminalUi(const Config &config, FrameBackend *backend, QObject *par
     // can never divide by zero.
     if (m_fps < 1)
         m_fps = 1;
+
+    // --width is the page width in browser mode, and means the same here for
+    // the backends that can be resized. Only the height is derived from the
+    // terminal.
+    if (config.width > 0)
+        m_viewportWidth = config.width;
 }
 
 TerminalUi::~TerminalUi() { end(); }
@@ -259,11 +265,43 @@ bool TerminalUi::tick()
 
     term::terminalSize(m_cols, m_rows);
 
+    // Ask the page to take the shape of the space it is about to be drawn in.
+    //
+    // The image renderers fit the frame into the cell rect with its aspect
+    // ratio kept, so a 16:9 page in a taller terminal leaves the unused rows
+    // black — the gap is the letterbox, not a drawing bug. A backend that owns
+    // its browser can remove the gap at the source by reshaping the page;
+    // /render/* and CDP ignore this and keep letterboxing, which is the honest
+    // outcome when the page belongs to somebody else.
+    //
+    // Halfblock needs none of it: it asks for exactly the grid it has.
+    if (m_gfx != GfxMode::Halfblock) {
+        const int pxW = m_cols * m_cellW;
+        const int pxH = pageRows() * m_cellH;
+        if (pxW > 0 && pxH > 0) {
+            // Width is pinned so the page keeps a sane CSS width and only the
+            // height follows the terminal; deriving both from cell counts would
+            // hand the page a viewport of a few hundred pixels on a small
+            // window and trigger every mobile breakpoint on the web.
+            const int targetW = m_viewportWidth;
+            const int targetH = std::max(1, static_cast<int>(llround(
+                                    static_cast<double>(targetW) * pxH / pxW)));
+            m_backend->resizeViewport(targetW, targetH);
+        }
+    }
+
     if (m_gfx == GfxMode::Halfblock)
-        m_backend->requestRgbFrame(m_cols, (m_rows - 1) * 2);
+        m_backend->requestRgbFrame(m_cols, pageRows() * 2);
     else
         m_backend->requestPngFrame();
     return true;
+}
+
+// Rows available to the page: every row except the status bar's, and all of
+// them when the bar is hidden.
+int TerminalUi::pageRows() const
+{
+    return m_statusVisible ? std::max(1, m_rows - 1) : std::max(1, m_rows);
 }
 
 void TerminalUi::onFrame(const FrameData &frame)
@@ -281,7 +319,7 @@ void TerminalUi::onFrame(const FrameData &frame)
         if (frame.width > 0 && frame.height > 0) {
             const double colsPerRow = (static_cast<double>(frame.width) / frame.height)
                                       * (static_cast<double>(m_cellH) / m_cellW);
-            int r = m_rows - 1;
+            int r = pageRows();
             int c = static_cast<int>(llround(r * colsPerRow));
             if (c > m_cols) {
                 c = m_cols;
@@ -397,10 +435,14 @@ void TerminalUi::renderUrlPrompt()
 
 void TerminalUi::renderStatusBar()
 {
+    // The prompt outranks the setting: it is a reply the user is waiting to
+    // see, and it borrows the row whether or not the bar lives there.
     if (m_urlPrompt) {
         renderUrlPrompt();
         return;
     }
+    if (!m_statusVisible)
+        return;
 
     std::string status = " anoa-browser terminal ";
     if (!m_backendLabel.empty())
@@ -467,7 +509,7 @@ void TerminalUi::renderHalfblock(const FrameData &frame)
     out.reserve(static_cast<size_t>(m_cols) * static_cast<size_t>(m_rows) * 24);
     out += "\033[H";
 
-    const int cellRows = m_rows - 1; // last row reserved for the status bar
+    const int cellRows = pageRows(); // one row less when the status bar is shown
     int lastFr = -1, lastFg = -1, lastFb = -1;
     int lastBr = -1, lastBg = -1, lastBb = -1;
 
@@ -625,6 +667,20 @@ bool TerminalUi::processInput(std::string &buf)
             flushPending();
             m_backend->reloadPage();
             m_lastInput = "reload";
+            renderStatusBar();
+            ++i;
+            continue;
+        }
+
+        if (c == 2) { // Ctrl-B — show or hide the status bar
+            flushPending();
+            m_statusVisible = !m_statusVisible;
+            // The row changes owner either way: hiding it leaves the bar's
+            // reverse-video text sitting on a row the page now wants, and
+            // showing it costs the page a row it had. Both need the frame
+            // redrawn rather than the cheap skip an identical PNG gets.
+            m_lastPng.clear();
+            fputs("\033[2J", stdout);
             renderStatusBar();
             ++i;
             continue;
