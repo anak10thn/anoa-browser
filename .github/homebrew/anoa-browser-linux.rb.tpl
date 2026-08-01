@@ -10,9 +10,10 @@ class AnoaBrowserLinux < Formula
   def install
     libexec.install Dir["*"]
     # anoa-browser.sh sets LD_LIBRARY_PATH / QtWebEngine paths relative to its
-    # own (symlink-resolved) location, so a plain symlink is enough.
+    # own (symlink-resolved) location, so a plain symlink is enough. The
+    # terminal viewer is a subcommand of the same binary (`anoa-browser
+    # terminal`), so this is the only launcher the bundle needs.
     bin.install_symlink libexec/"anoa-browser.sh" => "anoa-browser"
-    bin.install_symlink libexec/"anoa-term"
   end
 
   test do
