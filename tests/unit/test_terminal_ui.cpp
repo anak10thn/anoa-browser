@@ -18,6 +18,7 @@
 //     also stdout — without this the two interleave and the log is unreadable.
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -149,6 +150,100 @@ private:
     int m_saved = -1;
     FILE *m_file = nullptr;
     off_t m_read = 0;
+};
+
+// ── stdin redirection ───────────────────────────────────────────────────────
+
+// Replaces fd 0 with a temp file holding `contents` for its lifetime.
+//
+// The term:: helpers read stdin directly, and a regular file is the one input
+// that makes them deterministic: select() always reports a regular file ready,
+// and read() returns the bytes and then 0 at EOF. An inherited tty would make
+// the result a property of the runner, and a pipe would leave select() blocking
+// for the full 500 ms budget. It also guarantees the non-tty that
+// enterRawMode()'s tcgetattr() failure path needs, rather than assuming CTest
+// hands the test one.
+class RedirectedStdin
+{
+public:
+    explicit RedirectedStdin(const QByteArray &contents = QByteArray())
+    {
+        m_saved = dup(STDIN_FILENO);
+        m_file = tmpfile();
+        if (!m_file)
+            return;
+        if (!contents.isEmpty())
+            fwrite(contents.constData(), 1, static_cast<size_t>(contents.size()), m_file);
+        fflush(m_file);
+        rewind(m_file);
+        dup2(fileno(m_file), STDIN_FILENO);
+    }
+    ~RedirectedStdin()
+    {
+        if (m_saved >= 0) {
+            dup2(m_saved, STDIN_FILENO);
+            close(m_saved);
+        }
+        if (m_file)
+            fclose(m_file);
+    }
+    RedirectedStdin(const RedirectedStdin &) = delete;
+    RedirectedStdin &operator=(const RedirectedStdin &) = delete;
+
+private:
+    int m_saved = -1;
+    FILE *m_file = nullptr;
+};
+
+// ── gfx environment ─────────────────────────────────────────────────────────
+
+// Clears the three variables detectGfx() reads and puts the originals back
+// afterwards. Without the restore the matrix below would leak a fabricated
+// TERM into every test that runs after it.
+class ScopedGfxEnv
+{
+public:
+    ScopedGfxEnv()
+        : m_term(qgetenv("TERM"))
+        , m_prog(qgetenv("TERM_PROGRAM"))
+        , m_kitty(qgetenv("KITTY_WINDOW_ID"))
+        , m_hadTerm(qEnvironmentVariableIsSet("TERM"))
+        , m_hadProg(qEnvironmentVariableIsSet("TERM_PROGRAM"))
+        , m_hadKitty(qEnvironmentVariableIsSet("KITTY_WINDOW_ID"))
+    {
+        clear();
+    }
+    ~ScopedGfxEnv()
+    {
+        restore("TERM", m_hadTerm, m_term);
+        restore("TERM_PROGRAM", m_hadProg, m_prog);
+        restore("KITTY_WINDOW_ID", m_hadKitty, m_kitty);
+    }
+    ScopedGfxEnv(const ScopedGfxEnv &) = delete;
+    ScopedGfxEnv &operator=(const ScopedGfxEnv &) = delete;
+
+    void clear()
+    {
+        qunsetenv("TERM");
+        qunsetenv("TERM_PROGRAM");
+        qunsetenv("KITTY_WINDOW_ID");
+    }
+
+private:
+    static void restore(const char *name, bool had, const QByteArray &value)
+    {
+        if (had)
+            qputenv(name, value);
+        else
+            qunsetenv(name);
+    }
+
+    QByteArray m_term;
+    QByteArray m_prog;
+    QByteArray m_kitty;
+    bool m_hadTerm;
+    bool m_hadProg;
+    bool m_hadKitty;
 };
 
 Config terminalConfig(const char *gfx)
@@ -731,6 +826,272 @@ private slots:
         const QByteArray row = statusRow(capture.take());
         QVERIFY2(row.contains("ctrl-c=quit | typed \"hello\""), row.constData());
         QVERIFY(!row.contains("click/type/scroll drive the page"));
+    }
+
+    // ── Escape-sequence resync ──────────────────────────────────────────────
+    //
+    // The three branches below are the parser's "this is not a sequence I
+    // handle" exits. Each one advances the cursor by a different amount, and
+    // getting that wrong does not throw — it silently types control bytes into
+    // the page, which is exactly how bug-002 presented.
+
+    // TERM-INPUT-09: ESC followed by anything other than '[' (SS3 "ESC O P" is
+    // the common one — F1 on a vt100-style keyboard). Both bytes are skipped;
+    // the byte after them is ordinary input.
+    void testEscapeFollowedByNonCsiIsSkipped()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, "\x1bOP"));
+
+        QCOMPARE(backend.texts, QList<QByteArray>{QByteArray("P")});
+        QVERIFY2(backend.keys.isEmpty(), "SS3 was decoded as a named key");
+    }
+
+    // A CSI whose final byte is neither an arrow nor the SGR mouse introducer
+    // (ESC [ H, cursor home) drops only the two-byte introducer, so the 'H'
+    // itself is typed. Pinned as behaviour rather than endorsed: it is the
+    // fallthrough at the bottom of the loop, and a future arity-aware parser
+    // would change it.
+    void testUnknownCsiFinalBytePassesThrough()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(feed(ui, "\x1b[Hx"));
+
+        QCOMPARE(backend.texts, QList<QByteArray>{QByteArray("Hx")});
+        QVERIFY(backend.keys.isEmpty());
+    }
+
+    // TERM-INPUT-10: an SGR mouse report interrupted by a byte that is neither
+    // a digit, a separator nor a final M/m. The parser skips the offending byte
+    // and resumes at the next one; it must not report a click from the digits
+    // it had already accumulated.
+    void testMalformedSgrMouseReportResyncs()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+        ui.onFrame(rgbFrame(40, 20, 40, 20));
+
+        // The trailing 'z' matters: without a byte after the malformed one the
+        // parser treats the report as incomplete and waits for more input
+        // instead of resyncing.
+        QVERIFY(feed(ui, "\x1b[<0;5;5Xz"));
+
+        QVERIFY2(backend.clicks.isEmpty(), "a half-parsed mouse report produced a click");
+        QCOMPARE(backend.texts, QList<QByteArray>{QByteArray("z")});
+    }
+
+    // ── Construction edges ──────────────────────────────────────────────────
+
+    // An unrecognised --gfx name resolves to Auto, which is what defers the
+    // choice to detectGfx() in begin(). config.cpp rejects unknown names up
+    // front, so this is the second line of defence rather than a reachable CLI
+    // state — but it is what makes gfxModeFromString total.
+    void testUnknownGfxNameResolvesToAuto()
+    {
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("bogus"), &backend);
+
+        QCOMPARE(ui.gfxMode(), GfxMode::Auto);
+    }
+
+    // fps is clamped to >= 1 in the constructor even though config.cpp already
+    // validates the 1-120 range, because framePeriodMs() divides by it.
+    void testZeroFpsIsClampedRatherThanDividingByZero()
+    {
+        RecordingBackend backend;
+        Config cfg = terminalConfig("halfblock");
+        cfg.fps = 0;
+        TerminalUi ui(cfg, &backend);
+
+        QCOMPARE(ui.framePeriodMs(), 1000);
+    }
+
+    // Destroying through a QObject* is how a parented TerminalUi actually dies
+    // (terminal_app.cpp parents it), and it reaches the virtual deleting
+    // destructor that a stack instance never does. end() must be a no-op when
+    // begin() was never called, or this would try to restore a terminal the
+    // process does not own.
+    void testDestructionThroughBasePointerIsSafe()
+    {
+        RecordingBackend backend;
+        QObject *ui = new TerminalUi(terminalConfig("halfblock"), &backend);
+
+        delete ui; // must not touch termios — begin() was never called
+    }
+
+    // ── term:: terminal helpers ─────────────────────────────────────────────
+
+    // TERM-TERM-01: the gfx auto-detection matrix. Every branch is a getenv
+    // string compare, so this is the whole function — and it is unreachable
+    // from the pty suites, where script(1) fixes TERM to something unrelated.
+    void testDetectGfxEnvironmentMatrix()
+    {
+        ScopedGfxEnv env;
+
+        QCOMPARE(term::detectGfx(), GfxMode::Halfblock);
+
+        qputenv("KITTY_WINDOW_ID", "1");
+        QCOMPARE(term::detectGfx(), GfxMode::Kitty);
+        env.clear();
+
+        qputenv("TERM", "xterm-kitty");
+        QCOMPARE(term::detectGfx(), GfxMode::Kitty);
+        env.clear();
+
+        qputenv("TERM_PROGRAM", "ghostty");
+        QCOMPARE(term::detectGfx(), GfxMode::Kitty);
+        env.clear();
+
+        qputenv("TERM_PROGRAM", "iTerm.app");
+        QCOMPARE(term::detectGfx(), GfxMode::Iterm);
+        env.clear();
+
+        qputenv("TERM_PROGRAM", "WezTerm");
+        QCOMPARE(term::detectGfx(), GfxMode::Iterm);
+        env.clear();
+
+        // A terminal that says nothing recognisable gets the renderer that
+        // works everywhere, not an image protocol it would print as garbage.
+        qputenv("TERM", "xterm-256color");
+        QCOMPARE(term::detectGfx(), GfxMode::Halfblock);
+    }
+
+    // TERM-TERM-02: restoreTerminal() before enterRawMode() has succeeded is a
+    // no-op. It is registered with atexit(), so it runs on every exit path
+    // including the ones where raw mode was never entered.
+    void testRestoreTerminalWithoutRawModeIsANoOp()
+    {
+        CapturedStdout capture;
+
+        term::restoreTerminal();
+
+        QVERIFY2(capture.take().isEmpty(),
+                 "restoreTerminal wrote escape codes without owning the terminal");
+    }
+
+    // TERM-TERM-03: enterRawMode() on a non-tty fails at tcgetattr() and
+    // reports it rather than proceeding. This is the check behind terminal
+    // mode's "stdin/stdout must be a terminal" refusal.
+    void testEnterRawModeFailsOnANonTty()
+    {
+        CapturedStdout capture;
+        RedirectedStdin stdinIsAFile;
+
+        QVERIFY2(!term::enterRawMode(), "raw mode was entered on a regular file");
+        QVERIFY2(capture.take().isEmpty(), "the alt screen was taken despite the failure");
+    }
+
+    // TERM-TERM-04: terminalSize() falls back to 80x24 when the ioctl fails,
+    // which is the geometry every other test in this file assumes.
+    void testTerminalSizeFallsBackTo80x24()
+    {
+        CapturedStdout capture; // fd 1 is now a temp file, so TIOCGWINSZ fails
+        int cols = 0;
+        int rows = 0;
+
+        term::terminalSize(cols, rows);
+
+        QCOMPARE(cols, 80);
+        QCOMPARE(rows, 24);
+    }
+
+    // TERM-TERM-05: the XTWINOPS cell-size probe parses a well-formed reply.
+    // The reply order is ESC [ 6 ; <height> ; <width> t — height first — and
+    // swapping it silently halves or doubles every image the gfx renderers
+    // scale, which is why the two numbers here are deliberately different.
+    void testQueryCellSizeParsesTheXtwinopsReply()
+    {
+        CapturedStdout capture;
+        RedirectedStdin reply("\x1b[6;32;14t");
+        int cellW = 0;
+        int cellH = 0;
+
+        term::queryCellSize(cellW, cellH);
+
+        QCOMPARE(cellH, 32);
+        QCOMPARE(cellW, 14);
+        QVERIFY2(capture.take().contains("\x1b[16t"), "the probe itself was never sent");
+    }
+
+    // A terminal that never answers leaves the common 1:2 cell in place. The
+    // poll budget is bounded (10 x 50 ms), so a silent endpoint cannot hang
+    // startup.
+    void testQueryCellSizeFallsBackWhenTheTerminalStaysSilent()
+    {
+        CapturedStdout capture;
+        RedirectedStdin noReply;
+        int cellW = 0;
+        int cellH = 0;
+
+        term::queryCellSize(cellW, cellH);
+
+        QCOMPARE(cellW, 8);
+        QCOMPARE(cellH, 16);
+    }
+
+    // TERM-TERM-06: begin() on a non-tty resolves the gfx mode and then fails
+    // at raw mode, reporting false without having drawn anything. The caller
+    // relies on that ordering — a half-started viewer would leave the terminal
+    // on the alt screen with no way back.
+    void testBeginResolvesGfxThenFailsOnANonTty()
+    {
+        CapturedStdout capture;
+        RedirectedStdin stdinIsAFile;
+        ScopedGfxEnv env; // no image protocol -> the resolved mode is halfblock
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("auto"), &backend);
+        QCOMPARE(ui.gfxMode(), GfxMode::Auto);
+
+        QVERIFY2(!ui.begin(), "begin() succeeded without a terminal");
+
+        QCOMPARE(ui.gfxMode(), GfxMode::Halfblock);
+        QVERIFY2(capture.take().isEmpty(), "begin() painted before raw mode was established");
+    }
+
+    // TERM-TERM-07: SIGWINCH is latched by the handler and consumed once by the
+    // frame tick, which clears the screen so the previous size's cells do not
+    // survive under the new one.
+    void testResizeSignalClearsTheScreenOnce()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+        term::installSignalHandlers();
+        QVERIFY2(!term::takeResized(), "a resize was pending before one was raised");
+
+        raise(SIGWINCH);
+        QVERIFY(ui.tick());
+
+        QVERIFY2(capture.take().contains("\x1b[2J"), "stale cells were not cleared");
+        QVERIFY2(!term::takeResized(), "the resize flag was not one-shot");
+    }
+
+    // TERM-TERM-08: a quit signal stops the frame loop without asking the
+    // backend for anything further.
+    //
+    // This is deliberately the LAST slot in the class: the quit flag has no
+    // reset, by design — nothing should be able to un-quit a viewer — so every
+    // tick() after this one would return false. Add new cases above it.
+    void testQuitSignalStopsTheFrameLoop()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+        term::installSignalHandlers();
+        QVERIFY2(!term::quitSignalled(), "a quit was pending before one was raised");
+
+        raise(SIGTERM);
+
+        QVERIFY(term::quitSignalled());
+        QVERIFY2(!ui.tick(), "the frame loop kept running after a quit signal");
+        QVERIFY2(backend.rgbRequests.isEmpty(), "a frame was requested after quitting");
     }
 };
 

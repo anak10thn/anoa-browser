@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QImage>
 #include <QImageReader>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -300,6 +301,210 @@ private slots:
         QCOMPARE(r.cfg["cdpUrl"].toString(), QString("http://example.test:9222"));
     }
 
+    // ── parseArgs validation ──────────────────────────────────────────────
+    //
+    // Every validator below ends in ::exit(1), so each case is a subprocess.
+    // port_layout.test.sh covers some of the same refusals against the shipped
+    // binary; these run against config.cpp directly, which is what makes them
+    // available on a machine with no WebEngine build and what puts the
+    // validators under the sanitizer and coverage builds of this target.
+
+    // CFG-15: --port outside 1-65535 is refused at both ends.
+    void testInvalidPortIsRefused()
+    {
+        QCOMPARE(runParseArgs({"--port", "0"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--port", "70000"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--port", "-1"}).exitCode, 1);
+        // The boundaries themselves are valid.
+        QCOMPARE(runParseArgs({"--port", "1"}).exitCode, 0);
+        QCOMPARE(runParseArgs({"--port", "65535"}).exitCode, 0);
+    }
+
+    // CFG-16: --width / --height must be positive integers. Non-numeric and
+    // zero take different branches of the same guard (toInt's ok flag vs the
+    // range test), so both are exercised.
+    void testInvalidWidthAndHeightAreRefused()
+    {
+        QCOMPARE(runParseArgs({"--width", "abc"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--width", "0"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--height", "abc"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--height", "0"}).exitCode, 1);
+
+        const ParseResult ok = runParseArgs({"--width", "1024", "--height", "768"});
+        QCOMPARE(ok.exitCode, 0);
+        QCOMPARE(ok.cfg["width"].toInt(), 1024);
+        QCOMPARE(ok.cfg["height"].toInt(), 768);
+    }
+
+    // TERM-CFG-10: --term-port and --fps reject a non-numeric value before the
+    // range check ever runs. TERM-CFG-04/05 already cover the range refusals
+    // (0, 70000); this is the branch above them.
+    void testNonNumericTermPortAndFpsAreRefused()
+    {
+        QCOMPARE(runParseArgs({"--term-port", "abc"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--fps", "abc"}).exitCode, 1);
+    }
+
+    // TERM-CFG-11: a --cdp URL that parses but carries an unusable scheme is
+    // refused by the general validator rather than the wss:// special case
+    // (TERM-CFG-09), as is a string that is not a URL at all.
+    void testCdpUrlWithUnusableSchemeIsRefused()
+    {
+        QCOMPARE(runParseArgs({"--cdp", "ftp://example.test:9222"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--cdp", "example.test:9222"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--cdp", "http://"}).exitCode, 1);
+    }
+
+    // CFG-17: --extension must name an existing directory. A file is not a
+    // directory, so the same guard rejects it.
+    void testExtensionPathMustBeAnExistingDirectory()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString file = writeTempJson(dir, "{}", "not-a-dir.json");
+
+        QCOMPARE(runParseArgs({"--extension", dir.filePath("nope")}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--extension", file}).exitCode, 1);
+
+        // A real directory is accepted and replaces (not appends to) whatever
+        // the config file supplied.
+        const ParseResult ok = runParseArgs({"--extension", dir.path()});
+        QCOMPARE(ok.exitCode, 0);
+        QCOMPARE(ok.cfg["extensionPaths"].toArray().size(), 1);
+        QCOMPARE(ok.cfg["extensionPaths"].toArray().at(0).toString(), dir.path());
+    }
+
+    // CFG-18: the plain CLI overrides. These have no validator of their own,
+    // which is exactly why they are worth pinning — a flag silently not
+    // reaching its Config field looks identical to one that does.
+    void testBrowserCliOverridesReachConfig()
+    {
+        // The named-profile flag is --profile, not --profile-name; the Config
+        // field it fills is profileName. Driving config.cpp directly also means
+        // there is no argv pre-scan here, so "--profile work" parses normally
+        // (see AGENTS.md on why "--profile terminal" cannot, in the real binary).
+        const ParseResult r = runParseArgs({"--headless", "--no-sandbox",
+                                            "--profile-dir", "/tmp/anoa-profile",
+                                            "--profile", "work"});
+        QCOMPARE(r.exitCode, 0);
+        QVERIFY(r.cfg["headless"].toBool());
+        QVERIFY(r.cfg["noSandbox"].toBool());
+        QCOMPARE(r.cfg["profileDir"].toString(), QString("/tmp/anoa-profile"));
+        QCOMPARE(r.cfg["profileName"].toString(), QString("work"));
+    }
+
+    // CFG-19: --config is read first and CLI options layer on top of it. This
+    // is the only test that drives loadConfigFile() through parseArgs rather
+    // than calling it directly.
+    void testConfigFileIsLoadedThenOverriddenByCli()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = writeTempJson(dir, R"({"port":8081,"authToken":"fromfile"})");
+
+        const ParseResult fromFile = runParseArgs({"--config", path});
+        QCOMPARE(fromFile.exitCode, 0);
+        QCOMPARE(fromFile.cfg["port"].toInt(), 8081);
+        QCOMPARE(fromFile.cfg["authToken"].toString(), QString("fromfile"));
+
+        const ParseResult overridden = runParseArgs({"--config", path, "--port", "9333"});
+        QCOMPARE(overridden.exitCode, 0);
+        QCOMPARE(overridden.cfg["port"].toInt(), 9333);
+        QCOMPARE(overridden.cfg["authToken"].toString(), QString("fromfile"));
+    }
+
+    // ── loadConfigFile formats ────────────────────────────────────────────
+
+    // CFG-20: width and height from a JSON config file. Every other JSON key
+    // is covered above; these two were the gap.
+    void testWidthAndHeightFromJsonConfigFile()
+    {
+        QTemporaryDir dir;
+        const QString path = writeTempJson(dir, R"({"width":1600,"height":900})");
+        const Config cfg = loadConfigFile(path);
+        QCOMPARE(cfg.width, 1600);
+        QCOMPARE(cfg.height, 900);
+    }
+
+    // CFG-21: any suffix that is not .json is read as INI via QSettings — a
+    // whole second parser that had no test at all. Note the defaults differ in
+    // kind from the JSON branch: QSettings substitutes them for absent keys
+    // rather than leaving the Config member untouched.
+    void testIniConfigFileIsParsed()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("config.ini");
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("port=8082\n"
+                    "headless=true\n"
+                    "noSandbox=true\n"
+                    "profileDir=/tmp/ini-profile\n"
+                    "profileName=ini\n"
+                    "authToken=inisecret\n"
+                    "extensionPaths=/tmp/ext-a, /tmp/ext-b\n"
+                    "width=1440\n"
+                    "height=810\n");
+        }
+
+        const Config cfg = loadConfigFile(path);
+        QCOMPARE(cfg.port, 8082);
+        QVERIFY(cfg.headless);
+        QVERIFY(cfg.noSandbox);
+        QCOMPARE(cfg.profileDir, QString("/tmp/ini-profile"));
+        QCOMPARE(cfg.profileName, QString("ini"));
+        QCOMPARE(cfg.authToken, QString("inisecret"));
+        QCOMPARE(cfg.extensionPaths, QStringList({"/tmp/ext-a", "/tmp/ext-b"}));
+        QCOMPARE(cfg.width, 1440);
+        QCOMPARE(cfg.height, 810);
+    }
+
+    // CFG-22: an empty INI file falls back to the documented defaults rather
+    // than to zeroes, which is what QSettings::value's second argument is for.
+    void testEmptyIniConfigFileUsesDefaults()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("empty.ini");
+        {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+        }
+
+        const Config cfg = loadConfigFile(path);
+        QCOMPARE(cfg.port, 9222);
+        QVERIFY(!cfg.headless);
+        QCOMPARE(cfg.width, 1280);
+        QCOMPARE(cfg.height, 720);
+        QVERIFY2(cfg.extensionPaths.isEmpty(),
+                 "an absent extensionPaths key produced a list with an empty entry");
+    }
+
+    // CFG-23: a path that exists but cannot be opened is a different failure
+    // from one that does not exist (CFG-13), and it has its own message. A
+    // directory named *.json reaches it on any platform and without depending
+    // on the test user's privileges — a chmod 000 file would still open as root.
+    void testUnreadableJsonConfigExits()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("adirectory.json");
+        QVERIFY(QDir().mkpath(path));
+
+        QProcess proc;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("ANOA_TEST_HARNESS", "bad_json");
+        env.insert("ANOA_TEST_HARNESS_PATH", path);
+        proc.setProcessEnvironment(env);
+        proc.start(QCoreApplication::applicationFilePath(), {});
+        QVERIFY(proc.waitForFinished(5000));
+        QCOMPARE(proc.exitCode(), 1);
+        QVERIFY2(proc.readAllStandardError().contains("cannot open config file"),
+                 "the unreadable-file path reported some other error");
+    }
+
     // ── QCoreApplication assumption ───────────────────────────────────────
     // Terminal mode constructs QCoreApplication, not QApplication, so that it
     // works over SSH with no display. The plan flags "QImage decodes PNG
@@ -377,6 +582,16 @@ static bool runHarnessIfRequested(int argc, char *argv[])
             {"fps", cfg.fps},
             {"gfxMode", cfg.gfxMode},
             {"cdpUrl", cfg.cdpUrl},
+            // Browser-mode fields, reported so the CLI-override and validation
+            // cases can assert on the value that survived rather than only on
+            // the exit code.
+            {"headless", cfg.headless},
+            {"noSandbox", cfg.noSandbox},
+            {"profileDir", cfg.profileDir},
+            {"profileName", cfg.profileName},
+            {"width", cfg.width},
+            {"height", cfg.height},
+            {"extensionPaths", QJsonArray::fromStringList(cfg.extensionPaths)},
         };
         QTextStream out(stdout);
         out << QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)) << Qt::endl;

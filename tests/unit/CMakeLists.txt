@@ -9,6 +9,19 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Test Core Gui)
 # worth making loud rather than silent. CI runs one Linux job with this on.
 option(ANOA_TEST_SANITIZE "Build the unit test targets with ASan + UBSan" OFF)
 
+# Optional gcov instrumentation. Kept separate from ANOA_TEST_SANITIZE because
+# the two want different builds: the sanitizer answers "is this memory-safe",
+# gcov answers "did the suite reach this line", and combining them makes the
+# arc counts harder to trust. Coverage is measured over the three Qt6::Core-only
+# libraries (config, frame_bytes, terminal_ui) — those hold the logic the unit
+# suite can reach at all, and none of them needs WebEngine to build.
+option(ANOA_TEST_COVERAGE "Build the unit test targets with gcov instrumentation" OFF)
+
+if(ANOA_TEST_SANITIZE AND ANOA_TEST_COVERAGE)
+    message(FATAL_ERROR
+        "ANOA_TEST_SANITIZE and ANOA_TEST_COVERAGE are separate builds; enable one.")
+endif()
+
 # Every target below is warning-clean under the same flags as the main binary.
 function(anoa_test_target_flags target)
     if(NOT MSVC)
@@ -19,6 +32,16 @@ function(anoa_test_target_flags target)
             -fsanitize=address,undefined -fno-omit-frame-pointer -g
         )
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    endif()
+endfunction()
+
+# Applied to the libraries *and* to the executables that link them: --coverage
+# is both a compile flag (emit the .gcno arc graph) and a link flag (pull in
+# libgcov, which is what writes the .gcda counts at exit).
+function(anoa_test_target_coverage target)
+    if(ANOA_TEST_COVERAGE AND NOT MSVC)
+        target_compile_options(${target} PRIVATE --coverage -O0 -g)
+        target_link_options(${target} PRIVATE --coverage)
     endif()
 endfunction()
 
@@ -35,6 +58,7 @@ target_link_libraries(anoa-config-lib PUBLIC
     Qt6::Core
 )
 set_target_properties(anoa-config-lib PROPERTIES AUTOMOC ON)
+anoa_test_target_coverage(anoa-config-lib)
 
 add_executable(anoa-browser-test-config test_config.cpp)
 target_include_directories(anoa-browser-test-config PRIVATE
@@ -47,6 +71,7 @@ target_link_libraries(anoa-browser-test-config PRIVATE
     anoa-config-lib
 )
 set_target_properties(anoa-browser-test-config PROPERTIES AUTOMOC ON)
+anoa_test_target_coverage(anoa-browser-test-config)
 
 add_test(NAME ConfigTests COMMAND anoa-browser-test-config)
 
@@ -67,6 +92,7 @@ if(NOT WIN32)
     )
     target_link_libraries(anoa-terminal-bytes-lib PUBLIC Qt6::Core)
     anoa_test_target_flags(anoa-terminal-bytes-lib)
+    anoa_test_target_coverage(anoa-terminal-bytes-lib)
 
     add_executable(anoa-browser-test-frame-bytes test_frame_bytes.cpp)
     target_link_libraries(anoa-browser-test-frame-bytes PRIVATE
@@ -76,6 +102,7 @@ if(NOT WIN32)
     )
     set_target_properties(anoa-browser-test-frame-bytes PROPERTIES AUTOMOC ON)
     anoa_test_target_flags(anoa-browser-test-frame-bytes)
+    anoa_test_target_coverage(anoa-browser-test-frame-bytes)
 
     add_test(NAME FrameBytesTests COMMAND anoa-browser-test-frame-bytes)
 
@@ -94,6 +121,7 @@ if(NOT WIN32)
     target_link_libraries(anoa-terminal-ui-lib PUBLIC Qt6::Core)
     set_target_properties(anoa-terminal-ui-lib PROPERTIES AUTOMOC ON)
     anoa_test_target_flags(anoa-terminal-ui-lib)
+    anoa_test_target_coverage(anoa-terminal-ui-lib)
 
     add_executable(anoa-browser-test-terminal-ui test_terminal_ui.cpp)
     target_link_libraries(anoa-browser-test-terminal-ui PRIVATE
@@ -103,6 +131,7 @@ if(NOT WIN32)
     )
     set_target_properties(anoa-browser-test-terminal-ui PROPERTIES AUTOMOC ON)
     anoa_test_target_flags(anoa-browser-test-terminal-ui)
+    anoa_test_target_coverage(anoa-browser-test-terminal-ui)
 
     add_test(NAME TerminalUiTests COMMAND anoa-browser-test-terminal-ui)
 endif()

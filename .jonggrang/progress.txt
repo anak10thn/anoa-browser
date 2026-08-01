@@ -150,3 +150,57 @@
 - anoa-term relocated INTO the .app bundle (Contents/MacOS/) so it is covered by the app signature + staple (a standalone Mach-O cannot be stapled). This also fixes the ad-hoc anoa-term quarantine SIGKILL for free (postflight now de-quarantines it inside the bundle).
 - Entitlements required for QtWebEngine V8 under hardened runtime: allow-jit, allow-unsigned-executable-memory, disable-library-validation. Applied to the leaf executables + helper, then reseal QtWebEngineCore + the app.
 - Secrets needed: MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, MACOS_NOTARY_KEY_P8_BASE64, MACOS_NOTARY_KEY_ID, MACOS_NOTARY_ISSUER_ID.
+
+## 2026-08-01 — phase 15 (coverage)
+
+- Threshold is 80 (.jonggrang/jonggrang.json testing.coverage_threshold). First
+  measurement: config.cpp 70.09%, terminal_ui.cpp 76.32%, frame_bytes.cpp 100%.
+  TWO OF THREE WERE UNDER THE GATE — phase 14's behavioural checklist was
+  complete and the code under it still failed a numeric gate. Worth remembering:
+  a green checklist is not a coverage result.
+- Final: config.cpp 100% (210/210), frame_bytes.cpp 100% (54/54),
+  terminal_ui.cpp 92.68% (367/396). Aggregate 631/660 = 95.61%.
+- gcov gotcha #1: libgcov MERGES into an existing .gcda. Stale files must be
+  deleted before the run or the number is a function of how many times the suite
+  has been run. tests/coverage.sh does this; do not remove it.
+- gcov gotcha #2: gcov's "Lines executed:N% of M" summary counts Qt template
+  instantiations (QArrayDataPointer<QString> etc.) that land in the TU but are
+  not source lines. config.cpp reads 93.75% of 224 by that measure and 100% of
+  210 by the per-line .gcov listing. The listing is the honest one.
+- gcov gotcha #3: a line can show ##### because one *instantiation* never ran.
+  terminal_ui.cpp:219 (the destructor) was "uncovered" only because the virtual
+  DELETING dtor (_ZN10TerminalUiD0Ev) never ran while the base dtor ran 26x.
+  Deleting through a QObject* covers it. Look for the `26*` marker.
+- The QProcess parse_args harness DOES merge its coverage back: the child is the
+  same instrumented binary and ::exit(1) still flushes .gcda. Verified before
+  trusting any config.cpp gap (config.cpp:66, the wss:// exit, showed count 1 —
+  only a child can produce that).
+- config.cpp's biggest single gap was the INI branch of loadConfigFile(): any
+  --config suffix that is not .json goes through QSettings, twelve lines with
+  zero tests. Its defaults differ IN KIND from the JSON branch (QSettings
+  substitutes a default for an absent key; the JSON branch leaves the Config
+  member untouched).
+- To reach loadConfigFile's "cannot open" branch you need a path that EXISTS but
+  will not open — it checks exists() first and exits. Use a directory named
+  *.json, not chmod 000: these tests run as root and a mode-000 file still opens.
+- Unit-testing the term:: helpers without a terminal: put a temp file on fd 0
+  (RedirectedStdin). select() always reports a regular file ready and read()
+  returns bytes then 0, so queryCellSize() both parses a planted XTWINOPS reply
+  and hits its silent-terminal fallback fast. A pipe would block the full 500 ms.
+- XTWINOPS replies HEIGHT FIRST: ESC [ 6 ; <h> ; <w> t. The fixture uses 32/14
+  on purpose so a swap fails loudly.
+- The flag is --profile, not --profile-name; the Config field is profileName.
+  That was the one test that failed on first run this phase.
+- 29 lines of terminal_ui.cpp stay uncovered and should: enterRawMode's success
+  path, begin() past raw mode, end(), terminalSize's TIOCGWINSZ branch, and the
+  three m_started repaint lines. The pty suites cover them through a separate,
+  UNINSTRUMENTED anoa-browser process. Adding a pty to the QTest binary to chase
+  them would break the 80x24-constant invariant the whole suite rests on.
+- The gate is scoped to the three Qt6::Core-only unit libs on purpose. Folding
+  in browser/http/cdp would report ~0% for code the vitest suites cover well,
+  because that binary is not instrumented. Widening it = instrument the main
+  binary + preserve its .gcda from the integration suites. Separate piece of work.
+- Verified the gate fails, not just passes: COVERAGE_MIN=95 exits 1 naming
+  terminal_ui.cpp. Also verified SANITIZE+COVERAGE together is a CMake FATAL_ERROR.
+- Sandbox: gcov 13.3.0 present, lcov/gcovr NOT installed — hence the hand-rolled
+  awk table in tests/coverage.sh rather than a gcovr dependency.

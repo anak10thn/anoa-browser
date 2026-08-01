@@ -4,6 +4,10 @@ build-static/
 build-release/
 build-release-static/
 build-asan/
+build-coverage/
+*.gcov
+*.gcda
+*.gcno
 dist/
 *.o
 *.a

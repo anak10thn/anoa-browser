@@ -207,6 +207,7 @@ make build                       # Debug build -> build/anoa-browser
 make release                     # Release build -> build-release/
 make release-static QT_PREFIX=/opt/Qt/6.7.3/gcc_64   # what the release job runs
 make test                        # re-configures with -DBUILD_TESTS=ON, runs ctest
+make coverage                    # gcov the unit libs, fail under COVERAGE_MIN (default 80)
 make lint                        # clang-tidy over src/ (skipped if not installed)
 make help                        # every target and the QT_PREFIX in effect
 
@@ -409,6 +410,16 @@ Human should review and curate periodically.
   `waitUntil`, `viewerErrors`, `sgrPress`, `TERM_COLS`/`TERM_ROWS`/`TERM_FPS`).
   `terminal_cdp.test.js` and `terminal_http.test.js` share it; fake endpoints stay
   in their own suites.
+- **Coverage is `make coverage`** (phase 15) — `tests/coverage.sh` behind
+  `-DANOA_TEST_COVERAGE=ON`, gcov over the three Qt6::Core-only unit libraries,
+  failing under `COVERAGE_MIN` (default 80). It is mutually exclusive with
+  `ANOA_TEST_SANITIZE`; CMake errors out if both are on. Two traps it already
+  handles, so do not "simplify" them away: stale `.gcda` **merge** into the next
+  run, so they must be deleted first or the number depends on how often the
+  suite has been run; and gcov's own `Lines executed:N% of M` summary inflates
+  `M` with Qt template instantiations that are not lines of the source file
+  (14 phantom lines for `config.cpp`), so the script counts the per-line `.gcov`
+  listing instead.
 - **Two shell suites need no binary at all**: `build_shape.test.sh` (Windows
   compile-out, `if(NOT WIN32)` coverage) and `qt_floor.test.sh` (syntax-only against
   the declared Qt floor — `QT_FLOOR_PREFIX=/opt/Qt/6.4.3/gcc_64`, installed with
@@ -432,6 +443,17 @@ Human should review and curate periodically.
   pre-scan has no option-arity knowledge, so the word is taken as the subcommand
   wherever it appears and the parser then reports a missing value. TERM-MODE-05 pins
   it so it is not rediscovered as a regression.
+- **`TerminalUi`'s tty-only lines are covered by the pty suites, not by gcov.**
+  `enterRawMode()`'s success path, `begin()` past raw mode, `end()`,
+  `terminalSize()`'s `TIOCGWINSZ` branch and the three "repaint once started"
+  lines are 29 of `terminal_ui.cpp`'s lines and they will never show as covered:
+  the pty suites reach them through a *separate, uninstrumented* `anoa-browser`
+  process. Do not add a pty to the unit target to chase them — the invariant
+  that this suite never calls `begin()` is what keeps its 80x24 geometry a
+  constant rather than a property of the CI runner.
+- **The quit flag has no reset**, so `testQuitSignalStopsTheFrameLoop` must stay
+  the last slot in `test_terminal_ui.cpp`. Every `tick()` after it returns false.
+  New cases go above it.
 - **`anoa-browser --help` aborts without a display.** Browser mode constructs a
   `QApplication` before `parseArgs()` runs, so `--help` needs `QT_QPA_PLATFORM=offscreen`
   (the real Qt variable — `port_layout.test.sh` uses a misspelt `QPA_PLATFORM`

@@ -94,6 +94,28 @@ jobs:
         env:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
+      # Linux only, and a third build of the same three libraries — gcov and
+      # ASan want different instrumentation, so tests/unit/CMakeLists.txt
+      # refuses to enable both at once.
+      #
+      # The gate covers what the unit targets link and nothing else. The
+      # browser/http/cdp sources are driven only by the integration and e2e
+      # suites, which talk to a separate anoa-browser process; that process is
+      # not instrumented, so folding those files in here would report 0% for
+      # code those suites cover well. See the header of tests/coverage.sh.
+      - name: Check unit-test line coverage
+        if: runner.os == 'Linux'
+        run: QT_PREFIX=$QT_ROOT_DIR COVERAGE_MIN=80 bash tests/coverage.sh
+
+      - name: Upload coverage listings
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-gcov
+          path: build-coverage/.coverage-report/*.gcov
+          if-no-files-found: warn
+          retention-days: 7
+
   # ── 2. Integration Tests (Node.js + running binary) ───────────────────────
   integration-tests:
     name: Integration Tests
