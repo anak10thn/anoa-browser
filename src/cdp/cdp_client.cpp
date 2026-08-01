@@ -32,8 +32,11 @@ constexpr int kMaxReconnectMs = 8000;
 constexpr int kSweepIntervalMs = 250;
 
 // Prefix for the handful of messages this class writes straight to stderr.
-// Same wording as terminal_app.cpp, because to the user it is one program.
-const char kErrPrefix[] = "anoa terminal: ";
+//
+// Just the program name. It used to say "anoa terminal: ", which was true when
+// the viewer was this class's only caller — the agent commands now share it, so
+// `anoa status` was reporting failures under a subcommand the user never typed.
+const char kErrPrefix[] = "anoa: ";
 
 QString hostPort(const QUrl &url)
 {

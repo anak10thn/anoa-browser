@@ -20,6 +20,10 @@ anoa --headless --port 9222 &
 Everything below attaches to it. `anoa status` says whether one is listening;
 exit code 3 means nothing is.
 
+One port becomes three: `--port 9222` also uses 9223 (Chromium's own DevTools)
+and 9224 (the CDP proxy). You always address 9222 — the others are internal, and
+seeing 9224 in a log does not mean `--port` was ignored.
+
 ## The loop
 
 ```bash
@@ -63,7 +67,7 @@ more. Use `snapshot` when you need to *act*, `get text` when you need to *read*.
 anoa fill @e3 "user@example.com"
 anoa fill @e4 "hunter2"
 anoa click @e7
-anoa wait --load
+anoa wait --url "/dashboard"     # name where you expect to land
 ```
 
 `fill` sets the value through the native setter and fires `input`/`change`, so
@@ -85,11 +89,20 @@ take a fresh snapshot, then retry the original ref.
 ```bash
 anoa wait --load                       # navigation finished
 anoa wait --selector ".results"        # element appeared
+anoa wait --url "/dashboard"           # the url changed
+anoa wait --text "Welcome"             # the text arrived
 anoa wait --ms 500                     # last resort
 ```
 
-Prefer `--selector` over `--ms`: it is both faster when the page is quick and
-more reliable when it is slow.
+Prefer `--selector`, `--url` or `--text` over `--ms`: they are faster when the
+page is quick and more reliable when it is slow.
+
+After a click that navigates, prefer `--url` or `--text` over `--load` when you
+know what the destination should contain. `--load` works — it watches for the
+navigation to start rather than trusting the old document's state — but it
+spends about 1.5s deciding that nothing is loading, and a check that names the
+destination both confirms you arrived *somewhere specific* and returns as soon
+as you do.
 
 ## Output for programs
 

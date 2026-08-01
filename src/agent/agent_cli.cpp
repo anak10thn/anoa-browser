@@ -493,6 +493,45 @@ int cmdWait(Session &s, QStringList args)
     // the poll loop below stays a single thing rather than a branch per form.
     QString probe, what;
     if (load) {
+        // `wait --load` after something that triggers a navigation is the case
+        // that matters, and the obvious probe gets it wrong: the *old* document
+        // is still `complete` while the new one is in flight, so the wait
+        // returns instantly and the next command reads the page the user was
+        // trying to leave. An agent that trusts it reports the wrong page.
+        //
+        // So a page that is already loaded is watched for a transition first —
+        // the url changing, or readyState dropping out of `complete`. Seeing
+        // one means a navigation is under way and the wait continues into it.
+        // Seeing none within the settle window means the page really was idle,
+        // which is also a correct answer to "wait for the load".
+        QString e;
+        const QJsonObject before =
+            s.evaluate(QStringLiteral("__anoa.info()"), &e).toObject();
+        const QString startUrl = before.value(QStringLiteral("url")).toString();
+        const bool startedComplete =
+            before.value(QStringLiteral("ready")).toString() == QStringLiteral("complete");
+
+        if (startedComplete) {
+            static constexpr int kSettleMs = 1500;
+            QElapsedTimer settle;
+            settle.start();
+            bool moved = false;
+            while (settle.elapsed() < kSettleMs && !moved) {
+                const QJsonObject now =
+                    s.evaluate(QStringLiteral("__anoa.info()"), &e).toObject();
+                moved = now.value(QStringLiteral("url")).toString() != startUrl
+                        || now.value(QStringLiteral("ready")).toString()
+                               != QStringLiteral("complete");
+                if (moved)
+                    break;
+                QEventLoop tick;
+                QTimer::singleShot(80, &tick, &QEventLoop::quit);
+                tick.exec();
+            }
+            if (!moved)
+                return Ok; // nothing was loading, and nothing started
+        }
+
         probe = QStringLiteral("document.readyState === 'complete'");
         what = QStringLiteral("the page to finish loading");
     } else if (!text.isEmpty()) {
@@ -974,7 +1013,7 @@ int cmdMouse(Session &s, QStringList args)
     return r.ok ? Ok : fail(QStringLiteral("mouse failed: %1").arg(r.errorMessage));
 }
 
-int cmdStatus(Session &s, bool json)
+int cmdStatus(Session &s, const QString &host, int port, bool json)
 {
     QString e;
     const QJsonValue v = s.evaluate(QStringLiteral("__anoa.info()"), &e);
@@ -985,7 +1024,11 @@ int cmdStatus(Session &s, bool json)
     } else {
         const QJsonObject o = v.toObject();
         const QJsonObject size = o.value(QStringLiteral("size")).toObject();
-        out() << "attached  " << s.client().description() << Qt::endl
+        // The address the user gave, not the one the client ended up dialling.
+        // Discovery resolves :9222 to the CDP proxy on :9224, and reporting the
+        // latter reads as "--port was ignored" to anyone who passed the former.
+        out() << "attached  " << host << ":" << port << "  (CDP proxy on "
+              << s.client().description() << ")" << Qt::endl
               << "title     " << o.value(QStringLiteral("title")).toString() << Qt::endl
               << "url       " << o.value(QStringLiteral("url")).toString() << Qt::endl
               << "viewport  " << size.value(QStringLiteral("w")).toInt() << "x"
@@ -1076,7 +1119,7 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
     if (verb == QStringLiteral("pdf"))
         return cmdPdf(session, args);
     if (verb == QStringLiteral("status"))
-        return cmdStatus(session, json);
+        return cmdStatus(session, host, port, json);
     if (verb == QStringLiteral("cookies"))
         return cmdCookies(session, args, json);
     if (verb == QStringLiteral("storage"))

@@ -295,6 +295,38 @@ describe('Agent CLI (Suite 8)', () => {
     assert.match(late.err, /timed out/);
   });
 
+  // AGENT-19: `wait --load` straight after a click that navigates.
+  //
+  // Found by pointing an agent at the skill and watching it work. The obvious
+  // probe returns instantly here — the *old* document is still `complete` while
+  // the new one is in flight — so the wait passed, the next command read the
+  // page the agent was trying to leave, and it reported the wrong answer with
+  // no sign anything had gone wrong.
+  it('wait --load waits for a navigation the click started', () => {
+    anoa('open', 'example.com');
+    anoa('snapshot', '-i');
+    const before = anoa('eval', 'location.href').out;
+
+    assert.equal(anoa('click', '@e1').code, 0);
+    assert.equal(anoa('wait', '--load').code, 0);
+
+    const after = anoa('eval', 'location.href').out;
+    assert.notEqual(after, before,
+                    'wait --load returned while the navigation was still in flight');
+    assert.match(after, /iana\.org/);
+  });
+
+  // AGENT-19b: and it must not hang on a page that is genuinely idle — the
+  // settle window is what bounds that, so a regression there shows up as a
+  // wait that never returns rather than one that returns too early.
+  it('wait --load returns promptly when nothing is loading', () => {
+    anoa('open', 'example.com');
+    const started = Date.now();
+    assert.equal(anoa('wait', '--load').code, 0);
+    const took = Date.now() - started;
+    assert.ok(took < 6000, `wait --load on an idle page took ${took}ms`);
+  });
+
   // AGENT-18: the reference an agent is told to read must exist and describe
   // the commands that exist.
   it('skills get commands documents the real command set', () => {
