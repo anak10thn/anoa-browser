@@ -2,9 +2,9 @@ feature_id: unified-anoa-binary-terminal-cdp-ms8ngppx
 description: unified-anoa-binary-terminal-cdp
 work_type: LARGE
 created_at: '2026-07-31T07:57:35.925Z'
-updated_at: '2026-08-01T05:40:30.828Z'
+updated_at: '2026-08-01T05:51:24.950Z'
 status: completed
-current_phase: 17
+current_phase: null
 active_phases:
   - 1
   - 2
@@ -385,7 +385,7 @@ phases:
     name: completion
     status: completed
     started_at: '2026-08-01T05:40:30.828Z'
-    completed_at: '2026-08-01T05:55:00.000Z'
+    completed_at: '2026-08-01T05:51:24.950Z'
     agent_id: null
     output:
       unit: 3/3
