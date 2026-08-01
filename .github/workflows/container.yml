@@ -13,9 +13,20 @@ on:
         description: 'anoa release to build the image from (e.g. v0.6.0, or "latest")'
         required: false
         default: 'latest'
-  # Every published release gets an image tagged with the same version. This is
-  # the trigger that matters — a release without an image is the case people
-  # actually hit.
+  # Every release gets an image tagged with the same version — the trigger that
+  # matters, since a release without an image is the case people actually hit.
+  #
+  # It hangs off the Release workflow finishing, NOT off `release: published`,
+  # and that is not a style choice. Our releases are created by the Release
+  # workflow using GITHUB_TOKEN, and GitHub deliberately does not raise events
+  # for actions taken with that token — an anti-recursion rule. A `release`
+  # trigger here would therefore never fire even once; it did not, across every
+  # release this repository has cut.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+  # Kept for a release published by hand, where the token rule does not apply.
   release:
     types: [published]
 
@@ -32,6 +43,11 @@ jobs:
     name: Build, test, and publish
     runs-on: ubuntu-22.04
     timeout-minutes: 45
+    # A chained run must not publish anything when the release it is chained to
+    # failed; every other trigger has nothing to check.
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
 
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +63,9 @@ jobs:
           case "${{ github.event_name }}" in
             release) v="${{ github.event.release.tag_name }}" ;;
             workflow_dispatch) v="${{ inputs.version }}" ;;
+            # Chained off Release: the release it just published is the latest,
+            # so resolving `latest` below names exactly the right version.
+            workflow_run) v="latest" ;;
             *) v="latest" ;;
           esac
           if [ "$v" = "latest" ]; then
@@ -97,8 +116,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ steps.version.outputs.anoa }}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' || github.event_name == 'workflow_run' }}
+            type=raw,value=edge,enable=${{ github.event_name == 'push' }}
           labels: |
             org.opencontainers.image.title=anoa
             org.opencontainers.image.description=Headless browser with CDP and an agent CLI
