@@ -13,12 +13,39 @@ struct Group {
 // Ordered the way the work is: start something, go somewhere, look at it, touch
 // it, take a copy. An agent reading top to bottom gets a usable workflow.
 const Group kGroups[] = {
-    {"browser", "BROWSER  — start and view the browser itself", R"(  anoa [options]                    start a browser (add --headless for no window)
-  anoa terminal [options]           watch and drive it from this terminal
-  anoa --help-browser               every flag the browser itself takes
+    {"browser", "BROWSER  — start the browser, or watch one", R"(  anoa [options]                    start a browser (add --headless for no window)
+  anoa terminal [options]           watch and drive one from this terminal
 
-  The browser is the session. Agent commands below attach to one that is
-  already running and leave it running, so page state survives between them.)"},
+  The browser is the session. Every command below attaches to one that is
+  already running and leaves it running, so the page, the cookies and the
+  scroll position survive between them.
+
+  Starting one:
+    -p, --port <n>                  CDP port (default 9222; also uses n+1, n+2)
+    --headless                      no window, and no display server needed
+    --no-sandbox                    disable the Chromium sandbox
+    --width <px> / --height <px>    viewport size (default 1280x720)
+    --profile <name>                named profile: its own cookies and storage
+    --profile-dir <dir>             where profiles live
+    --extension <path>              load an unpacked extension (repeatable)
+    --auth-token <secret>           require this bearer token on CDP
+    --config <file>                 JSON or INI file of the above
+    -v, --version                   print the version and exit
+
+  Watching one (`anoa terminal`):
+    --term-host <host>              host to view (default 127.0.0.1)
+    --term-port <n>                 port to view (default 9222)
+    --term-token <secret>           bearer token for the viewed endpoint
+    --cdp <url>                     attach to any external CDP endpoint instead
+    --fps <n>                       refresh rate, 1-120 (default 30)
+    --gfx <mode>                    auto | halfblock | iterm | kitty
+
+  Given no target at all, `anoa terminal` attaches to a browser already on 9222
+  and hosts its own only when there is none.
+
+  Reaching a browser from an agent command:
+    --port <n> / --host <h>         where it is listening (default 127.0.0.1:9222)
+    --token <secret>                its bearer token, if it demands one)"},
 
     {"navigate", "NAVIGATE", R"(  anoa open <url>                   go to a url (scheme optional)
   anoa back | forward | reload      move through history

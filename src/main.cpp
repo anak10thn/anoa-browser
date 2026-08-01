@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <memory>
@@ -146,19 +147,28 @@ int main(int argc, char *argv[])
         embeddedTerminal = false;
 #endif
 
-    // `anoa help [group]` and a bare `anoa --help`: the grouped command list,
-    // not the browser's flag table. Someone typing `anoa --help` is far more
-    // likely to be looking for `click` than for `--profile-dir`, and the flag
-    // table is one line away under `anoa help browser`.
-    if (!agentVerb.isEmpty() && agentVerb == QLatin1String("help")) {
-        if (agentArgs.isEmpty()) {
+    // `anoa help [group]` and `anoa --help` are the same thing.
+    //
+    // QCommandLineParser's own --help lists flags and cannot mention a
+    // subcommand, because the parser never sees one — so a user typing --help
+    // was shown --profile-dir and left with no idea `click` existed. The
+    // grouped help carries both: the commands, and the flags under BROWSER.
+    const bool wantsHelp =
+        agentVerb == QLatin1String("help")
+        || (agentVerb.isEmpty()
+            && std::any_of(argv + 1, argv + argc, [](const char *a) {
+                   return a && (std::strcmp(a, "--help") == 0 || std::strcmp(a, "-h") == 0);
+               }));
+    if (wantsHelp) {
+        const QString group = agentArgs.isEmpty() ? QString() : agentArgs.first();
+        if (group.isEmpty()) {
             printAgentHelp();
             return 0;
         }
-        if (printAgentHelpGroup(agentArgs.first()))
+        if (printAgentHelpGroup(group))
             return 0;
-        QTextStream(stderr) << "anoa: no help group '" << agentArgs.first()
-                            << "' — try: anoa help" << Qt::endl;
+        QTextStream(stderr) << "anoa: no help group '" << group << "' — try: anoa help"
+                            << Qt::endl;
         return 2;
     }
 

@@ -188,6 +188,25 @@ describe('Agent CLI (Suite 8)', () => {
     assert.equal(run(['help', 'nope']).code, 2);
   });
 
+  // AGENT-12b: --help and -h must be the grouped help, not the flag dump.
+  // QCommandLineParser's own --help cannot mention a subcommand, because the
+  // parser never sees one — so someone typing --help was shown --profile-dir
+  // and left with no idea `click` existed.
+  it('--help and -h print the same grouped help as `help`', () => {
+    const grouped = run(['help']);
+    for (const flag of ['--help', '-h']) {
+      const r = run([flag]);
+      assert.equal(r.code, 0, `${flag} failed`);
+      assert.equal(r.out, grouped.out, `${flag} differs from \`help\``);
+    }
+    // And it carries the browser flags, so nothing was lost by replacing the
+    // parser's output with this.
+    for (const flag of ['--headless', '--auth-token', '--gfx', '--term-port']) {
+      assert.match(grouped.out, new RegExp(flag.replace(/-/g, '\\-')),
+                   `${flag} missing from help`);
+    }
+  });
+
   // AGENT-13: find returns refs, so its output feeds every other command.
   it('find locates by role, text and selector, and returns usable refs', () => {
     anoa('open', 'example.com');
