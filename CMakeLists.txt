@@ -69,12 +69,14 @@ if(NOT WIN32)
         src/terminal/terminal_ui.cpp
         src/terminal/render_http_client.cpp
         src/terminal/cdp_client.cpp
+        src/terminal/cdp_frame_backend.cpp
         # frame_backend.h has no .cpp of its own, so AUTOMOC only sees it (and
         # generates the FrameBackend metaobject) when it is listed here.
         src/terminal/frame_backend.h
         src/terminal/terminal_ui.h
         src/terminal/render_http_client.h
         src/terminal/cdp_client.h
+        src/terminal/cdp_frame_backend.h
     )
 endif()
 
