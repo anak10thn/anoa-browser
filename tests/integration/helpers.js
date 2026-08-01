@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { createConnection } from 'net';
+import { createConnection, createServer } from 'net';
 import WebSocket from 'ws';
 import fetch from 'node-fetch';
 import { resolve, dirname } from 'path';
@@ -29,6 +29,28 @@ export function waitForPort(port, timeout = 10000) {
       });
     }
     attempt();
+  });
+}
+
+/**
+ * Ask the kernel for an unused loopback port and hand it back.
+ *
+ * The suites that spawn anoa-browser use the fixed ANOA_PORT triplet, because
+ * the binary's three ports are derived from one another. A test that stands up
+ * its *own* server (the fake CDP endpoint in terminal_cdp.test.js) has no such
+ * constraint and should not squat on the triplet, so it takes an ephemeral one
+ * from here instead. There is a race between the close() and the next listen(),
+ * which is unavoidable without keeping the socket — with fileParallelism off
+ * and nothing else on the box binding ephemeral ports, it does not bite.
+ */
+export function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
   });
 }
 
