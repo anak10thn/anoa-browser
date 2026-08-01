@@ -286,3 +286,49 @@
   Content-Length declares the full size. Pre-existing and unrelated to this
   work; invisible to every in-repo caller because they all request scaled
   frames.
+
+## Agent CLI, the `anoa` rename, and a release that deleted itself (2026-08-01)
+
+- BEFORE TAGGING ANY RELEASE: run the Release workflow on `workflow_dispatch`
+  and wait for it to pass. It builds and smoke-tests every package and publishes
+  nothing. This is written up in AGENTS.md (Known Gotchas) and docs/BUILDING.md
+  (Releasing) — read one of them before touching a tag.
+
+- The reason: v0.4.1 shipped a macOS app that deleted itself on first run. An
+  empty QtWebEngineCore.framework/Versions/Resources made the framework layout
+  invalid, so Gatekeeper SIGKILLed the process and removed the app. Every check
+  in CI passed — `spctl --assess` said "accepted, source=Notarized Developer ID"
+  — because the stray directory reappeared *after* the guard and before `tar`.
+  Verify the artifact, not the working tree.
+
+- Diagnosing it: extract the published tarball and run
+  `codesign --verify --deep --strict` on the .app. That is what said "embedded
+  framework contains modified or invalid version" and named the framework.
+  `spctl` alone passed on the broken bundle and told us nothing.
+
+- The agent commands (`anoa open|snapshot|click|fill|…`) attach to a browser
+  that is already running. State that has to survive between commands lives in
+  the *page*: `snapshot` writes data-anoa-ref onto the DOM nodes, which is why a
+  ref minted by one process resolves in the next. Do not try to cache refs in a
+  file or a daemon — the DOM already has exactly the right lifetime.
+
+- Clicks go through Input.dispatchMouseEvent at a hit-tested point, never
+  el.click(). The synthetic click skips hit testing and would "click" through a
+  consent banner, which is the failure that makes an agent believe it dismissed
+  something it did not.
+
+- `fill` sets the value through the prototype setter before dispatching
+  input/change. React tracks the last value it wrote on the node and ignores an
+  event whose value it believes is unchanged; assigning el.value directly is
+  silently a no-op there.
+
+- macOS testing gaps closed: tests/e2e/terminal_e2e.py drives the viewer through
+  pty.fork() instead of GNU `script -q -c`, so it runs on macOS where
+  terminal_http/terminal_cdp skip themselves. helpers.js now probes for
+  build/anoa.app/Contents/MacOS/anoa, which removes the hand-made build/anoa
+  symlink that only survived until the next clean build.
+
+- Homebrew renames need cask_renames.json / formula_renames.json at the tap
+  root, mapping old -> new. Deleting the old cask/formula without them strands
+  existing installs: `brew upgrade` reports "No available formula or cask" and
+  they silently stop receiving updates.

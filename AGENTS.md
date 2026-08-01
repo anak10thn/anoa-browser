@@ -99,6 +99,28 @@ tests/
 
 ## Known Gotchas
 
+- **Never tag a release without running the Release workflow on
+  `workflow_dispatch` first.** It builds and smoke-tests every package and
+  publishes nothing, so a broken package is caught before it reaches anyone.
+  Skip it and the first person to find out is a user.
+
+  This is not hypothetical. **v0.4.1 shipped a macOS app that deleted itself.**
+  The bundle carried an empty
+  `QtWebEngineCore.framework/Versions/Resources`; a framework may only hold
+  version directories under `Versions/`, so `codesign --verify --deep --strict`
+  reported *"embedded framework contains modified or invalid version"* and
+  Gatekeeper on current macOS SIGKILLed the process **and removed the app** —
+  which then surfaced to the user as brew's *"It seems the App source
+  '/Applications/anoa-browser.app' is not there"*.
+
+  Every check in CI passed. `spctl --assess` answered *"accepted, source=
+  Notarized Developer ID"*. The directory reappeared **after** that guard and
+  before `tar`, so every assurance was about a bundle that was no longer the one
+  being shipped. The Package step now purges again, verifies the signature, and
+  then extracts the finished archive and verifies *that*. The lesson generalises:
+  **verify the artifact, not the working tree** — green CI is not evidence that
+  what you published works. See `docs/BUILDING.md` → Releasing.
+
 - **Terminal options are CLI-only.** `--term-host`, `--term-port`, `--term-token`,
   `--fps`, `--gfx` and `--cdp` are read by `parseArgs()` only; `loadConfigFile()` is
   deliberately *not* extended with them, so nothing in `--config` can set them.

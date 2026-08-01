@@ -137,10 +137,26 @@ screenshot and shift every click by its own height.
 ## Releasing (maintainers)
 
 1. Bump `project(anoa VERSION ...)` in `CMakeLists.txt` and merge it.
-2. Tag `vX.Y.Z` and push it — via GitHub (**Releases → Draft a new release →
+2. **Run the Release workflow on `workflow_dispatch` and wait for it to pass.**
+   It builds and smoke-tests every package and publishes nothing — no release,
+   no tap commit. This step is not optional; see the warning below.
+3. Tag `vX.Y.Z` and push it — via GitHub (**Releases → Draft a new release →
    Choose a tag → Create new tag**) or `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. CI builds Linux / macOS / Windows, signs and notarizes the macOS app,
+4. CI builds Linux / macOS / Windows, signs and notarizes the macOS app,
    publishes the GitHub Release, and updates the Homebrew tap.
+
+> **Why step 2 exists.** v0.4.1 shipped a macOS app that deleted itself on first
+> run. The bundle contained an empty
+> `QtWebEngineCore.framework/Versions/Resources` — an invalid framework layout —
+> so Gatekeeper SIGKILLed the process and removed the app, and the user saw
+> brew's *"It seems the App source is not there"* on their next upgrade.
+>
+> Every check passed. `spctl --assess` answered *"accepted, source=Notarized
+> Developer ID"*. The stray directory came back **after** that guard and before
+> `tar`, so the thing that was verified was not the thing that was published.
+> The Package step now purges again, verifies the signature, and extracts the
+> finished archive to verify that too — but the general rule is the one worth
+> remembering: **verify the artifact, not the working tree.**
 
 The tag name is what the built binary reports: CI passes it through
 `ANOA_VERSION_OVERRIDE`. Keep the `CMakeLists.txt` version equal to it — a
