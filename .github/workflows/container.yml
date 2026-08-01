@@ -1,0 +1,127 @@
+name: Container
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/container.yml'
+      - 'tests/e2e/container_e2e.sh'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'anoa release to build the image from (e.g. v0.6.0, or "latest")'
+        required: false
+        default: 'latest'
+  # Every published release gets an image tagged with the same version. This is
+  # the trigger that matters — a release without an image is the case people
+  # actually hit.
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build, test, and publish
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Which anoa release goes in the image. A release event pins to that
+      # release; a manual run takes the input; a branch push takes the latest.
+      # Never left implicit — an image whose contents depend on when it was
+      # built is an image nobody can reproduce.
+      - name: Resolve the anoa version
+        id: version
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            release) v="${{ github.event.release.tag_name }}" ;;
+            workflow_dispatch) v="${{ inputs.version }}" ;;
+            *) v="latest" ;;
+          esac
+          if [ "$v" = "latest" ]; then
+            v="$(curl -fsSL https://api.github.com/repos/${{ github.repository }}/releases/latest \
+                 | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"
+          fi
+          [ -n "$v" ] || { echo "::error::could not resolve an anoa version"; exit 1; }
+          echo "anoa=$v" >> "$GITHUB_OUTPUT"
+          echo "resolved to $v"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built and loaded locally first, then tested, then pushed. Pushing an
+      # untested image and testing it afterwards means a broken image was
+      # public for the length of the test.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: anoa:test
+          build-args: |
+            ANOA_VERSION=${{ steps.version.outputs.anoa }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test the image
+        run: |
+          chmod +x tests/e2e/container_e2e.sh
+          CONTAINER_ENGINE=docker tests/e2e/container_e2e.sh anoa:test
+
+      # Everything below only runs once the image has proved itself, and only
+      # where a push makes sense — a pull request from a fork has no
+      # credentials and should not be publishing anything.
+      - name: Log in to the registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.anoa }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/master' }}
+          labels: |
+            org.opencontainers.image.title=anoa
+            org.opencontainers.image.description=Headless browser with CDP and an agent CLI
+            org.opencontainers.image.version=${{ steps.version.outputs.anoa }}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ANOA_VERSION=${{ steps.version.outputs.anoa }}
+          cache-from: type=gha
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Container image"
+            echo
+            echo "- anoa version: \`${{ steps.version.outputs.anoa }}\`"
+            echo "- tags: \`${{ steps.meta.outputs.tags || 'not pushed' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

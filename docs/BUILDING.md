@@ -200,6 +200,17 @@ make test        # unit suites (QTest + CTest)
 make coverage    # same, with a coverage gate at 80%
 ```
 
+The container suite needs an image rather than a build:
+
+```bash
+docker build -t anoa:test .
+tests/e2e/container_e2e.sh anoa:test
+```
+
+It picks whichever of docker or podman can actually see that tag, because on a
+machine with both they keep separate image stores and "docker exists" is no
+reason to believe docker has the image podman just built.
+
 Integration and regression suites live in `tests/`:
 
 | Suite | Runner | Notes |
@@ -209,6 +220,7 @@ Integration and regression suites live in `tests/`:
 | `tests/integration/*.test.sh` | bash | port layout, build shape, Qt floor |
 | `tests/e2e/` | Playwright + Puppeteer | connect over CDP to a running binary |
 | `tests/regression/smoke.sh` | bash | end-to-end sanity |
+| `tests/e2e/container_e2e.sh` | bash | the container image, against a real release |
 
 The bash suites need `nc` (netcat) to wait for readiness — without it every
 browser-launching case fails identically and the errors look like GPU problems.

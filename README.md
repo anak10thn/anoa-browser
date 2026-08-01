@@ -112,6 +112,37 @@ tar xzf anoa-linux-x86_64.tar.gz
 
 Always go through `anoa.sh`: the raw executable next to it has none of that environment set up, in terminal mode as much as in browser mode.
 
+### Container (Docker / Podman)
+
+```bash
+docker run --rm -p 9222:9222 ghcr.io/porcupine-md/anoa-browser
+```
+
+Headless, no display server, no sandbox privileges needed. The CDP endpoint is
+on 9222, so Playwright and Puppeteer connect to it exactly as they would to a
+local browser. Drive it with the agent commands from inside the container:
+
+```bash
+docker run -d --name anoa -p 9222:9222 ghcr.io/porcupine-md/anoa-browser
+docker exec anoa anoa open example.com
+docker exec anoa anoa snapshot -i
+docker exec anoa anoa click @e1
+```
+
+Tags: a version (`v0.6.0`) for each release, `latest` for the newest release,
+`edge` for master. Build it yourself with `docker build -t anoa .` — the
+Dockerfile installs a published release rather than compiling, and takes
+`--build-arg ANOA_VERSION=v0.6.0` to pin one.
+
+The browser runs as a non-root user and the endpoint is **unauthenticated by
+default**. Pass `--auth-token` and do not publish the port to an untrusted
+network without one:
+
+```bash
+docker run --rm -p 9222:9222 ghcr.io/porcupine-md/anoa-browser \
+  --headless --no-sandbox --port 9222 --auth-token "$SECRET"
+```
+
 ### Windows
 
 Download `anoa-windows-x86_64.zip` from [Releases](https://github.com/porcupine-md/anoa-browser/releases) and run `anoa.exe`.
