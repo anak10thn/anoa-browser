@@ -29,6 +29,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QNetworkRequest;
 class QTimer;
 class QWebSocket;
 

@@ -98,7 +98,16 @@ CdpClient::CdpClient(const QString &token, QObject *parent)
     connect(m_socket, &QWebSocket::disconnected, this, &CdpClient::onSocketDisconnected);
     // Qt drops trailing signal arguments, so the SocketError is not carried
     // into the slot; QWebSocket::errorString() has the text we want anyway.
+    // QWebSocket::errorOccurred only exists from 6.5; on 6.4 (what Ubuntu 24.04
+    // and Debian bookworm ship, and what find_package above still allows) the
+    // signal is error(), which needs the overload spelled out because a
+    // same-named getter shares the address.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     connect(m_socket, &QWebSocket::errorOccurred, this, &CdpClient::onSocketError);
+#else
+    connect(m_socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error), this,
+            &CdpClient::onSocketError);
+#endif
     connect(m_socket, &QWebSocket::textMessageReceived, this,
             &CdpClient::onTextMessageReceived);
     connect(m_reconnectTimer, &QTimer::timeout, this, &CdpClient::onReconnectTimeout);
