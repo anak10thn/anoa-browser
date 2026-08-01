@@ -229,9 +229,19 @@
 - Kept TERM-GUI-01 even though it asserts what this test file's own main()
   builds -- it is the premise guard for TERM-GUI-02/03, which stop proving
   anything headless if the harness silently becomes a QApplication.
-- port_layout.test.sh fails 6/14 in this sandbox: no GL, no GPU, so WebEngine
-  cannot start. All 6 are the PORT-0x browser-launching cases. Every
-  TERM-MODE-* case passes. Do not chase these here.
+- CORRECTED in phase 17. The earlier note here said port_layout.test.sh fails
+  6/14 in this sandbox because "no GL, no GPU, so WebEngine cannot start", and
+  told the next agent not to chase it. That diagnosis was wrong and the advice
+  was dangerous -- it would have hidden a real regression. The actual cause is
+  that `nc` is not installed: wait_for_port() is `while ! nc -z ...`, so with no
+  nc every readiness probe fails and every browser-launching case reports
+  "Browser failed to start". WebEngine starts fine here despite the QRhiGles2 /
+  Vulkan noise on stderr -- /json/version answers in about 2 seconds. After
+  `apt-get install -y netcat-openbsd`: port_layout 14/14, smoke.sh 4/4,
+  extensions.test.sh 4/4, vitest 103/103. Same trap in tests/regression/smoke.sh
+  and tests/integration/extensions.test.sh, which use the same probe.
+  Lesson: when a readiness probe fails, prove the service is down before
+  blaming the environment -- curl it by hand.
 - build-asan/ on disk can be STALE-partial: ctest reported ConfigTests "Not
   Run" because only the terminal targets had been built there. `make test`
   builds everything; a hand-driven build dir may not. Build the target before

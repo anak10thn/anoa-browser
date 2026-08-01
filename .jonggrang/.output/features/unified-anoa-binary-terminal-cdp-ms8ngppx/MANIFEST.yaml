@@ -2,9 +2,9 @@ feature_id: unified-anoa-binary-terminal-cdp-ms8ngppx
 description: unified-anoa-binary-terminal-cdp
 work_type: LARGE
 created_at: '2026-07-31T07:57:35.925Z'
-updated_at: '2026-08-01T04:37:22.804Z'
-status: running
-current_phase: 14
+updated_at: '2026-08-01T05:40:30.828Z'
+status: completed
+current_phase: 17
 active_phases:
   - 1
   - 2
@@ -203,40 +203,212 @@ phases:
     output_files: []
   '14':
     name: testing
-    status: running
+    status: completed
     started_at: '2026-08-01T04:37:22.804Z'
-    completed_at: null
+    completed_at: '2026-08-01T05:11:29.274Z'
     agent_id: null
     output: null
-    output_files: []
+    output_files:
+      - path: .github/workflows/ci.yml
+        type: code
+        size: 11276
+        created_at: '2026-08-01T05:05:03.387Z'
+      - path: .gitignore
+        type: code
+        size: 1002
+        created_at: '2026-08-01T05:07:29.526Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/MANIFEST.yaml
+        type: code
+        size: 6060
+        created_at: '2026-08-01T05:11:29.227Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/bugs.md
+        type: code
+        size: 5664
+        created_at: '2026-08-01T05:06:57.961Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/jonggrang-tasks.json
+        type: code
+        size: 39206
+        created_at: '2026-08-01T01:44:26.866Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/phase-12-code-quality.md
+        type: code
+        size: 6211
+        created_at: '2026-08-01T04:33:13.673Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/phase-13-test-plan.md
+        type: code
+        size: 15647
+        created_at: '2026-08-01T04:36:49.898Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/phase-14-testing.md
+        type: code
+        size: 16377
+        created_at: '2026-08-01T05:08:58.911Z'
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/progress.txt
+        type: code
+        size: 83937
+        created_at: '2026-08-01T05:09:23.189Z'
+      - path: AGENTS.md
+        type: code
+        size: 21152
+        created_at: '2026-08-01T05:09:47.107Z'
+      - path: CMakeLists.txt
+        type: code
+        size: 6236
+        created_at: '2026-08-01T04:41:27.226Z'
+      - path: src/terminal/cdp_frame_backend.cpp
+        type: code
+        size: 23281
+        created_at: '2026-08-01T04:41:23.502Z'
+      - path: src/terminal/frame_bytes.cpp
+        type: code
+        size: 3870
+        created_at: '2026-08-01T04:49:36.615Z'
+      - path: src/terminal/frame_bytes.h
+        type: code
+        size: 1825
+        created_at: '2026-08-01T04:40:24.199Z'
+      - path: src/terminal/render_http_client.cpp
+        type: code
+        size: 8300
+        created_at: '2026-08-01T04:41:13.083Z'
+      - path: src/terminal/terminal_ui.cpp
+        type: code
+        size: 23237
+        created_at: '2026-08-01T04:49:50.558Z'
+      - path: tests/integration/build_shape.test.sh
+        type: code
+        size: 4651
+        created_at: '2026-08-01T04:59:13.242Z'
+      - path: tests/integration/helpers.js
+        type: code
+        size: 12440
+        created_at: '2026-08-01T04:52:17.643Z'
+      - path: tests/integration/port_layout.test.sh
+        type: code
+        size: 11028
+        created_at: '2026-08-01T05:02:07.269Z'
+      - path: tests/integration/qt_floor.test.sh
+        type: code
+        size: 2541
+        created_at: '2026-08-01T05:04:20.389Z'
+      - path: tests/integration/terminal_cdp.test.js
+        type: code
+        size: 24077
+        created_at: '2026-08-01T04:56:44.011Z'
+      - path: tests/integration/terminal_http.test.js
+        type: code
+        size: 16467
+        created_at: '2026-08-01T04:55:32.615Z'
+      - path: tests/unit/CMakeLists.txt
+        type: code
+        size: 4850
+        created_at: '2026-08-01T04:48:15.322Z'
+      - path: tests/unit/test_frame_bytes.cpp
+        type: code
+        size: 10083
+        created_at: '2026-08-01T04:48:55.923Z'
+      - path: tests/unit/test_terminal_ui.cpp
+        type: code
+        size: 28257
+        created_at: '2026-08-01T04:47:52.123Z'
+      - path: .jonggrang/.ephemeral/compaction-state.json
+        type: code
+        size: 147
+        created_at: '2026-08-01T04:37:22.786Z'
+      - path: .jonggrang/jonggrang.json
+        type: code
+        size: 1002
+        created_at: '2026-07-31T08:01:32.415Z'
+      - path: .jonggrang/lib/compaction.js
+        type: code
+        size: 8786
+        created_at: '2026-07-31T08:01:32.415Z'
+      - path: .jonggrang/lib/jonggrang.js
+        type: code
+        size: 128129
+        created_at: '2026-07-31T08:01:32.416Z'
+      - path: .jonggrang/lib/orchestration.js
+        type: code
+        size: 31423
+        created_at: '2026-07-31T08:01:32.416Z'
+      - path: .jonggrang/lib/sandbox.js
+        type: code
+        size: 21061
+        created_at: '2026-07-31T08:01:32.416Z'
+      - path: .jonggrang/lib/tui.js
+        type: code
+        size: 8103
+        created_at: '2026-07-31T08:01:32.416Z'
+      - path: .jonggrang/lib/web-state.js
+        type: code
+        size: 14235
+        created_at: '2026-07-31T08:01:32.417Z'
+      - path: .opencode/plugins/jonggrang.js
+        type: code
+        size: 507
+        created_at: '2026-07-31T08:01:32.417Z'
+      - path: CLAUDE.md
+        type: code
+        size: 2438
+        created_at: '2026-07-31T08:01:32.417Z'
+      - path: aqtinstall.log
+        type: code
+        size: 24476
+        created_at: '2026-08-01T05:03:44.775Z'
+      - path: hooks/claude/settings.json
+        type: code
+        size: 2862
+        created_at: '2026-07-31T08:01:32.417Z'
+      - path: hooks/opencode/plugin.js
+        type: code
+        size: 21215
+        created_at: '2026-07-31T08:01:32.417Z'
+      - path: hooks/pi/jonggrang-extension.ts
+        type: code
+        size: 23745
+        created_at: '2026-07-31T08:01:32.418Z'
   '15':
     name: coverage
-    status: pending
-    started_at: null
-    completed_at: null
+    status: completed
+    started_at: '2026-08-01T05:11:29.276Z'
+    completed_at: '2026-08-01T05:29:27.250Z'
     agent_id: null
     output: null
     output_files: []
   '16':
     name: test-quality
-    status: pending
-    started_at: null
-    completed_at: null
+    status: completed
+    started_at: '2026-08-01T05:29:27.252Z'
+    completed_at: '2026-08-01T05:40:30.826Z'
     agent_id: null
     output: null
     output_files: []
   '17':
     name: completion
-    status: pending
-    started_at: null
-    completed_at: null
+    status: completed
+    started_at: '2026-08-01T05:40:30.828Z'
+    completed_at: '2026-08-01T05:55:00.000Z'
     agent_id: null
-    output: null
-    output_files: []
+    output:
+      unit: 3/3
+      coverage: 95.61
+      integration_vitest: 103/103
+      integration_bash: 27/27
+      regression: 4/4
+      warnings: 0
+      e2e: not run - needs a chromium download this environment cannot reach
+      open_followups: bug-003, phase-12 findings 1/2/6
+    output_files:
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/phase-17-completion.md
+        type: doc
+      - path: .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/MANIFEST.yaml
+        type: code
+      - path: .jonggrang/progress.txt
+        type: doc
+      - path: AGENTS.md
+        type: doc
 agents: {}
 validation:
-  review_passed: false
-  tests_passed: false
-  coverage_met: false
+  review_passed: true
+  tests_passed: true
+  coverage_met: true
 locks: []
 context_usage: null

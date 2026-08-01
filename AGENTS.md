@@ -130,6 +130,17 @@ tests/
   `anoa-browser terminal` prints it too even though terminal mode starts no CDP
   server. Known noise — tests filter stderr on the `anoa-browser terminal: ` prefix
   rather than counting lines.
+- **"Browser failed to start" from a bash suite usually means `nc` is missing, not
+  that the browser is broken.** `wait_for_port()` is `while ! nc -z ...` in
+  `port_layout.test.sh`, `extensions.test.sh` and `smoke.sh`; with no netcat the
+  loop can never succeed and every browser-launching case fails identically. A
+  headless run also prints `QRhiGles2: Failed to create context`, `QVulkanInstance:
+  Failed to initialize Vulkan` and `Unable to detect GPU vendor` on stderr, which
+  makes "this box has no GPU, WebEngine can't come up" look like the obvious
+  explanation. It is not — WebEngine falls back to software and `/json/version`
+  answers in about two seconds. Before blaming the environment, `curl` the port by
+  hand; a wrong call here gets written down as "do not chase this" and hides the
+  next real regression.
 
 ---
 
@@ -191,6 +202,11 @@ tests/
 - **Chromium**, embedded via QtWebEngine — no external browser is downloaded.
 - **Node ≥ 20** for the test suites only (vitest, ws, node-fetch, @playwright/test,
   puppeteer-core). Each `tests/*` directory has its own `package.json`.
+- **`nc` (netcat-openbsd)** is required by the three bash suites that launch the
+  browser — `port_layout.test.sh`, `extensions.test.sh` and `regression/smoke.sh`
+  all wait on readiness with `while ! nc -z 127.0.0.1 <port>`. Without it every
+  probe fails and the suites report *"Browser failed to start"*, which reads
+  exactly like a product failure and is not one. See *Known Gotchas*.
 - **Homebrew** is the distribution channel: `.github/homebrew/*.tpl` are rendered by
   `update-homebrew-tap.yml` on release. macOS builds are codesigned/notarized using
   `.github/entitlements/anoa-browser.entitlements`.
