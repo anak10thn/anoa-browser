@@ -1,4 +1,4 @@
-#include "terminal/cdp_client.h"
+#include "cdp/cdp_client.h"
 
 #include <cstdio> // stderr, for the QTextStream error lines
 
@@ -33,7 +33,7 @@ constexpr int kSweepIntervalMs = 250;
 
 // Prefix for the handful of messages this class writes straight to stderr.
 // Same wording as terminal_app.cpp, because to the user it is one program.
-const char kErrPrefix[] = "anoa-browser terminal: ";
+const char kErrPrefix[] = "anoa terminal: ";
 
 QString hostPort(const QUrl &url)
 {

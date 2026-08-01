@@ -17,7 +17,7 @@
 #include <QUrl>
 
 #include "config/config.h"
-#include "terminal/cdp_client.h"
+#include "cdp/cdp_client.h"
 #include "terminal/cdp_frame_backend.h"
 #include "terminal/frame_backend.h"
 #include "terminal/inprocess_frame_backend.h"
@@ -48,7 +48,7 @@ namespace {
 // left over stays in the tty buffer and re-arms the notifier at once.
 const size_t kMaxBurstBytes = 64 * 1024;
 
-const char kErrPrefix[] = "anoa-browser terminal: ";
+const char kErrPrefix[] = "anoa terminal: ";
 
 // How many failed dials to accept from an endpoint that has never once
 // answered. CdpClient's backoff is 250 ms doubling to an 8 s cap, so six
@@ -117,7 +117,7 @@ bool probeBackend(FrameBackend *backend, QTextStream &err)
 
     err << kErrPrefix << "cannot fetch " << backend->description()
         << "/render/screenshot.ppm (" << failure << ")" << Qt::endl
-        << "Is anoa-browser running? Does it need --term-token?" << Qt::endl;
+        << "Is anoa running? Does it need --term-token?" << Qt::endl;
     return false;
 }
 
@@ -147,14 +147,14 @@ QString attachedTarget(const CdpClient *client)
 }
 
 // --term-host and --term-port describe the /render/* endpoint of a local
-// anoa-browser. On the CDP path the target comes from --cdp alone, so they are
+// anoa. On the CDP path the target comes from --cdp alone, so they are
 // not applied — and saying so beats letting someone believe the viewer is
 // pointed where they asked. Config carries no "was this set?" flag, so the
 // test is against the defaults declared in config.h.
 //
 // --term-token is deliberately absent from that list, because it is *not*
 // ignored here: CdpClient sends it as the endpoint's bearer token, on both the
-// /json/list GET and the WebSocket dial, which is what anoa-browser's own CDP
+// /json/list GET and the WebSocket dial, which is what anoa's own CDP
 // proxy requires. This line says that out loud for the same reason.
 void warnIgnoredRenderOptions(const Config &config, QTextStream &err)
 {

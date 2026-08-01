@@ -14,7 +14,7 @@ struct Config {
     int width = 1280;
     int height = 720;
 
-    // Terminal mode (`anoa-browser terminal`). CLI-only — never read from the
+    // Terminal mode (`anoa terminal`). CLI-only — never read from the
     // JSON/INI config file. terminalMode is set by the argv pre-scan in
     // main.cpp, not by parseArgs().
     bool terminalMode = false;
@@ -23,7 +23,7 @@ struct Config {
     // browser in-process instead of connecting to one. It cannot be derived
     // from the fields below: their defaults are indistinguishable from the user
     // typing those same values, and `--term-port 9222` must still mean "connect
-    // to the anoa-browser already on 9222".
+    // to the anoa already on 9222".
     bool termEmbedded = false;
     QString termHost = "127.0.0.1";
     int termPort = 9222;

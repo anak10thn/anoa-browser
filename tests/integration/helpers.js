@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from 'child_process';
 import { createConnection, createServer } from 'net';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import WebSocket from 'ws';
 import fetch from 'node-fetch';
@@ -9,8 +9,20 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// CMake builds into an app bundle on macOS and leaves the executable in place
+// everywhere else, so there is no single path that works on both. Probing is
+// what removes the "works on Linux, mysteriously fails on a Mac" gap — the
+// alternative was a hand-made build/anoa symlink that survived exactly until
+// the next clean build.
+const BINARY_CANDIDATES = [
+  resolve(__dirname, '../../build/anoa.app/Contents/MacOS/anoa'),
+  resolve(__dirname, '../../build/anoa'),
+  resolve(__dirname, '../../build/anoa.exe'),
+];
+
 export const BINARY = process.env.ANOA_BINARY
-  ?? resolve(__dirname, '../../build/anoa-browser');
+  ?? BINARY_CANDIDATES.find((p) => existsSync(p))
+  ?? BINARY_CANDIDATES[1];
 
 export const HTTP_PORT = parseInt(process.env.ANOA_PORT ?? '9222', 10);
 export const WS_PORT   = HTTP_PORT + 2;
@@ -37,7 +49,7 @@ export function waitForPort(port, timeout = 10000) {
 /**
  * Ask the kernel for an unused loopback port and hand it back.
  *
- * The suites that spawn anoa-browser use the fixed ANOA_PORT triplet, because
+ * The suites that spawn anoa use the fixed ANOA_PORT triplet, because
  * the binary's three ports are derived from one another. A test that stands up
  * its *own* server (the fake CDP endpoint in terminal_cdp.test.js) has no such
  * constraint and should not squat on the triplet, so it takes an ephemeral one
@@ -57,7 +69,7 @@ export function freePort() {
 }
 
 /**
- * Start the anoa-browser binary and wait for HTTP port to be ready.
+ * Start the anoa binary and wait for HTTP port to be ready.
  * Returns the child process.
  */
 export async function startBrowser(extraArgs = []) {
@@ -140,7 +152,7 @@ export function sendCdp(ws, method, params = {}, id = 1) {
   });
 }
 
-// ── `anoa-browser terminal` on a pty ────────────────────────────────────────
+// ── `anoa terminal` on a pty ────────────────────────────────────────
 //
 // Shared by terminal_cdp.test.js and terminal_http.test.js, which are the same
 // suite pointed at two transports: one fake endpoint each, the same viewer,
@@ -184,12 +196,12 @@ export const TERM_COLS = 100;
 export const TERM_ROWS = 30;
 export const TERM_FPS = 10; // slower than the 30 fps default: fewer frames, same behaviour
 
-export const VIEWER_ERR_PREFIX = 'anoa-browser terminal: ';
+export const VIEWER_ERR_PREFIX = 'anoa terminal: ';
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /**
- * Run `anoa-browser terminal <args>` on a pty at TERM_COLS x TERM_ROWS.
+ * Run `anoa terminal <args>` on a pty at TERM_COLS x TERM_ROWS.
  *
  * Returns a handle whose `send()` writes raw bytes to the viewer's stdin (they
  * reach it through the pty exactly as a terminal would deliver them, i.e. as
@@ -207,7 +219,7 @@ export function launchViewer(extraArgs = []) {
   const inner = `stty rows ${TERM_ROWS} cols ${TERM_COLS}; exec ${shq(BINARY)} ${argv.map(shq).join(' ')} 2>${shq(errPath)}`;
 
   // detached: script leads its own process group, so a test that has to give
-  // up can take the whole tree (script -> sh -> anoa-browser) down at once.
+  // up can take the whole tree (script -> sh -> anoa) down at once.
   // Killing script alone would orphan the viewer, which would then sit in its
   // reconnect loop for the rest of the run.
   const proc = spawn('script', ['-q', '-e', '-c', inner, '/dev/null'], {

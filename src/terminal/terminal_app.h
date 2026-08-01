@@ -1,6 +1,6 @@
 #pragma once
 
-// Terminal mode (`anoa-browser terminal`) is POSIX-only: the viewer is built on
+// Terminal mode (`anoa terminal`) is POSIX-only: the viewer is built on
 // termios, select()/QSocketNotifier over STDIN and SIGWINCH, none of which exist
 // on MSVC. This header is never included on Windows and terminal_app.cpp is not
 // added to target_sources there — main.cpp guards both behind Q_OS_WIN.

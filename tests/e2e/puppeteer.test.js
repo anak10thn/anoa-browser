@@ -2,7 +2,7 @@
  * Suite 7 — Puppeteer Compatibility Tests
  *
  * Prerequisites:
- *   1. anoa-browser is running:  ./build/anoa-browser --headless --no-sandbox --port 9222
+ *   1. anoa is running:  ./build/anoa --headless --no-sandbox --port 9222
  *   2. npm install in this directory
  *
  * Run: node --test puppeteer.test.js

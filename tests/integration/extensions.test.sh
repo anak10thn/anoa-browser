@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Suite 9 — Extension Loading Tests
-# Usage: ANOA_BINARY=./build/anoa-browser bash tests/integration/extensions.test.sh
+# Usage: ANOA_BINARY=./build/anoa bash tests/integration/extensions.test.sh
 set -euo pipefail
 
-BINARY="${ANOA_BINARY:-./build/anoa-browser}"
+BINARY="${ANOA_BINARY:-./build/anoa}"
 PORT="${ANOA_PORT:-9222}"
 FIXTURES_DIR="$(dirname "$0")/../fixtures"
 PASS=0

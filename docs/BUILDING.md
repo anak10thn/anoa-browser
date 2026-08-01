@@ -1,7 +1,7 @@
-# Building anoa-browser
+# Building anoa
 
 Everything in this file is for people building from source or cutting releases.
-If you only want to *use* anoa-browser, the [README](../README.md) has prebuilt
+If you only want to *use* anoa, the [README](../README.md) has prebuilt
 packages for macOS, Linux and Windows and you never need to read this.
 
 ---
@@ -37,7 +37,7 @@ WebEngine and the MSVC 2022 components.
 
 ```bash
 git clone git@github.com:porcupine-md/anoa-browser.git
-cd anoa-browser
+cd anoa
 
 make                        # Debug build (dynamic linking)
 make release                # Release build
@@ -71,7 +71,7 @@ make release-static QT_PREFIX=/path/to/qt JOBS=8 INSTALL_PREFIX=/opt/anoa
 `src/terminal/` is built on termios, `SIGWINCH` and `QSocketNotifier` over
 stdin, none of which have an MSVC equivalent. On Windows those sources are left
 out of the target entirely (`if(NOT WIN32)` in `CMakeLists.txt`) and
-`anoa-browser terminal` reports the unsupported platform at runtime. A syntax
+`anoa terminal` reports the unsupported platform at runtime. A syntax
 check would not prove this, so `tests/integration/build_shape.test.sh` asserts
 it negatively — every `src/terminal/` reference must sit inside the guard.
 
@@ -81,7 +81,7 @@ On a CI runner with no GPU:
 
 ```bash
 export QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox"
-./anoa-browser --headless --port 9222
+./anoa --headless --port 9222
 ```
 
 `--headless` selects the offscreen platform itself, so no display server is
@@ -93,7 +93,7 @@ needed on Linux and `DISPLAY` is never required on macOS. `--version` and
 ## Architecture
 
 ```
-anoa-browser
+anoa
 ├── main.cpp                  # CLI parsing, application bootstrap
 ├── config/                   # Config struct from CLI flags + env vars
 ├── browser/
@@ -104,7 +104,7 @@ anoa-browser
 ├── cdp/
 │   ├── cdp_proxy             # QWebSocketServer bridge, session multiplexing, auth
 │   └── cdp_extensions        # Profiler / HeapProfiler / Security domain stubs
-├── terminal/                 # `anoa-browser terminal` — POSIX only
+├── terminal/                 # `anoa terminal` — POSIX only
 │   ├── terminal_app          # event loop — QSocketNotifier(stdin) + frame QTimer
 │   ├── terminal_ui           # termios raw mode, SIGWINCH, iTerm2/kitty image protocols or
 │   │                         # ANSI half-block fallback, status bar, SGR mouse/key parsing
@@ -136,7 +136,7 @@ screenshot and shift every click by its own height.
 
 ## Releasing (maintainers)
 
-1. Bump `project(anoa-browser VERSION ...)` in `CMakeLists.txt` and merge it.
+1. Bump `project(anoa VERSION ...)` in `CMakeLists.txt` and merge it.
 2. Tag `vX.Y.Z` and push it — via GitHub (**Releases → Draft a new release →
    Choose a tag → Create new tag**) or `git tag vX.Y.Z && git push origin vX.Y.Z`.
 3. CI builds Linux / macOS / Windows, signs and notarizes the macOS app,
@@ -168,11 +168,11 @@ Green CI is not the same as a working install. Worth checking by hand:
 
 ```bash
 # the tap's checksum must match the published asset, or brew install fails for everyone
-curl -fsSL https://github.com/porcupine-md/anoa-browser/releases/download/vX.Y.Z/anoa-browser-macos-universal.tar.gz \
+curl -fsSL https://github.com/porcupine-md/anoa-browser/releases/download/vX.Y.Z/anoa-macos-universal.tar.gz \
   | shasum -a 256
 
 # and what brew now offers
-brew update && brew info --cask porcupine-md/tap/anoa-browser
+brew update && brew info --cask porcupine-md/tap/anoa
 ```
 
 ---

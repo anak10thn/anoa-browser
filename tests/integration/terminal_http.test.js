@@ -1,4 +1,4 @@
-// `anoa-browser terminal` against a fake /render/* endpoint — the default
+// `anoa terminal` against a fake /render/* endpoint — the default
 // backend, with no --cdp anywhere.
 //
 // Why this suite exists: the whole argument for shipping both transports was
@@ -304,7 +304,7 @@ describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal against a fake /render/* endp
 
   // THTTP-06 — --term-token. Never verified anywhere before, and it is the
   // difference between the viewer working against an authenticated
-  // anoa-browser and failing with a 401 it cannot explain.
+  // anoa and failing with a 401 it cannot explain.
   it('--term-token authenticates every request, header and query alike', async () => {
     const port = await freePort();
     endpoint = await startFakeRender({ port });
@@ -341,7 +341,7 @@ describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal against a fake /render/* endp
     );
     // The follow-up hint carries no prefix, so viewerErrors() drops it; it is
     // still the second thing the user reads.
-    expect(stderr).toContain('Is anoa-browser running? Does it need --term-token?');
+    expect(stderr).toContain('Is anoa running? Does it need --term-token?');
   }, 30000);
 
   // THTTP-09 — bug-001 at the wire. "P6 4000 4000 255" with no body is the

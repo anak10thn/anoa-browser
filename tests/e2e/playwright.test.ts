@@ -2,10 +2,10 @@
  * Suite 6 — Playwright Compatibility Tests
  *
  * Prerequisites:
- *   1. anoa-browser is running:  ./build/anoa-browser --headless --no-sandbox --port 9222
+ *   1. anoa is running:  ./build/anoa --headless --no-sandbox --port 9222
  *   2. npm install in this directory
  *
- * Key constraint: browser.newPage() is NOT supported by anoa-browser (QtWebEngine
+ * Key constraint: browser.newPage() is NOT supported by anoa (QtWebEngine
  * limitation). Always use browser.contexts()[0].pages()[0] to get the existing page.
  */
 import { chromium, type Browser, type Page, type BrowserContext } from '@playwright/test';

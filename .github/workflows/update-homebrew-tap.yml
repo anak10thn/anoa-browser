@@ -42,8 +42,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release download "${{ steps.tag.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'anoa-browser-macos-universal.tar.gz' \
-            --pattern 'anoa-browser-linux-x86_64.tar.gz'
+            --pattern 'anoa-macos-universal.tar.gz' \
+            --pattern 'anoa-linux-x86_64.tar.gz'
 
       - name: Update tap
         env:
@@ -56,8 +56,8 @@ jobs:
           fi
           TAG="${{ steps.tag.outputs.tag }}"
           VERSION="${TAG#v}"
-          MACOS_SHA256=$(sha256sum anoa-browser-macos-universal.tar.gz | awk '{print $1}')
-          LINUX_SHA256=$(sha256sum anoa-browser-linux-x86_64.tar.gz | awk '{print $1}')
+          MACOS_SHA256=$(sha256sum anoa-macos-universal.tar.gz | awk '{print $1}')
+          LINUX_SHA256=$(sha256sum anoa-linux-x86_64.tar.gz | awk '{print $1}')
           git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
           git config user.name "github-actions"
@@ -67,17 +67,17 @@ jobs:
           # macOS Cask
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{MACOS_SHA256}}/${MACOS_SHA256}/" \
-              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser.rb.tpl" > Casks/anoa-browser.rb
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa.rb.tpl" > Casks/anoa.rb
 
           # Linux Formula
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
-              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser-linux.rb.tpl" > Formula/anoa-browser-linux.rb
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
 
           git add -A
           if git diff --cached --quiet; then
             echo "Tap already up to date with ${TAG} — nothing to push."
             exit 0
           fi
-          git commit -m "anoa-browser v${VERSION}"
+          git commit -m "anoa v${VERSION}"
           git push

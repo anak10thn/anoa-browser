@@ -1,6 +1,6 @@
 #pragma once
 
-// The CDP FrameBackend: what `anoa-browser terminal --cdp URL` draws from.
+// The CDP FrameBackend: what `anoa terminal --cdp URL` draws from.
 //
 // It owns a CdpClient and answers the seam's two frame requests with
 // Page.captureScreenshot. Everything the /render/* server used to do on its
@@ -40,7 +40,7 @@
 #include <QObject>
 #include <QString>
 
-#include "terminal/cdp_client.h"
+#include "cdp/cdp_client.h"
 #include "terminal/frame_backend.h"
 
 struct Config;

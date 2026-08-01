@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(anoa-browser VERSION 0.4.1 LANGUAGES CXX)
+project(anoa VERSION 0.5.0 LANGUAGES CXX)
 
 # CI injects the git tag here so the tag is the single source of truth for the
 # version — CMakeLists.txt never needs a manual bump for releases. The value
@@ -45,13 +45,13 @@ set(SOURCES
     src/main.cpp
 )
 
-add_executable(anoa-browser ${SOURCES})
+add_executable(anoa ${SOURCES})
 
 if(APPLE)
-    set_target_properties(anoa-browser PROPERTIES MACOSX_BUNDLE TRUE)
+    set_target_properties(anoa PROPERTIES MACOSX_BUNDLE TRUE)
 endif()
 
-target_sources(anoa-browser PRIVATE
+target_sources(anoa PRIVATE
     src/config/config.cpp
     src/common/url_input.cpp
     src/browser/anoa_browser.cpp
@@ -59,20 +59,24 @@ target_sources(anoa-browser PRIVATE
     src/browser/browser_window.h
     src/http/http_server.cpp
     src/cdp/cdp_proxy.cpp
+    src/cdp/cdp_client.cpp
+    src/cdp/cdp_client.h
     src/cdp/cdp_extensions.cpp
+    src/agent/agent_cli.cpp
+    src/agent/agent_help.cpp
+    src/agent/agent_skill.cpp
     src/pdf/pdf_handler.cpp
 )
 
-# Terminal mode (`anoa-browser terminal`) is POSIX-only — termios, select() on
+# Terminal mode (`anoa terminal`) is POSIX-only — termios, select() on
 # STDIN and SIGWINCH have no MSVC equivalent. On Windows the sources are left
 # out entirely and main.cpp reports the unsupported platform at runtime.
 if(NOT WIN32)
-    target_sources(anoa-browser PRIVATE
+    target_sources(anoa PRIVATE
         src/terminal/terminal_app.cpp
         src/terminal/terminal_ui.cpp
         src/terminal/frame_bytes.cpp
         src/terminal/render_http_client.cpp
-        src/terminal/cdp_client.cpp
         src/terminal/cdp_frame_backend.cpp
         src/terminal/inprocess_frame_backend.cpp
         # frame_backend.h has no .cpp of its own, so AUTOMOC only sees it (and
@@ -80,21 +84,20 @@ if(NOT WIN32)
         src/terminal/frame_backend.h
         src/terminal/terminal_ui.h
         src/terminal/render_http_client.h
-        src/terminal/cdp_client.h
         src/terminal/cdp_frame_backend.h
         src/terminal/inprocess_frame_backend.h
     )
 endif()
 
-target_include_directories(anoa-browser PRIVATE
+target_include_directories(anoa PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_definitions(anoa-browser PRIVATE
+target_compile_definitions(anoa PRIVATE
     ANOA_VERSION="${PROJECT_VERSION}"
 )
 
-target_link_libraries(anoa-browser PRIVATE
+target_link_libraries(anoa PRIVATE
     Qt6::WebEngineWidgets
     Qt6::WebEngineCore
     Qt6::Network
@@ -113,7 +116,7 @@ if(STATIC_BUILD)
         set(_qt_platform_plugins Qt6::QXcbIntegrationPlugin)
     endif()
 
-    qt_import_plugins(anoa-browser
+    qt_import_plugins(anoa
         INCLUDE ${_qt_platform_plugins}
         EXCLUDE_BY_TYPE imageformats
         EXCLUDE_BY_TYPE sqldrivers
@@ -121,7 +124,7 @@ if(STATIC_BUILD)
     )
 
     if(APPLE)
-        target_link_libraries(anoa-browser PRIVATE
+        target_link_libraries(anoa PRIVATE
             "-framework AppKit"
             "-framework CoreFoundation"
             "-framework CoreGraphics"
@@ -134,7 +137,7 @@ if(STATIC_BUILD)
             "-framework SystemConfiguration"
         )
     elseif(UNIX)
-        target_link_libraries(anoa-browser PRIVATE
+        target_link_libraries(anoa PRIVATE
             pthread dl m resolv
         )
     endif()
@@ -143,15 +146,15 @@ endif()
 
 # Compiler warnings
 if(MSVC)
-    target_compile_options(anoa-browser PRIVATE /W4)
-    set_property(TARGET anoa-browser PROPERTY VS_PLATFORM_TOOLSET "v143")
+    target_compile_options(anoa PRIVATE /W4)
+    set_property(TARGET anoa PROPERTY VS_PLATFORM_TOOLSET "v143")
 else()
-    target_compile_options(anoa-browser PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(anoa PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # RPATH for portable Linux distribution (binary finds ./lib at runtime)
 if(UNIX AND NOT APPLE)
-    set_target_properties(anoa-browser PROPERTIES
+    set_target_properties(anoa PROPERTIES
         INSTALL_RPATH "$ORIGIN/lib"
         BUILD_RPATH "$ORIGIN/lib"
         INSTALL_RPATH_USE_LINK_RPATH FALSE
@@ -161,29 +164,29 @@ endif()
 # Release strip flags
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     if(MSVC)
-        target_link_options(anoa-browser PRIVATE /OPT:REF /OPT:ICF)
+        target_link_options(anoa PRIVATE /OPT:REF /OPT:ICF)
     elseif(UNIX AND NOT APPLE)
-        target_link_options(anoa-browser PRIVATE -s)
+        target_link_options(anoa PRIVATE -s)
     endif()
 endif()
 
 # Install rule
 include(GNUInstallDirs)
 if(APPLE)
-    install(TARGETS anoa-browser
+    install(TARGETS anoa
         BUNDLE DESTINATION .
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 else()
-    install(TARGETS anoa-browser
+    install(TARGETS anoa
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()
 
-install(FILES resources/anoa-browser.desktop
+install(FILES resources/anoa.desktop
     DESTINATION share/applications
 )
-install(FILES resources/anoa-browser.svg
+install(FILES resources/anoa.svg
     DESTINATION share/icons/hicolor/scalable/apps
 )
 

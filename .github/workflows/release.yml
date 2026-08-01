@@ -47,18 +47,18 @@ jobs:
 
       - name: Package portable bundle
         run: |
-          bundle=dist/anoa-browser
+          bundle=dist/anoa
           mkdir -p "$bundle"/lib "$bundle"/lib/qt6/libexec "$bundle"/resources "$bundle"/translations/qtwebengine_locales
 
-          # Binary — one executable; terminal mode is `anoa-browser terminal`.
-          cp build/anoa-browser "$bundle/anoa-browser"
-          chmod +x "$bundle/anoa-browser"
-          patchelf --set-rpath '$ORIGIN/lib' "$bundle/anoa-browser"
+          # Binary — one executable; terminal mode is `anoa terminal`.
+          cp build/anoa "$bundle/anoa"
+          chmod +x "$bundle/anoa"
+          patchelf --set-rpath '$ORIGIN/lib' "$bundle/anoa"
 
           # Iteratively copy ALL shared lib dependencies
           # Exclude glibc/core libs that MUST come from the host system
           # Pass 1: direct deps of the binary
-          ldd "$bundle/anoa-browser" | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
+          ldd "$bundle/anoa" | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
             base=$(basename "$lib")
             echo "$base" | grep -qE '^libc\.so|^libm\.so|^libpthread\.so|^libdl\.so|^librt\.so|^ld-linux' && continue
             cp -vn "$lib" "$bundle/lib/" 2>/dev/null || true
@@ -115,8 +115,8 @@ jobs:
           patchelf --set-rpath '$ORIGIN/..' "$bundle/lib/qt6/libexec/QtWebEngineProcess" 2>/dev/null || true
 
           # Wrapper script (primary entry point)
-          cp resources/anoa-browser.sh "$bundle/anoa-browser.sh"
-          chmod +x "$bundle/anoa-browser.sh"
+          cp resources/anoa.sh "$bundle/anoa.sh"
+          chmod +x "$bundle/anoa.sh"
 
           # qt.conf: lets Qt resolve plugins/libexec/resources from the bundle
           # even without the wrapper's environment variables.
@@ -129,16 +129,16 @@ jobs:
           Translations = translations
           QTCONF
 
-          tar czf anoa-browser-linux-x86_64.tar.gz -C dist anoa-browser
+          tar czf anoa-linux-x86_64.tar.gz -C dist anoa
 
       - name: Smoke test the portable bundle
         run: |
           # Extract to a fresh dir and launch WITHOUT the build's Qt on the
           # library path — proves the bundle is self-contained.
-          mkdir -p /tmp/bundle-test && tar xzf anoa-browser-linux-x86_64.tar.gz -C /tmp/bundle-test
-          cd /tmp/bundle-test/anoa-browser
+          mkdir -p /tmp/bundle-test && tar xzf anoa-linux-x86_64.tar.gz -C /tmp/bundle-test
+          cd /tmp/bundle-test/anoa
           env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox" \
-            ./anoa-browser.sh --headless --no-sandbox --port 9333 &
+            ./anoa.sh --headless --no-sandbox --port 9333 &
           BROWSER_PID=$!
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:9333/json/version && break
@@ -148,18 +148,18 @@ jobs:
           curl -sf "http://127.0.0.1:9333/render/screenshot.png" -o /tmp/frame.png
           file /tmp/frame.png | grep -q "PNG image data"
           # Terminal mode is the same binary, reached through the wrapper — the
-          # raw ./anoa-browser has no LD_LIBRARY_PATH/QT_PLUGIN_PATH and must
+          # raw ./anoa has no LD_LIBRARY_PATH/QT_PLUGIN_PATH and must
           # never be the documented entry point. Stripping the build's Qt off
           # the environment again proves terminal mode is self-contained too.
           env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH \
-            ./anoa-browser.sh terminal --help > /tmp/term-help.txt
+            ./anoa.sh terminal --help > /tmp/term-help.txt
           grep -q -- '--gfx' /tmp/term-help.txt
           kill $BROWSER_PID
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-linux-x86_64
-          path: anoa-browser-linux-x86_64.tar.gz
+          name: anoa-linux-x86_64
+          path: anoa-linux-x86_64.tar.gz
 
   build-macos:
     name: macOS universal (x86_64 + arm64)
@@ -218,13 +218,13 @@ jobs:
 
       - name: Verify universal binaries
         run: |
-          lipo -archs build/anoa-browser.app/Contents/MacOS/anoa-browser | grep -q x86_64
-          lipo -archs build/anoa-browser.app/Contents/MacOS/anoa-browser | grep -q arm64
+          lipo -archs build/anoa.app/Contents/MacOS/anoa | grep -q x86_64
+          lipo -archs build/anoa.app/Contents/MacOS/anoa | grep -q arm64
 
       - name: Strip the binary
         run: |
           # strip must precede signing — it would otherwise break the signature.
-          strip -x build/anoa-browser.app/Contents/MacOS/anoa-browser || true
+          strip -x build/anoa.app/Contents/MacOS/anoa || true
 
       # Import the Developer ID cert (if provided) BEFORE macdeployqt, so
       # macdeployqt can sign the bundle for notarization in one pass. macdeployqt
@@ -259,7 +259,7 @@ jobs:
       - name: Deploy Qt frameworks (+ sign for notarization when signing)
         run: |
           set -euo pipefail
-          APP=build/anoa-browser.app
+          APP=build/anoa.app
           IDENTITY="${{ steps.cert.outputs.identity }}"
           if [ -n "$IDENTITY" ]; then
             # macdeployqt deploys AND signs the whole bundle correctly for
@@ -293,8 +293,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          APP=build/anoa-browser.app
-          ENT="$GITHUB_WORKSPACE/.github/entitlements/anoa-browser.entitlements"
+          APP=build/anoa.app
+          ENT="$GITHUB_WORKSPACE/.github/entitlements/anoa.entitlements"
           IDENTITY="${{ steps.cert.outputs.identity }}"
           sign() { codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"; }
           HELP="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app"
@@ -305,7 +305,7 @@ jobs:
           find "$APP/Contents/PlugIns" -name '*.dylib' -print0 | while IFS= read -r -d '' dylib; do
             sign "$dylib"
           done
-          sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa-browser"
+          sign --entitlements "$ENT" "$APP/Contents/MacOS/anoa"
           # Reseal the framework that contains the re-signed helper, then the app.
           sign "$APP/Contents/Frameworks/QtWebEngineCore.framework"
           sign --entitlements "$ENT" "$APP"
@@ -331,11 +331,11 @@ jobs:
 
       - name: Ad-hoc sign (unsigned fallback only)
         if: ${{ steps.cert.outputs.identity == '' }}
-        run: codesign --force --deep --sign - build/anoa-browser.app
+        run: codesign --force --deep --sign - build/anoa.app
 
       - name: Smoke test the bundle
         run: |
-          ./build/anoa-browser.app/Contents/MacOS/anoa-browser --headless --no-sandbox --port 9333 &
+          ./build/anoa.app/Contents/MacOS/anoa --headless --no-sandbox --port 9333 &
           BROWSER_PID=$!
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:9333/json/version && break
@@ -344,17 +344,17 @@ jobs:
           curl -sf http://127.0.0.1:9333/json/version | grep -q Browser
           # Terminal mode is the same signed binary — exercise the subcommand so
           # the packaged, notarized artifact is what proves it runs.
-          ./build/anoa-browser.app/Contents/MacOS/anoa-browser terminal --help > /tmp/term-help.txt
+          ./build/anoa.app/Contents/MacOS/anoa terminal --help > /tmp/term-help.txt
           grep -q -- '--gfx' /tmp/term-help.txt
           kill $BROWSER_PID
 
       - name: Package
-        run: tar czf anoa-browser-macos-universal.tar.gz -C build anoa-browser.app
+        run: tar czf anoa-macos-universal.tar.gz -C build anoa.app
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-macos-universal
-          path: anoa-browser-macos-universal.tar.gz
+          name: anoa-macos-universal
+          path: anoa-macos-universal.tar.gz
 
   build-windows:
     name: Windows x86_64
@@ -383,7 +383,7 @@ jobs:
       - name: Deploy Qt DLLs & WebEngine resources
         shell: pwsh
         run: |
-          windeployqt build\Release\anoa-browser.exe --release --no-translations --no-opengl-sw
+          windeployqt build\Release\anoa.exe --release --no-translations --no-opengl-sw
           $qtDir = $env:QT_ROOT_DIR
           New-Item -ItemType Directory -Path "build\Release\resources" -Force | Out-Null
           Copy-Item -Path "$qtDir\resources\*" -Destination "build\Release\resources\" -Recurse -Force -ErrorAction SilentlyContinue
@@ -403,26 +403,26 @@ jobs:
           # and must not gain stray artifacts.
           $outFile = Join-Path $env:RUNNER_TEMP 'term-out.txt'
           $errFile = Join-Path $env:RUNNER_TEMP 'term-err.txt'
-          $exe = (Resolve-Path .\anoa-browser.exe).Path
+          $exe = (Resolve-Path .\anoa.exe).Path
           $p = Start-Process -FilePath $exe -ArgumentList 'terminal' `
             -NoNewWindow -Wait -PassThru `
             -RedirectStandardOutput $outFile -RedirectStandardError $errFile
           $text = (Get-Content $errFile -Raw)
           Write-Host "exit=$($p.ExitCode) stderr=$text"
           if ($p.ExitCode -eq 0) {
-            throw "anoa-browser terminal must exit non-zero on Windows, got 0"
+            throw "anoa terminal must exit non-zero on Windows, got 0"
           }
           if ($text -notmatch 'not supported on Windows') {
-            throw "anoa-browser terminal did not print the unsupported-platform error"
+            throw "anoa terminal did not print the unsupported-platform error"
           }
 
       - name: Package
-        run: 7z a anoa-browser-windows-x86_64.zip .\build\Release\*
+        run: 7z a anoa-windows-x86_64.zip .\build\Release\*
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-browser-windows-x86_64
-          path: anoa-browser-windows-x86_64.zip
+          name: anoa-windows-x86_64
+          path: anoa-windows-x86_64.zip
 
   release:
     needs: [build-linux, build-macos, build-windows]
@@ -457,8 +457,8 @@ jobs:
             exit 0
           fi
           VERSION="${GITHUB_REF_NAME#v}"
-          MACOS_SHA256=$(sha256sum anoa-browser-macos-universal.tar.gz | awk '{print $1}')
-          LINUX_SHA256=$(sha256sum anoa-browser-linux-x86_64.tar.gz | awk '{print $1}')
+          MACOS_SHA256=$(sha256sum anoa-macos-universal.tar.gz | awk '{print $1}')
+          LINUX_SHA256=$(sha256sum anoa-linux-x86_64.tar.gz | awk '{print $1}')
           git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
           git config user.name "github-actions"
@@ -468,13 +468,13 @@ jobs:
           # macOS Cask
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{MACOS_SHA256}}/${MACOS_SHA256}/" \
-              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser.rb.tpl" > Casks/anoa-browser.rb
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa.rb.tpl" > Casks/anoa.rb
 
           # Linux Formula
           sed -e "s/{{VERSION}}/${VERSION}/" \
               -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
-              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-browser-linux.rb.tpl" > Formula/anoa-browser-linux.rb
+              "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
 
           git add -A
-          git commit -m "anoa-browser v${VERSION}"
+          git commit -m "anoa v${VERSION}"
           git push

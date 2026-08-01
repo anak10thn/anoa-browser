@@ -2,7 +2,7 @@
 
 // The third FrameBackend: an AnoaBrowser living in this very process.
 //
-// This is what `anoa-browser terminal` uses when it is given no target at all
+// This is what `anoa terminal` uses when it is given no target at all
 // — no --term-host, no --term-port, no --cdp. There is no socket, no port and
 // no second process: frames come from QWidget::grab() and input goes straight
 // into the view, so the /render/* and CDP transports are bypassed entirely

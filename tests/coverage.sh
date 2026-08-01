@@ -5,7 +5,7 @@
 # Scope, and why it is what it is: this measures the three Qt6::Core-only
 # libraries the unit targets link (config.cpp, frame_bytes.cpp, terminal_ui.cpp).
 # The browser, http, cdp and pdf subsystems are exercised only by the vitest and
-# e2e suites, which drive a *separate* anoa-browser process — an uninstrumented
+# e2e suites, which drive a *separate* anoa process — an uninstrumented
 # binary reports nothing back, so folding those files in would report 0% for code
 # that is in fact well covered. Widening this gate means instrumenting the main
 # binary and teaching the integration suites to preserve its .gcda, which is a
@@ -60,9 +60,9 @@ cmake -B "${BUILD_DIR}" -S "${ROOT}" \
 
 echo "==> building the unit targets"
 cmake --build "${BUILD_DIR}" \
-  --target anoa-browser-test-config \
-           anoa-browser-test-frame-bytes \
-           anoa-browser-test-terminal-ui \
+  --target anoa-test-config \
+           anoa-test-frame-bytes \
+           anoa-test-terminal-ui \
   -- -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
 
 # Stale counters from a previous run merge into this one and make the result a

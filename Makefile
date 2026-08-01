@@ -118,7 +118,7 @@ clean-all:
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:
 	@echo ""
-	@echo "anoa-browser build targets"
+	@echo "anoa build targets"
 	@echo ""
 	@echo "  make                        Debug build (dynamic)"
 	@echo "  make build                  Debug build (dynamic)"

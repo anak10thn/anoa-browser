@@ -7,8 +7,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/porcupine-md/anoa-browser/master/scripts/install-linux.sh | bash
 #
 # Layout it creates:
-#   ~/.local/lib/anoa-browser/     the unpacked bundle (binary, lib/, resources/)
-#   ~/.local/bin/anoa-browser  ->  ../lib/anoa-browser/anoa-browser.sh
+#   ~/.local/lib/anoa/     the unpacked bundle (binary, lib/, resources/)
+#   ~/.local/bin/anoa  ->  ../lib/anoa/anoa.sh
 #
 # The symlink points at the *launcher*, never at the raw binary: the launcher is
 # what exports LD_LIBRARY_PATH, QT_PLUGIN_PATH and the QtWebEngine paths that
@@ -18,7 +18,7 @@
 set -eu
 
 REPO="porcupine-md/anoa-browser"
-ASSET="anoa-browser-linux-x86_64.tar.gz"
+ASSET="anoa-linux-x86_64.tar.gz"
 PREFIX="${HOME}/.local"
 VERSION=""
 UNINSTALL=0
@@ -32,7 +32,7 @@ Usage: install-linux.sh [options]
   --uninstall         Remove an installation made by this script
   -h, --help          Show this help
 
-Installs to <prefix>/lib/anoa-browser with a launcher at <prefix>/bin/anoa-browser.
+Installs to <prefix>/lib/anoa with a launcher at <prefix>/bin/anoa.
 EOF
 }
 
@@ -46,9 +46,9 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-BUNDLE_DIR="${PREFIX}/lib/anoa-browser"
+BUNDLE_DIR="${PREFIX}/lib/anoa"
 BIN_DIR="${PREFIX}/bin"
-LINK="${BIN_DIR}/anoa-browser"
+LINK="${BIN_DIR}/anoa"
 
 say()  { printf '%s\n' "$*"; }
 warn() { printf '%s\n' "$*" >&2; }
@@ -57,8 +57,8 @@ die()  { printf 'install-linux.sh: %s\n' "$*" >&2; exit 1; }
 if [ "$UNINSTALL" -eq 1 ]; then
     removed=0
     # Only remove the symlink if it is ours. Someone may have put their own
-    # anoa-browser on the PATH, and deleting that would be a surprise.
-    if [ -L "$LINK" ] && [ "$(readlink -f "$LINK" 2>/dev/null || true)" = "${BUNDLE_DIR}/anoa-browser.sh" ]; then
+    # anoa on the PATH, and deleting that would be a surprise.
+    if [ -L "$LINK" ] && [ "$(readlink -f "$LINK" 2>/dev/null || true)" = "${BUNDLE_DIR}/anoa.sh" ]; then
         rm -f "$LINK"; say "removed ${LINK}"; removed=1
     elif [ -e "$LINK" ]; then
         warn "left ${LINK} alone: it is not a link into ${BUNDLE_DIR}"
@@ -72,7 +72,7 @@ fi
 
 # ── Preconditions ───────────────────────────────────────────────────────────
 
-[ "$(uname -s)" = "Linux" ] || die "this installer is for Linux; on macOS use: brew install --cask anoa-browser"
+[ "$(uname -s)" = "Linux" ] || die "this installer is for Linux; on macOS use: brew install --cask anoa"
 
 arch="$(uname -m)"
 case "$arch" in
@@ -112,7 +112,7 @@ URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-say "Downloading anoa-browser ${VERSION}…"
+say "Downloading anoa ${VERSION}…"
 fetch "$URL" "${TMP}/${ASSET}" || die "download failed: ${URL}"
 
 # A 404 from a release that has no such asset arrives as an HTML page, and tar
@@ -124,7 +124,7 @@ esac
 
 say "Unpacking…"
 tar xzf "${TMP}/${ASSET}" -C "$TMP"
-[ -x "${TMP}/anoa-browser/anoa-browser.sh" ] || die "archive layout unexpected: no anoa-browser/anoa-browser.sh"
+[ -x "${TMP}/anoa/anoa.sh" ] || die "archive layout unexpected: no anoa/anoa.sh"
 
 # ── Install ─────────────────────────────────────────────────────────────────
 
@@ -136,19 +136,19 @@ if [ -d "$BUNDLE_DIR" ]; then
     rm -rf "${BUNDLE_DIR}.old"
     mv "$BUNDLE_DIR" "${BUNDLE_DIR}.old"
 fi
-if mv "${TMP}/anoa-browser" "$BUNDLE_DIR"; then
+if mv "${TMP}/anoa" "$BUNDLE_DIR"; then
     rm -rf "${BUNDLE_DIR}.old"
 else
     [ -d "${BUNDLE_DIR}.old" ] && mv "${BUNDLE_DIR}.old" "$BUNDLE_DIR"
     die "could not install into ${BUNDLE_DIR}"
 fi
 
-ln -sfn "${BUNDLE_DIR}/anoa-browser.sh" "$LINK"
+ln -sfn "${BUNDLE_DIR}/anoa.sh" "$LINK"
 
 # ── Report ──────────────────────────────────────────────────────────────────
 
 say ""
-say "Installed anoa-browser ${VERSION}"
+say "Installed anoa ${VERSION}"
 say "  bundle:   ${BUNDLE_DIR}"
 say "  launcher: ${LINK}"
 
@@ -163,7 +163,7 @@ unset IFS
 
 if [ "$on_path" -eq 1 ]; then
     say ""
-    say "Try it:  anoa-browser terminal"
+    say "Try it:  anoa terminal"
 else
     say ""
     warn "${BIN_DIR} is not on your PATH. Add it:"
