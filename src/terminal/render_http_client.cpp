@@ -10,70 +10,9 @@
 #include <cstring>
 
 #include "config/config.h"
+#include "terminal/frame_bytes.h"
 
 namespace {
-
-// ── PPM (P6) parsing - halfblock renderer ──────────────────────────────────
-
-// /render/screenshot.ppm answers with the page already scaled server-side, so
-// the only work here is stripping the header off the packed RGB the renderer
-// wants.
-bool parsePpm(const std::string &data, FrameData &frame)
-{
-    size_t pos = 0;
-    auto skipSpace = [&]() {
-        while (pos < data.size()) {
-            if (isspace(static_cast<unsigned char>(data[pos]))) {
-                ++pos;
-            } else if (data[pos] == '#') { // comment to end of line
-                while (pos < data.size() && data[pos] != '\n')
-                    ++pos;
-            } else {
-                break;
-            }
-        }
-    };
-    auto readInt = [&](int &value) {
-        skipSpace();
-        if (pos >= data.size() || !isdigit(static_cast<unsigned char>(data[pos])))
-            return false;
-        value = 0;
-        while (pos < data.size() && isdigit(static_cast<unsigned char>(data[pos])))
-            value = value * 10 + (data[pos++] - '0');
-        return true;
-    };
-
-    if (data.size() < 2 || data[0] != 'P' || data[1] != '6')
-        return false;
-    pos = 2;
-    int w = 0, h = 0, maxval = 0;
-    if (!readInt(w) || !readInt(h) || !readInt(maxval) || maxval != 255)
-        return false;
-    ++pos; // single whitespace byte after maxval
-    const size_t need = static_cast<size_t>(w) * static_cast<size_t>(h) * 3;
-    if (w <= 0 || h <= 0 || data.size() - pos < need)
-        return false;
-
-    frame.width = w;
-    frame.height = h;
-    frame.bytes = QByteArray(data.data() + pos, static_cast<qsizetype>(need));
-    return true;
-}
-
-// ── PNG IHDR dimensions - the image protocols need only width/height ───────
-
-// The PNG itself is handed to the terminal untouched, so it is never decoded;
-// the aspect-correct cell rect only needs the IHDR numbers.
-bool pngDimensions(const std::string &png, int &w, int &h)
-{
-    static const unsigned char sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
-    if (png.size() < 24 || memcmp(png.data(), sig, 8) != 0)
-        return false;
-    const auto *p = reinterpret_cast<const unsigned char *>(png.data());
-    w = (p[16] << 24) | (p[17] << 16) | (p[18] << 8) | p[19];
-    h = (p[20] << 24) | (p[21] << 16) | (p[22] << 8) | p[23];
-    return w > 0 && h > 0;
-}
 
 std::string urlEncode(const std::string &in)
 {
@@ -245,7 +184,8 @@ void RenderHttpClient::requestRgbFrame(int width, int height)
     }
 
     FrameData frame;
-    if (!parsePpm(resp.body, frame)) {
+    if (!frame_bytes::parsePpm(resp.body.data(), resp.body.size(), frame.width, frame.height,
+                               frame.bytes)) {
         emit frameFailed(QStringLiteral("malformed PPM"));
         return;
     }
@@ -267,7 +207,8 @@ void RenderHttpClient::requestPngFrame()
     }
 
     FrameData frame;
-    if (!pngDimensions(resp.body, frame.width, frame.height)) {
+    if (!frame_bytes::pngDimensions(resp.body.data(), resp.body.size(), frame.width,
+                                    frame.height)) {
         emit frameFailed(QStringLiteral("malformed PNG"));
         return;
     }

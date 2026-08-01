@@ -67,6 +67,7 @@ if(NOT WIN32)
     target_sources(anoa-browser PRIVATE
         src/terminal/terminal_app.cpp
         src/terminal/terminal_ui.cpp
+        src/terminal/frame_bytes.cpp
         src/terminal/render_http_client.cpp
         src/terminal/cdp_client.cpp
         src/terminal/cdp_frame_backend.cpp

@@ -59,11 +59,40 @@ jobs:
             -DBUILD_TESTS=ON \
             -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
 
-      - name: Build test target
-        run: cmake --build build --target anoa-browser-test-config --parallel
+      # Three targets, three libraries, no WebEngine in any of them:
+      # anoa-config-lib (config.cpp against Qt6::Core), anoa-terminal-bytes-lib
+      # (the wire-facing PPM/PNG parsers) and anoa-terminal-ui-lib (the input
+      # parser, cell map and image-protocol renderers).
+      - name: Build test targets
+        run: |
+          cmake --build build --parallel \
+            --target anoa-browser-test-config \
+                     anoa-browser-test-frame-bytes \
+                     anoa-browser-test-terminal-ui
 
       - name: Run unit tests (CTest)
         run: ctest --test-dir build -V --output-on-failure
+
+      # Linux only, and only the two terminal targets. frame_bytes.cpp sizes a
+      # copy from numbers a peer chose off the wire — an out-of-bounds read and
+      # an unsigned wrap are exactly what these sanitizers exist for, and the
+      # bug they were added for (bug-001) was a guard that wrapped to SIZE_MAX.
+      # Cheap because neither target links WebEngine: it is a rebuild of two
+      # small libraries, not of the browser.
+      - name: Run unit tests under ASan + UBSan
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DANOA_TEST_SANITIZE=ON \
+            -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR
+          cmake --build build-asan --parallel \
+            --target anoa-browser-test-frame-bytes anoa-browser-test-terminal-ui
+          ./build-asan/tests/unit/anoa-browser-test-frame-bytes
+          ./build-asan/tests/unit/anoa-browser-test-terminal-ui
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
   # ── 2. Integration Tests (Node.js + running binary) ───────────────────────
   integration-tests:
@@ -152,6 +181,42 @@ jobs:
         run: bash tests/integration/extensions.test.sh
         env:
           ANOA_BINARY: ./build/anoa-browser
+
+      # Reads the tree, not the binary: terminal mode is compiled out on
+      # Windows and there is no Windows job, so the only available check that
+      # it stays compiled out is a negative one.
+      - name: Run build shape tests
+        run: bash tests/integration/build_shape.test.sh
+
+  # ── 3b. Qt API Floor ───────────────────────────────────────────────────────
+  # CMakeLists.txt says the floor is Qt 6.4; every other job pins 6.7.3, so
+  # without this nothing between the two numbers is ever exercised and a
+  # \since 6.5 API reaches a distro user before it reaches CI. Syntax-only
+  # against QtCore/Gui/Network/WebSockets — no WebEngine, no link step, which
+  # is what makes a second Qt version affordable to install.
+  qt-floor:
+    name: Qt 6.4 API Floor
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.4.3"
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtwebsockets
+          install-deps: true
+          cache: true
+          cache-key-prefix: qt-6.4.3-floor
+
+      # QT_FLOOR_PREFIX is unset here on purpose: the script falls back to
+      # QT_ROOT_DIR, which install-qt-action exports into the job environment.
+      - name: Syntax-check src/terminal against the declared floor
+        run: bash tests/integration/qt_floor.test.sh
 
   # ── 4. E2E Tests (Playwright + Puppeteer) ─────────────────────────────────
   e2e-tests:

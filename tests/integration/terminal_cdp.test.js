@@ -8,56 +8,28 @@
 // catch them. A fake endpoint also makes the device scale factor a knob rather
 // than a property of whatever machine CI runs on.
 //
-// ── A pty is required, and here is exactly why ──────────────────────────────
-// terminal_app.cpp:191 refuses to start unless both stdin and stdout are a
-// terminal, and terminal_ui.cpp takes the terminal size from TIOCGWINSZ and
-// reads input in termios raw mode. Over a pipe the binary exits 1 with
-// "stdin/stdout must be a terminal" before it has looked at --cdp at all, so a
-// pipe exercises *nothing* on this path — not even the failure cases, which
-// would pass for the wrong reason.
-//
-// A committed general pty harness is out of scope for this feature, so the pty
-// here is `script(1)` from util-linux: one process that allocates a pty, runs
-// the viewer on it, forwards our stdin into it and returns the child's exit
-// status (-e). Two details make it enough rather than a harness:
-//   * `stty rows N cols M` inside the same shell sets the window size on the
-//     pty slave, which is what makes the cell -> CSS-pixel arithmetic below
-//     predictable instead of dependent on the runner's terminal.
-//   * `2><file>` inside the same shell keeps stderr off the pty, so the
-//     one-line failure messages are readable without the alt-screen paint
-//     mixed into them.
-// BSD `script` (macOS) takes different arguments and has no -e; the pty-driven
-// tests skip there rather than pretend. CI's integration job is ubuntu-22.04,
-// where util-linux script is part of the base image.
+// The pty harness (`script(1)`), the fixed terminal geometry and the viewer
+// error-line filter live in helpers.js — terminal_http.test.js is the same
+// suite pointed at the other transport and shares all of it. What stays here
+// is the fake CDP endpoint and the assertions about the CDP wire.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { spawn, execFileSync } from 'child_process';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { deflateSync } from 'zlib';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
 
-import { BINARY, waitForPort, freePort } from './helpers.js';
-
-// ── pty availability ────────────────────────────────────────────────────────
-
-const HAVE_UTIL_LINUX_SCRIPT = (() => {
-  try {
-    return /util-linux/.test(execFileSync('script', ['--version'], { encoding: 'utf8' }));
-  } catch {
-    return false;
-  }
-})();
-
-// ── The terminal geometry every pty-driven test runs at ─────────────────────
-//
-// Fixed on purpose: the click-coordinate assertions are arithmetic over these
-// numbers, so they are constants of the suite rather than per-test knobs.
-const COLS = 100;
-const ROWS = 30;
-const FPS = 10; // slower than the 30 fps default: fewer frames, same behaviour
+import {
+  HAVE_UTIL_LINUX_SCRIPT,
+  TERM_COLS as COLS,
+  TERM_ROWS as ROWS,
+  VIEWER_ERR_PREFIX as ERR_PREFIX,
+  freePort,
+  launchViewer,
+  sgrPress,
+  viewerErrors,
+  waitForPort,
+  waitUntil,
+} from './helpers.js';
 
 // The page as the fake endpoint reports it. deviceScaleFactor 2 means the
 // screenshot comes back at twice the CSS viewport, which is the whole point of
@@ -163,10 +135,11 @@ const SCREENSHOT = makePng(IMAGE_W, IMAGE_H).toString('base64');
  * HTTP + WebSocket on one port, answering just enough of CDP for the viewer.
  *
  * `targets` is what /json/list returns; pass [] for the empty-list failure
- * path. Every frame the client sends is recorded, so a test asserts on
+ * path, or `listBody` to answer with a byte string that is not JSON at all.
+ * Every frame the client sends is recorded, so a test asserts on
  * `endpoint.calls` (all of them) or `endpoint.inputs` (the Input.* subset).
  */
-async function startFakeCdp({ port, targets, metrics = true } = {}) {
+async function startFakeCdp({ port, targets, metrics = true, listBody = null } = {}) {
   const httpPaths = [];
   const wsPaths = [];
   const calls = [];
@@ -174,7 +147,7 @@ async function startFakeCdp({ port, targets, metrics = true } = {}) {
   const http = createServer((req, res) => {
     httpPaths.push(req.url);
     if (req.url.split('?')[0] === '/json/list') {
-      const body = JSON.stringify(targets);
+      const body = listBody ?? JSON.stringify(targets);
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.length });
       res.end(body);
       return;
@@ -238,6 +211,16 @@ async function startFakeCdp({ port, targets, metrics = true } = {}) {
     inputsOf(method) {
       return calls.filter((c) => c.method === method);
     },
+    /**
+     * Drop every attached CDP socket without shutting the endpoint down —
+     * what a Chrome that quits, or a tab that closes, looks like to a client
+     * that had already attached successfully.
+     */
+    dropConnections() {
+      const dropped = wss.clients.size;
+      for (const client of wss.clients) client.close();
+      return dropped;
+    },
     async close() {
       for (const client of wss.clients) client.terminate();
       await new Promise((resolve) => wss.close(resolve));
@@ -258,103 +241,8 @@ function pageTarget(port, id = 'FAKEPAGE00000000000000000000000A') {
 
 // ── Driving the viewer ──────────────────────────────────────────────────────
 
-const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-
-/**
- * Run `anoa-browser terminal --cdp <url>` on a pty at COLS x ROWS.
- *
- * Returns a handle whose `send()` writes raw bytes to the viewer's stdin (they
- * reach it through the pty exactly as a terminal would deliver them, i.e. as
- * the escape sequences a real keypress or SGR mouse report produces), and
- * whose `exited` resolves with { code, stderr } once it is gone.
- */
-function launchTerminal(cdpUrl, extraArgs = []) {
-  const dir = mkdtempSync(join(tmpdir(), 'anoa-term-cdp-'));
-  const errPath = join(dir, 'stderr.txt');
-
-  const argv = [
-    'terminal',
-    '--gfx',
-    'halfblock', // never 'auto': kitty/iterm would probe the pty for a cell size
-    '--fps',
-    String(FPS),
-    '--cdp',
-    cdpUrl,
-    ...extraArgs,
-  ];
-  const inner = `stty rows ${ROWS} cols ${COLS}; exec ${shq(BINARY)} ${argv.map(shq).join(' ')} 2>${shq(errPath)}`;
-
-  // detached: script leads its own process group, so a test that has to give
-  // up can take the whole tree (script -> sh -> anoa-browser) down at once.
-  // Killing script alone would orphan the viewer, which would then sit in its
-  // reconnect loop for the rest of the run.
-  const proc = spawn('script', ['-q', '-e', '-c', inner, '/dev/null'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: true,
-    env: { ...process.env, TERM: 'xterm-256color' },
-  });
-
-  // The viewer repaints the whole grid every frame, so only a tail is kept —
-  // enough for the status bar, which is the last thing written each frame.
-  let tail = '';
-  proc.stdout.on('data', (d) => {
-    tail = (tail + d.toString('latin1')).slice(-16384);
-  });
-  proc.stderr.on('data', () => {}); // script's own diagnostics; the viewer's go to errPath
-
-  let exit = null;
-  const exited = new Promise((resolve) => {
-    proc.once('close', (code) => {
-      let stderr = '';
-      try {
-        stderr = readFileSync(errPath, 'utf8');
-      } catch { /* the shell never got far enough to create it */ }
-      exit = { code, stderr };
-      resolve(exit);
-    });
-  });
-
-  return {
-    proc,
-    get exit() { return exit; },
-    exited,
-    get tail() { return tail; },
-    send(bytes) {
-      proc.stdin.write(Buffer.from(bytes, 'latin1'));
-    },
-    /** Ctrl-C: ISIG is off in raw mode, so this is byte 3, not a signal. */
-    async quit() {
-      if (exit) return exit;
-      try {
-        proc.stdin.write(Buffer.from([3]));
-      } catch { /* already gone */ }
-      const result = await Promise.race([
-        exited,
-        new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
-      ]);
-      if (result) return result;
-      try {
-        process.kill(-proc.pid, 'SIGKILL'); // the group, not just script
-      } catch { /* already reaped */ }
-      return exited;
-    },
-    async cleanup() {
-      await this.quit();
-      rmSync(dir, { recursive: true, force: true });
-    },
-  };
-}
-
-/** Poll until `fn()` is truthy, failing loudly (never silently) on timeout. */
-async function waitUntil(fn, what, timeout = 15000) {
-  const deadline = Date.now() + timeout;
-  for (;;) {
-    const value = fn();
-    if (value) return value;
-    if (Date.now() >= deadline) throw new Error(`timed out after ${timeout}ms waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-}
+const launchTerminal = (cdpUrl, extraArgs = []) =>
+  launchViewer(['--cdp', cdpUrl, ...extraArgs]);
 
 /**
  * Wait until the viewer has painted at least two frames from the endpoint.
@@ -372,30 +260,6 @@ async function waitForFrames(endpoint, term, count = 2) {
   // triggers time to land before anything depends on the display map.
   await new Promise((resolve) => setTimeout(resolve, 200));
 }
-
-const ERR_PREFIX = 'anoa-browser terminal: ';
-
-/**
- * The distinct viewer error lines in a captured stderr.
- *
- * Two filters, both deliberate. Lines without the prefix are dropped because
- * parseArgs() emits an unrelated "--auth-token is not set" warning on every
- * invocation, terminal mode included — pre-existing, not this path's, and
- * asserting it away either way would encode it. Duplicates are collapsed
- * because a discovery failure is written twice by design: once by
- * CdpClient::failDiscovery() while the alt screen is still up (where a user
- * would never see it) and once by runTerminal() after the terminal has been
- * handed back. Redirecting stderr to a file is what makes both copies visible
- * here; what the user reads is one line.
- */
-function viewerErrors(stderr) {
-  return [...new Set(stderr.split('\n').filter((line) => line.startsWith(ERR_PREFIX)))];
-}
-
-// SGR mouse reports, exactly what a terminal writes for a press: the button
-// field is 0-2 for left/middle/right and 64/65 for wheel up/down, and the
-// coordinates are 1-based.
-const sgrPress = (btn, cellX, cellY) => `\x1b[<${btn};${cellX + 1};${cellY + 1}M`;
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -642,5 +506,83 @@ describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal --cdp against a fake CDP endp
         `^${ERR_PREFIX}http://127\\.0\\.0\\.1:${port}/json/list lists no debuggable targets`,
       ),
     );
+  }, 30000);
+
+  // TCDP-10 — the common real-world loss: Chrome quits, or the tab closes,
+  // after the viewer had attached successfully. CdpClient carries no retry
+  // budget once a connection has worked ("a session that worked and then
+  // blipped should heal, not exit"), and this pins which of the two documented
+  // outcomes the code actually takes: it stays up, re-dials, and resumes
+  // capturing — it does not exit, and it does not sit there silently.
+  //
+  // The status bar's link field is not what this reads. At the 100 columns the
+  // harness runs at, the row is already over budget before any link, so the
+  // link yields by design and is never painted; that rule is covered where it
+  // is observable, in the TerminalUi unit suite at 80 columns.
+  it('survives the endpoint dropping the socket after a successful attach', async () => {
+    const port = await freePort();
+    endpoint = await startFakeCdp({ port, targets: [pageTarget(port)] });
+
+    term = launchTerminal(`http://127.0.0.1:${port}`);
+    await waitForFrames(endpoint, term);
+    const capturesBefore = endpoint.inputsOf('Page.captureScreenshot').length;
+
+    expect(endpoint.dropConnections()).toBe(1);
+
+    // A second dial, and frames flowing again through it.
+    await waitUntil(
+      () => !term.exit && endpoint.wsPaths.length >= 2,
+      `a re-dial (viewer stderr: ${term.exit?.stderr ?? 'still running'})`,
+    );
+    await waitUntil(
+      () => !term.exit && endpoint.inputsOf('Page.captureScreenshot').length > capturesBefore,
+      'a capture after the reconnect',
+    );
+    expect(term.exit).toBeNull();
+
+    // And it is still interactive: Ctrl-C leaves cleanly rather than needing
+    // the process group killed, and nothing was reported as fatal.
+    const result = await term.quit();
+    expect(result).not.toBeNull();
+    expect(viewerErrors(result.stderr)).toEqual([]);
+  }, 30000);
+
+  // TCDP-11 — more than one debuggable target. The viewer is a one-page
+  // viewer by design, so "ambiguous" resolves to the first entry rather than
+  // to a prompt. Which entry it picks is the whole contract: picking the last
+  // one would attach to a different tab than the user expects, and nothing
+  // about the resulting session would look wrong.
+  it('attaches to the first page target when /json/list offers several', async () => {
+    const port = await freePort();
+    const first = pageTarget(port, 'FIRSTPAGE0000000000000000000000A');
+    const second = pageTarget(port, 'SECONDPAGE000000000000000000000B');
+    endpoint = await startFakeCdp({ port, targets: [first, second] });
+
+    term = launchTerminal(`http://127.0.0.1:${port}`);
+    await waitForFrames(endpoint, term);
+
+    expect(endpoint.wsPaths).toEqual(['/devtools/page/FIRSTPAGE0000000000000000000000A']);
+    expect(term.exit).toBeNull();
+  }, 30000);
+
+  // TCDP-12 — a body that is not JSON. Distinct from the empty-list case:
+  // that one is a well-formed answer with nothing in it, this one never
+  // parses, and the two used to be indistinguishable from the outside.
+  it('a malformed /json/list exits non-zero with one line saying so', async () => {
+    const port = await freePort();
+    endpoint = await startFakeCdp({ port, targets: [], listBody: '<html>not json</html>' });
+
+    term = launchTerminal(`http://127.0.0.1:${port}`);
+
+    const { code, stderr } = await term.exited;
+    expect(code).not.toBe(0);
+
+    const lines = viewerErrors(stderr);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`http://127.0.0.1:${port}/json/list`);
+    // Whatever the wording, it must not be the empty-list one — that would
+    // send someone looking for a page that never existed instead of at the
+    // thing answering on the port.
+    expect(lines[0]).not.toContain('lists no debuggable targets');
   }, 30000);
 });

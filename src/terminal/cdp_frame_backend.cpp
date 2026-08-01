@@ -10,24 +10,9 @@
 #include <QtGlobal>
 
 #include "config/config.h"
+#include "terminal/frame_bytes.h"
 
 namespace {
-
-// The gfx renderers hand the PNG to the terminal untouched, so it is never
-// decoded on that path; the aspect-correct cell rect only needs the IHDR
-// numbers. Same reasoning (and the same 24-byte header walk) as the copy in
-// render_http_client.cpp — kept local rather than shared because the two
-// backends are deliberately independent of each other.
-bool pngDimensions(const QByteArray &png, int &w, int &h)
-{
-    static const unsigned char sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
-    if (png.size() < 24 || memcmp(png.constData(), sig, 8) != 0)
-        return false;
-    const auto *p = reinterpret_cast<const unsigned char *>(png.constData());
-    w = (p[16] << 24) | (p[17] << 16) | (p[18] << 8) | p[19];
-    h = (p[20] << 24) | (p[21] << 16) | (p[22] << 8) | p[23];
-    return w > 0 && h > 0;
-}
 
 // clientWidth/clientHeight of one Page.getLayoutMetrics viewport object.
 bool viewportSize(const QJsonObject &metrics, const char *key, int &w, int &h)
@@ -322,7 +307,8 @@ void CdpFrameBackend::emitRgbFrame(const QByteArray &png, int targetW, int targe
 void CdpFrameBackend::emitPngFrame(const QByteArray &png)
 {
     FrameData frame;
-    if (!pngDimensions(png, frame.width, frame.height)) {
+    if (!frame_bytes::pngDimensions(png.constData(), static_cast<size_t>(png.size()), frame.width,
+                                    frame.height)) {
         setCaptureError(QStringLiteral("capture failed: malformed PNG"));
         emit frameFailed(QStringLiteral("malformed PNG"));
         return;

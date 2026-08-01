@@ -393,5 +393,46 @@ Human should review and curate periodically.
 ### Patterns Discovered
 <!-- Agent appends here, human curates -->
 
+- **Three unit targets now, not one** (phase 14). `anoa-config-lib` is unchanged;
+  `anoa-terminal-bytes-lib` (`src/terminal/frame_bytes.cpp`) and
+  `anoa-terminal-ui-lib` (`terminal_ui.cpp`) are new, both Qt6::Core-only and both
+  inside `if(NOT WIN32)`. The rule in *Known Gotchas* still holds — never fold a
+  terminal source into `anoa-config-lib`; add a target instead.
+  `cmake -DANOA_TEST_SANITIZE=ON` builds them with ASan+UBSan; CI runs it on Linux.
+- **TerminalUi is testable without a terminal.** Construct it, never call `begin()`,
+  drive the public `feedInput()` with a stub `FrameBackend`. Skipping `begin()`
+  leaves `m_cols`/`m_rows` at 80x24, which is what makes the status-bar arithmetic a
+  constant rather than a property of the runner. Redirect stdout while doing it —
+  and replay the capture to stderr on failure, because QTest's logger writes to
+  stdout too and a failing `QVERIFY` would otherwise vanish into the temp file.
+- **The pty harness lives in `tests/integration/helpers.js`** (`launchViewer`,
+  `waitUntil`, `viewerErrors`, `sgrPress`, `TERM_COLS`/`TERM_ROWS`/`TERM_FPS`).
+  `terminal_cdp.test.js` and `terminal_http.test.js` share it; fake endpoints stay
+  in their own suites.
+- **Two shell suites need no binary at all**: `build_shape.test.sh` (Windows
+  compile-out, `if(NOT WIN32)` coverage) and `qt_floor.test.sh` (syntax-only against
+  the declared Qt floor — `QT_FLOOR_PREFIX=/opt/Qt/6.4.3/gcc_64`, installed with
+  `aqt install-qt linux desktop 6.4.3 gcc_64 -m qtwebsockets`, ~20 s, no WebEngine).
+
 ### Gotchas Discovered
 <!-- Agent appends here, human curates -->
+
+- **A stalling `/render/*` peer wedges the viewer and needs SIGKILL** (bug-003, open).
+  `RenderHttpClient::httpRequest()` sets no socket timeouts and now runs on the Qt
+  event loop, so a peer that accepts and goes quiet stops the `QSocketNotifier` from
+  ever firing again: Ctrl-C is never read, ISIG is off so byte 3 is not a signal, and
+  SIGTERM only sets a flag the never-reached frame tick polls. SIGKILL skips
+  `atexit(restoreTerminal)`, leaving the terminal in raw mode on the alt screen.
+  THTTP-08 is committed as `it.fails()` and passes *because* of this; it turns red
+  when the fix lands.
+- **The status bar's link field is invisible at 100 columns.** The row is over budget
+  before any link, so the link yields by design. Assert on the wire in the pty suites;
+  the yielding rule itself is covered in the unit suite at 80 columns.
+- **`--profile terminal` cannot work**, and that is accepted, not a bug: the raw-argv
+  pre-scan has no option-arity knowledge, so the word is taken as the subcommand
+  wherever it appears and the parser then reports a missing value. TERM-MODE-05 pins
+  it so it is not rediscovered as a regression.
+- **`anoa-browser --help` aborts without a display.** Browser mode constructs a
+  `QApplication` before `parseArgs()` runs, so `--help` needs `QT_QPA_PLATFORM=offscreen`
+  (the real Qt variable — `port_layout.test.sh` uses a misspelt `QPA_PLATFORM`
+  elsewhere and gets away with it only because those cases also pass `--headless`).

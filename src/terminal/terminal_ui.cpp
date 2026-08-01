@@ -544,10 +544,19 @@ bool TerminalUi::processInput(std::string &buf)
             i += 2;
             continue;
         }
+        // A buffer ending on exactly "ESC [" is a sequence whose body has not
+        // arrived yet, not one to resync past. Falling through to the i += 2
+        // at the bottom dropped both bytes and left the rest to be read as
+        // ordinary input on the next pass, so an up arrow split here typed a
+        // literal "A" into the page and a split mouse report leaked
+        // "<0;12;7M" as text. The SGR branch below already breaks the same way
+        // for its own longer partial; this is the two-byte tail it cannot see.
+        if (i + 2 >= buf.size())
+            break;
 
         // Arrow keys → forwarded as key events. In a focused text field they
         // move the caret; otherwise Chromium scrolls the page — both natural.
-        if (i + 2 < buf.size() && buf[i + 2] >= 'A' && buf[i + 2] <= 'D') {
+        if (buf[i + 2] >= 'A' && buf[i + 2] <= 'D') {
             static const char *arrows[] = {"up", "down", "right", "left"};
             const char *name = arrows[buf[i + 2] - 'A'];
             m_backend->sendKey(QString::fromLatin1(name));
@@ -557,7 +566,7 @@ bool TerminalUi::processInput(std::string &buf)
         }
 
         // SGR mouse: ESC [ < btn ; col ; row (M=press, m=release), 1-based.
-        if (i + 2 < buf.size() && buf[i + 2] == '<') {
+        if (buf[i + 2] == '<') {
             size_t j = i + 3;
             int nums[3] = {0, 0, 0};
             int nIdx = 0;

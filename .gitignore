@@ -3,6 +3,7 @@ build/
 build-static/
 build-release/
 build-release-static/
+build-asan/
 dist/
 *.o
 *.a

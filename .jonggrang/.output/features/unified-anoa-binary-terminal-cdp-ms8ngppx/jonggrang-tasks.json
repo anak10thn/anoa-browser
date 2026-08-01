@@ -5,17 +5,17 @@
       "title": "Add terminal-mode fields to Config and register terminal CLI options",
       "description": "Extend the shared Config struct and parser so terminal-mode flags are recognised by QCommandLineParser::process() instead of hard-exiting with \"Unknown option\".\n\nAcceptance criteria:\n- src/config/config.h: add fields to struct Config — bool terminalMode = false; QString termHost = \"127.0.0.1\"; int termPort = 9222; QString termToken; int fps = 30; QString gfxMode = \"auto\"; QString cdpUrl; (cdpUrl empty means the default /render/* HTTP backend).\n- src/config/config.cpp parseArgs(): register these options on the SAME parser used by browser mode, with unambiguous names that cannot collide with existing browser options: --term-host <host>, --term-port <port>, --term-token <token>, --fps <n>, --gfx <auto|halfblock|iterm|kitty>, --cdp <url>. Do NOT touch the meaning of --port or --auth-token: they keep their browser meaning (server listen port / server token).\n- Validation, following the existing config.cpp style (QTextStream(stderr) << ... << Qt::endl; ::exit(1)): --term-port must be 1..65535; --fps must be 1..120; --gfx must be one of the four literals; --cdp must parse as a QUrl with scheme http, https or ws — scheme wss must be rejected with an explicit message stating that TLS CDP endpoints are unsupported (Qt is not built with OpenSSL here).\n- Defaults for --term-host/--term-port must mirror today's anoa-term defaults (127.0.0.1 / 9222) so behaviour is unchanged when the flags are omitted.\n- loadConfigFile() is deliberately NOT extended — terminal options are CLI-only in v1. Do not add them to the JSON/INI paths.\n- Help text (--help) must list the new options with one-line descriptions.\n- config.cpp must remain free of any terminal/POSIX headers: tests/unit builds anoa-config-lib from config.cpp alone and must keep linking on every platform.",
       "priority": 1,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/config/config.h",
         "src/config/config.cpp"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T22:39:33.432Z",
       "error_log": []
     },
     {
@@ -23,13 +23,13 @@
       "title": "Pre-scan argv for the terminal subcommand and branch main() to runTerminal()",
       "description": "Dispatch the `terminal` positional subcommand before any application object exists, and choose the application class from it.\n\nContext: src/main.cpp:12-23 already pre-scans raw argv for --headless because QCommandLineParser needs a live QCoreApplication. The `terminal` word is detected in that same scan; QCommandLineParser has no positional registered today, so it must be dispatched before process().\n\nAcceptance criteria:\n- In main(), extend the existing raw-argv loop: treat a bare argv[i] == \"terminal\" (a positional word, not a flag) as terminal mode. Record it in a local bool. Keep the existing --headless handling intact.\n- The `terminal` token must be removed from the argv passed to the application/parser (shift the remaining args down and decrement argc) so QCommandLineParser::process() does not choke on an unregistered positional.\n- Terminal mode constructs QCoreApplication, browser mode keeps QApplication — the primary terminal use case is SSH with no display, where QApplication aborts unless QT_QPA_PLATFORM is pre-set. Both paths still call setApplicationVersion(ANOA_VERSION).\n- Terminal mode calls parseArgs(argc, argv) then branches to `int runTerminal(const Config &)` declared in a new src/terminal/terminal_app.h, and returns its exit code. It must NOT construct AnoaBrowser, HttpServer or CdpProxy.\n- Windows: guard the terminal branch with #ifdef Q_OS_WIN (or !defined(Q_OS_WIN)) so that on Windows `anoa-browser terminal` prints \"terminal mode is not supported on Windows\" to stderr and returns a non-zero exit code — a clean error, never a link failure. No terminal source or header may be included on Windows.\n- This task may land a minimal runTerminal() stub (prints a message, returns 0) in src/terminal/terminal_app.{h,cpp}; the real implementation arrives in phase 2. The tree must compile and browser mode must behave exactly as before.\n- CMakeLists.txt: add src/terminal/terminal_app.cpp to target_sources(anoa-browser ...) inside an `if(NOT WIN32)` guard. Do not touch the anoa-term target yet (removed in task-007).",
       "priority": 1,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-001"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/main.cpp",
         "src/terminal/terminal_app.h",
@@ -37,7 +37,7 @@
         "CMakeLists.txt"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T22:43:42.563Z",
       "error_log": []
     },
     {
@@ -45,20 +45,20 @@
       "title": "Unit tests for terminal config options and confirm QCoreApplication in CI",
       "description": "Cover the new config surface with QTest — the cheapest verification available in this project, and the reason phase 1 goes first (nothing compiles or runs in the dev sandbox; every phase is a CI round-trip).\n\nAcceptance criteria (tests/unit/test_config.cpp, following the existing QTest style there):\n- parseArgs accepts --term-host/--term-port/--term-token/--fps/--gfx/--cdp and populates the matching Config fields.\n- Defaults are asserted when the flags are omitted: termHost 127.0.0.1, termPort 9222, fps 30, gfxMode auto, cdpUrl empty.\n- --port and --auth-token still populate Config::port / Config::authToken and are NOT aliased to the terminal fields.\n- Invalid values are rejected: --term-port 0, --term-port 70000, --fps 0, --gfx bogus, --cdp wss://host:9222 (each expected to exit non-zero; use the same technique the existing tests use for validation failures, or a QProcess-based check if in-process exit cannot be trapped).\n- A --cdp ws://host:9222/devtools/page/ABC and a --cdp http://host:9222 both parse successfully.\n- tests/unit/CMakeLists.txt: keep anoa-config-lib built from config.cpp alone — do NOT add terminal sources to it.\n- Verification: `make test` (ctest, gated on -DBUILD_TESTS=ON) is green in CI on Linux and macOS.\n- Explicitly confirm in the CI run that terminal mode built on QCoreApplication starts and can decode a PNG with QImage on both Linux and macOS. This is the assumption flagged as unverified in the plan. If QImage PNG decode fails without a GUI application object, record it in progress.txt and fall back to QApplication with QT_QPA_PLATFORM=offscreen forced from the same argv pre-scan in main.cpp.",
       "priority": 1,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-002"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "tests/unit/test_config.cpp",
         "tests/unit/CMakeLists.txt",
-        "src/main.cpp"
+        ".github/workflows/ci.yml"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T22:51:48.572Z",
       "error_log": []
     },
     {
@@ -66,13 +66,13 @@
       "title": "Port terminal UI core (termios, signals, rendering, input parsing) into src/terminal/",
       "description": "Move the presentation and input half of tools/anoa-term/anoa_term.cpp into src/terminal/terminal_ui.{h,cpp}, split along its existing seams, and define the backend abstraction the two transports will implement.\n\nRequired reading before starting: .jonggrang/.output/features/web-render-endpoint-mpmwa0hx/progress.txt and .jonggrang/.output/features/work-session-mpo0gl1b/progress.txt — four input behaviours were already paid for there and must not regress.\n\nAcceptance criteria:\n- New src/terminal/frame_backend.h: an abstract backend seam with the operations the UI needs — fetch a frame (scaled RGB for halfblock / raw PNG for gfx modes), report viewport size and the cell-to-page mapping inputs, sendClick(pageX,pageY,button), sendScroll(pageX,pageY,dy), sendText(utf8), sendKey(namedKey). Signals or a callback for status/error text so connection state can reach the status bar. Pure virtual; no HTTP or CDP specifics leak into it.\n- New src/terminal/terminal_ui.{h,cpp} carrying, largely unchanged, from anoa_term.cpp: struct termios save/restore + enterRawMode/restoreTerminal (246-283), signal handlers keeping their `volatile sig_atomic_t` flags (262-263), terminalSize/queryCellSize/detectGfx (284-346), DisplayMap + mapCellToPage (347-364), renderStatusBar/renderHalfblock/renderGfx (416-520) and processInput (521-641). base64Encode (212) travels with renderGfx.\n- processInput keeps all four hard-won behaviours verbatim: Ctrl-C and Ctrl-Q quit (plain `q` must remain typeable), Backspace is delivered as DEL (127), printable bytes are batched per read burst into one send, and the status bar shows the last input event that was sent.\n- The UI calls only the FrameBackend interface — no direct socket/HTTP code remains in terminal_ui.cpp.\n- Anything the UI needs from Options (fps, gfx mode) comes from Config, not a private struct.\n- CMakeLists.txt: add the new sources to target_sources(anoa-browser ...) under the existing `if(NOT WIN32)` guard. Compiles clean under -Wall -Wextra -Wpedantic.",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-003"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/frame_backend.h",
         "src/terminal/terminal_ui.h",
@@ -80,7 +80,7 @@
         "CMakeLists.txt"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T23:00:29.882Z",
       "error_log": []
     },
     {
@@ -88,20 +88,20 @@
       "title": "Port the /render/* HTTP transport behind the backend seam",
       "description": "Move the transport half of tools/anoa-term/anoa_term.cpp into src/terminal/render_http_client.{h,cpp} as the default FrameBackend implementation. This path must stay byte-identical in behaviour to today's anoa-term so it remains the known-good control to diff CDP mode against.\n\nAcceptance criteria:\n- New src/terminal/render_http_client.{h,cpp} implementing FrameBackend, carrying over from anoa_term.cpp: httpRequest (60-140), withToken (141-149), Frame + parsePpm (150-200), pngDimensions (201-211), urlEncode (388-403), sendClick/sendScroll/sendText/sendKey (365-417).\n- Endpoints, query parameters, headers and the token handling (Bearer header or ?token=) are unchanged: GET /render/screenshot.ppm?w=&h= with X-Anoa-Viewport-Width/Height, GET /render/screenshot.png, POST /render/click, /render/scroll, /render/type, /render/key.\n- Scroll keeps the current Qt angleDelta convention (+120 = up, matching processInput btn==64). Do not normalise it here — the sign difference is handled in the CDP backend.\n- Host, port and token come from Config::termHost / termPort / termToken.\n- It may keep the existing blocking socket implementation as long as each request is short-lived and does not stall the frame timer beyond the current behaviour; do not introduce a nested QEventLoop.\n- CMakeLists.txt: sources added under the `if(NOT WIN32)` guard. Clean under -Wall -Wextra -Wpedantic.",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-004"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/render_http_client.h",
         "src/terminal/render_http_client.cpp",
         "CMakeLists.txt"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T23:05:35.558Z",
       "error_log": []
     },
     {
@@ -109,21 +109,19 @@
       "title": "Convert the select() frame loop to QCoreApplication::exec() + QSocketNotifier + QTimer",
       "description": "Implement runTerminal(config) for real: replace the blocking select() loop from anoa_term.cpp main() (659-838) with a Qt event loop, so QWebSocket can work in phase 3. This is the highest-risk step in the plan and it lands against the known-good HTTP backend BEFORE any CDP code exists.\n\nAcceptance criteria (src/terminal/terminal_app.cpp):\n- runTerminal() enters raw mode, installs the SIGWINCH/SIGINT handlers, constructs a RenderHttpClient as the FrameBackend, and returns QCoreApplication::exec()'s result.\n- stdin is driven by a QSocketNotifier(STDIN_FILENO, QSocketNotifier::Read) whose activation reads the available bytes and feeds terminal_ui's processInput. Byte batching per burst must be preserved (read what is available, then dispatch once).\n- Frames are driven by a QTimer with interval 1000/config.fps.\n- The signal handlers keep their `volatile sig_atomic_t` flags; the frame timer polls g_quit and g_resized each tick and acts on them (quit → restore terminal and QCoreApplication::quit(); resized → re-query terminal size and rebuild the DisplayMap). No self-pipe.\n- Terminal restoration must run on every exit path, including SIGINT and a failed backend connection (atexit or an explicit RAII guard, as anoa_term.cpp does today).\n- Delete the now-dead main()/usage() copies rather than leaving them behind; --help for terminal mode comes from the shared QCommandLineParser.\n- Exit criterion — parity, not just compilation: `anoa-browser terminal` pointed at a locally running `anoa-browser` must be indistinguishable from `anoa-term`. Verify in CI or manually: halfblock render, iterm/kitty gfx render, SGR mouse click, wheel scroll direction, typing printable chars, Enter/Backspace/Tab/arrow keys, terminal resize, Ctrl-C and Ctrl-Q quit with the terminal correctly restored.",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-005"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/terminal_app.cpp",
-        "src/terminal/terminal_app.h",
-        "src/terminal/terminal_ui.cpp",
-        "src/terminal/terminal_ui.h"
+        "src/terminal/render_http_client.cpp"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T23:20:40.520Z",
       "error_log": []
     },
     {
@@ -131,19 +129,19 @@
       "title": "Delete the standalone anoa-term target and tools/anoa-term/",
       "description": "Retire the second binary now that `anoa-browser terminal` reaches parity. The breaking change is accepted and deliberate — no compatibility shim, symlink or wrapper script.\n\nAcceptance criteria:\n- Delete tools/anoa-term/anoa_term.cpp and the now-empty tools/anoa-term/ directory (and tools/ if it holds nothing else).\n- CMakeLists.txt: remove the `add_executable(anoa-term tools/anoa-term/anoa_term.cpp)` block with its target_compile_options (around lines 126-130) and the `install(TARGETS anoa-term ...)` block (around lines 163-167). No reference to the anoa-term target may remain in the file.\n- Confirm nothing else in the build graph references the target; packaging and CI references are handled in phase 5 and are expected to still name anoa-term at this point.\n- The tree still configures and builds: a clean `make configure && make build` succeeds and produces exactly one executable.",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-006"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "CMakeLists.txt",
         "tools/anoa-term/anoa_term.cpp"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T23:22:41.981Z",
       "error_log": []
     },
     {
@@ -151,20 +149,20 @@
       "title": "Implement the CDP WebSocket client with request/response correlation",
       "description": "New src/terminal/cdp_client.{h,cpp}: a genuine CDP client, not a relay. CdpProxy is a blind pass-through that never parses replies, so response correlation is new code here.\n\nModel it on the QWebSocket + pending-message-queue shape in src/cdp/cdp_proxy.cpp:86-97 and 131-156; build CDP JSON with QJsonDocument::fromJson(...) / toJson(QJsonDocument::Compact) as src/cdp/cdp_extensions.cpp does.\n\nAcceptance criteria:\n- QObject subclass owning a QWebSocket. connectToEndpoint(QUrl) opens the socket; messages sent before the socket is open are queued and flushed on connected().\n- send(method, params) allocates a monotonically increasing integer id, stores a pending entry keyed by id, and delivers the matching {\"id\":N,\"result\":{...}} reply back to that call site (callback or QFuture-style continuation — no nested QEventLoop, since the frame loop is already a Qt event loop).\n- CDP error replies ({\"error\":{code,message}}) resolve the pending entry as a failure with the message text preserved, and a per-request timeout (default 5s) resolves it as a failure so a lost reply can never leak a pending entry.\n- Unsolicited events (no id) are dispatched to a separate event signal, not treated as orphan responses.\n- Bearer auth on both channels, matching src/http/http_server.cpp:113-122 and src/cdp/cdp_proxy.cpp:56-80: when Config::termToken is set, send `Authorization: Bearer <token>` as a QNetworkRequest raw header AND append ?token=<token> to the URL query (QUrlQuery), so either server convention works.\n- Connection loss, retries and the current connection state are exposed via signals so terminal_ui can surface them in the status bar. Reconnect uses a bounded backoff, never a tight loop.\n- Includes a Page.navigate primitive (no UI is built on it in this iteration — the URL input line is out of scope).\n- Attaches to exactly one target: no sessionId routing or multi-target plumbing in v1.\n- CMakeLists.txt: source added under the `if(NOT WIN32)` guard; Qt6::WebSockets is already linked into anoa-browser, no new find_package component is needed.",
       "priority": 3,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-007"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/cdp_client.h",
         "src/terminal/cdp_client.cpp",
         "CMakeLists.txt"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T23:34:03.508Z",
       "error_log": []
     },
     {
@@ -172,19 +170,19 @@
       "title": "CDP endpoint discovery: accept http(s):// via /json/list and ws:// directly",
       "description": "Make --cdp accept both URL forms the user is likely to have on hand, resolving the http form to a page target before dialling the WebSocket.\n\nAcceptance criteria (src/terminal/cdp_client.{h,cpp}):\n- A ws://host:port/devtools/page/<id> URL is dialled directly, no discovery.\n- An http://host:port or https://host:port URL triggers a QNetworkAccessManager GET of /json/list; the client parses the JSON array and attaches to the first entry whose \"type\" is \"page\", using its webSocketDebuggerUrl.\n- When more than one page target is present, print the list (index, title, url) to stderr before attaching to the first, so the user can see what was chosen and re-point --cdp at a specific ws:// URL.\n- Empty list, no page-typed target, an unreachable host, or malformed JSON each produce a clear one-line stderr error and a non-zero exit — never a silent hang.\n- The token from --term-token is applied to the /json/list request too (Bearer header + ?token=), same dual convention as the WebSocket dial.\n- wss:// was already rejected at config validation (task-001); assert here that the client never receives one.\n- Discovery is asynchronous — it must not block the Qt event loop or the frame timer.",
       "priority": 3,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-008"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/cdp_client.h",
         "src/terminal/cdp_client.cpp"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-07-31T23:47:22.544Z",
       "error_log": []
     },
     {
@@ -192,20 +190,20 @@
       "title": "CDP frame backend: screenshot capture, layout metrics and the CSS-pixel display map",
       "description": "Implement the FrameBackend seam against CDP for the output half. New src/terminal/cdp_frame_backend.{h,cpp} wrapping CdpClient.\n\nAcceptance criteria:\n- Frame fetch: Page.captureScreenshot (format png) → QByteArray::fromBase64 → QImage::loadFromData. There is no server-side scaling on this path, unlike /render/screenshot.ppm.\n- Halfblock mode: downscale the decoded QImage to the terminal cell grid aspect-correctly, then convert to the packed RGB buffer terminal_ui's renderHalfblock expects. Follow the QImage → Format_RGB888 scanline-copy recipe in src/http/http_server.cpp:342-388.\n- iterm/kitty gfx modes: pass the PNG bytes through untouched — no decode/re-encode round trip.\n- Display map: Page.getLayoutMetrics supplies the CSS viewport size and deviceScaleFactor. The cell-to-page mapping MUST target CSS pixels, not image pixels — with deviceScaleFactor > 1 the returned PNG is larger than the viewport, and mapping against image pixels puts every click off-target on a HiDPI endpoint. Refresh the metrics on resize and when the viewport size changes between frames.\n- Frame fetch is asynchronous and must not block the timer: if a capture is still in flight when the next tick fires, skip that tick rather than queueing captures.\n- Capture failures and connection loss set the status text rather than tearing the UI down; the terminal stays usable and the status bar shows the state.\n- CMakeLists.txt: source added under the `if(NOT WIN32)` guard.",
       "priority": 4,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-009"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/cdp_frame_backend.h",
         "src/terminal/cdp_frame_backend.cpp",
         "CMakeLists.txt"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-07-31T23:51:27.717Z",
+      "completed_at": "2026-08-01T00:04:40.402Z",
       "error_log": []
     },
     {
@@ -213,19 +211,19 @@
       "title": "CDP input dispatch: mouse, wheel, text and the full named-key table",
       "description": "Implement the input half of the CDP FrameBackend so control is at parity with the /render/* path: screenshot + click + scroll + type + special keys.\n\nAcceptance criteria (src/terminal/cdp_frame_backend.cpp):\n- Click: Input.dispatchMouseEvent type mousePressed followed by mouseReleased at the same CSS-pixel x/y, with button (left/middle/right), clickCount 1 and the correct buttons bitmask.\n- Scroll: Input.dispatchMouseEvent type mouseWheel with deltaX/deltaY. The sign is INVERTED relative to the /render/scroll path — /render/scroll uses Qt angleDelta (+120 = up, per processInput btn==64) while CDP deltaY uses the opposite convention. Convert explicitly at this boundary; this is a silent UX bug with no error message if it is wrong, so it gets the dedicated integration test in task-016.\n- Typing: Input.insertText with the batched UTF-8 text from the input burst.\n- Named keys: Input.dispatchKeyEvent (rawKeyDown/keyDown + keyUp) covering the full 14-key set implemented in src/browser/anoa_browser.cpp:220-258. Each entry needs key, code, windowsVirtualKeyCode and (where applicable) text — a partial entry silently does nothing in Chromium. Backspace must remain reachable from the DEL (127) byte the terminal delivers.\n- Modifier bits are computed per CDP convention (alt 1, ctrl 2, meta 4, shift 8) where the terminal reports them.\n- Every dispatch is fire-and-forget with respect to the frame loop — no blocking waits on the reply, but CDP error replies are surfaced to the status bar.",
       "priority": 4,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-010"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/cdp_frame_backend.cpp",
         "src/terminal/cdp_frame_backend.h"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-08-01T00:16:10.407Z",
       "error_log": []
     },
     {
@@ -233,20 +231,20 @@
       "title": "Select the backend from --cdp and surface connection state in the status bar",
       "description": "Wire the two backends together at the runTerminal() entry point. Omitting --cdp must preserve today's behaviour exactly — same host, same port, same endpoints — so every CDP-mode bug has a known-good control to diff against.\n\nAcceptance criteria (src/terminal/terminal_app.cpp):\n- config.cdpUrl empty → construct RenderHttpClient (default, unchanged behaviour). Non-empty → construct CdpFrameBackend over CdpClient with that URL. Everything downstream talks to FrameBackend only; no mode conditionals leak into terminal_ui.\n- The status bar shows which backend is active and its connection state: connecting / attached to <target title or url> / disconnected, retrying. Wire CdpClient's state signals into terminal_ui's status text. The last-input-event display from the HTTP path must keep working on both backends.\n- A CDP endpoint that never connects fails cleanly: after the retry budget is exhausted, restore the terminal, print a one-line error to stderr and exit non-zero rather than sitting on a blank screen.\n- --term-host/--term-port/--term-token are ignored (not silently misapplied) when --cdp is given; --fps and --gfx apply to both backends.\n- Verify both paths in the same session: `anoa-browser terminal` against a local anoa-browser, and `anoa-browser terminal --cdp http://127.0.0.1:9222` against a headless Chrome or the fake endpoint from task-016.",
       "priority": 4,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-011"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/terminal_app.cpp",
         "src/terminal/terminal_ui.cpp",
         "src/terminal/terminal_ui.h"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-01T00:21:15.097Z",
+      "completed_at": "2026-08-01T00:38:17.710Z",
       "error_log": []
     },
     {
@@ -254,18 +252,18 @@
       "title": "Retarget every anoa-term reference in the release workflow",
       "description": "The release pipeline names anoa-term in 8 places; all of them must move to the single anoa-browser binary. There is no second binary to copy any more.\n\nAcceptance criteria (.github/workflows/release.yml):\n- Linux job: drop the anoa-term `cp` (~L55), its `chmod` (~L56) and its `patchelf --set-rpath` (~L58). The bundle smoke test (~L152) must exercise the merged binary instead.\n- macOS job: drop anoa-term from the `lipo -archs` slice verification (~L219-220) and remove the step that moves anoa-term into the .app bundle (~L225-230). The `codesign --entitlements` invocation for anoa-term (~L311) goes away — the browser binary is already signed with the same entitlements. Update the macOS smoke test (~L349).\n- Both `--help` smoke invocations become `anoa-browser terminal --help` so terminal mode is exercised end-to-end in the packaged artifact on Linux and macOS. On the Linux tarball this must go through resources/anoa-browser.sh, never the raw libexec/anoa-browser.\n- The Windows job packages build/Release/* wholesale and needs no change — confirm it still produces a working artifact and that `anoa-browser terminal` there prints the unsupported-platform error and exits non-zero.\n- Grep the whole workflow afterwards: no occurrence of `anoa-term` may remain.\n- Verify by triggering release.yml via workflow_dispatch (publish/tap steps are already gated on refs/tags, so nothing is released).",
       "priority": 5,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-012"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         ".github/workflows/release.yml"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-08-01T00:43:51.238Z",
       "error_log": []
     },
     {
@@ -273,20 +271,20 @@
       "title": "Update Homebrew templates and the Linux launcher for the merged binary",
       "description": "Remove the anoa-term entries from both package templates and fix the bundle-layout comment.\n\nAcceptance criteria:\n- .github/homebrew/anoa-browser-linux.rb.tpl:15 — delete `bin.install_symlink libexec/\"anoa-term\"`. Only the anoa-browser launcher symlink remains.\n- .github/homebrew/anoa-browser.rb.tpl:18 — delete the `binary \"#{appdir}/.../MacOS/anoa-term\"` stanza. The anoa-browser binary stanza stays.\n- resources/anoa-browser.sh:6 — update the bundle-layout comment so it no longer describes a separate anoa-term binary. The script itself already execs with \"$@\", so `anoa-browser terminal` inherits LD_LIBRARY_PATH / QT_PLUGIN_PATH / QTWEBENGINE_RESOURCES_PATH / QTWEBENGINE_LOCALES_PATH for free — no logic change needed, but confirm that is true.\n- Note the upgrade hazard explicitly in the commit body and in the release notes wording carried into task-017: `brew upgrade` will not necessarily remove a stale bin/anoa-term symlink on Linux, and the cask's binary shim only disappears on reinstall.\n- Grep both templates: no occurrence of `anoa-term` may remain.",
       "priority": 5,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-013"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         ".github/homebrew/anoa-browser-linux.rb.tpl",
         ".github/homebrew/anoa-browser.rb.tpl",
         "resources/anoa-browser.sh"
       ],
       "started_at": null,
-      "completed_at": null,
+      "completed_at": "2026-08-01T00:49:04.627Z",
       "error_log": []
     },
     {
@@ -294,19 +292,19 @@
       "title": "Verify the static release build with terminal sources linked in",
       "description": "Confirm the merged binary survives the static build, where the risk is concentrated: CMakeLists.txt:92 excludes imageformats plugins via qt_import_plugins EXCLUDE_BY_TYPE, and the CDP frame backend now depends on PNG decoding.\n\nAcceptance criteria:\n- `make release-static` (and `make configure-release-static`) completes and produces a working anoa-browser.\n- The static binary decodes PNG: QImage::loadFromData on a PNG must succeed in the static artifact. PNG is built into QtGui rather than shipped as an imageformats plugin, so this is expected to work — but it must be demonstrated on the static artifact, not assumed, since a regression here only surfaces there.\n- The static binary runs `anoa-browser terminal --help` and a real terminal session against a local anoa-browser.\n- Re-read CMakeLists.txt end to end: terminal sources are added to anoa-browser under a single `if(NOT WIN32)` guard, no anoa-term target or install rule remains, warnings flags still apply, and RPATH/strip blocks are untouched.\n- If PNG decode does fail statically, add the required plugin back via qt_import_plugins INCLUDE rather than dropping the EXCLUDE_BY_TYPE line wholesale, and record the finding in progress.txt.",
       "priority": 5,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-014"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
-        "CMakeLists.txt",
-        "Makefile"
+        "src/terminal/cdp_client.h",
+        "src/terminal/cdp_client.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-01T00:51:10.730Z",
+      "completed_at": "2026-08-01T01:01:35.456Z",
       "error_log": []
     },
     {
@@ -314,20 +312,19 @@
       "title": "Integration test: fake CDP endpoint exercising --cdp",
       "description": "Cover the CDP path without needing a real Chrome. The plan calls out four capability-gap bugs that all fail silently — they need tests, not code review.\n\nAcceptance criteria (new tests/integration/terminal_cdp.test.js, vitest, fileParallelism already false):\n- Stand up a fake CDP endpoint using the existing `ws` dependency: an HTTP server answering /json/list with one page-typed target, plus a WebSocket server that answers Page.captureScreenshot with a small base64 PNG, Page.getLayoutMetrics with a known cssVisualViewport and deviceScaleFactor, and records every Input.* message it receives.\n- Reuse tests/integration/helpers.js (BINARY, waitForPort, openWs, sendCdp) and pick a free port per test as the existing suites do.\n- Discovery test: launching with --cdp http://127.0.0.1:<port> results in a WebSocket connection to the advertised webSocketDebuggerUrl. A ws:// URL connects directly with no /json/list request.\n- Scroll-direction test: a wheel-up in the terminal produces an Input.dispatchMouseEvent mouseWheel whose deltaY sign is the CDP convention, i.e. INVERTED relative to the +120 angleDelta the /render/scroll path sends. Assert the sign explicitly.\n- Click-coordinate test: with deviceScaleFactor 2 and a screenshot twice the CSS viewport size, a click at a known terminal cell arrives at the expected CSS-pixel x/y — not the image-pixel coordinates. This is the HiDPI off-target bug.\n- Key test: Enter/Backspace/Tab/an arrow each produce an Input.dispatchKeyEvent carrying key, code and windowsVirtualKeyCode; typing produces Input.insertText with the batched text.\n- Failure paths: unreachable endpoint and an empty /json/list each exit non-zero with a one-line error.\n- Drive the terminal by writing escape sequences to the child process stdin; if a pty is required, note it and keep the test to what a pipe can exercise — a committed general pty harness is out of scope.\n- Register the new file so `npm test` in tests/integration picks it up, and add it to the CI integration job if the job enumerates files explicitly.",
       "priority": 6,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": "core/testing",
       "blocked_by": [
         "task-015"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "tests/integration/terminal_cdp.test.js",
-        "tests/integration/helpers.js",
-        ".github/workflows/ci.yml"
+        "tests/integration/helpers.js"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-01T01:06:52.855Z",
+      "completed_at": "2026-08-01T01:14:51.987Z",
       "error_log": []
     },
     {
@@ -335,18 +332,18 @@
       "title": "Rewrite the README around `anoa-browser terminal` and document the breaking change",
       "description": "Every user-facing mention of anoa-term must go, and the removal must be called out as a breaking change.\n\nAcceptance criteria (README.md):\n- Features bullet (~L16): describe the terminal viewer as a mode of anoa-browser, not a second binary.\n- macOS install text (~L38) and the Linux tarball example (~L68): correct the file lists and paths — the tarball and the .app no longer contain an anoa-term executable, and there is no bin/anoa-term symlink.\n- The whole \"Terminal Viewer (`anoa-term`)\" section (~L265-320+) is rewritten around `anoa-browser terminal`: invocation, --term-host/--term-port/--term-token/--fps/--gfx, the key bindings (Ctrl-C / Ctrl-Q to quit, `q` is typeable, Backspace, Tab, arrows), and the SGR mouse support.\n- New subsection documenting --cdp: both accepted URL forms (http(s):// triggers /json/list discovery and attaches to the first page target; ws://.../devtools/page/<id> attaches directly), the auth token behaviour, and that wss:// is unsupported because Qt is not built with OpenSSL here.\n- Explicit BREAKING CHANGE note: anoa-term is gone with no shim; users type `anoa-browser terminal`. State both upgrade hazards — `brew upgrade` may leave a stale bin/anoa-term symlink on Linux, and the macOS cask's binary shim only disappears on reinstall.\n- Note that terminal mode is POSIX-only and that `anoa-browser terminal` on Windows exits non-zero with an unsupported-platform message.\n- Note that terminal options are CLI-only — they are not readable from the JSON/INI config file.\n- Grep the README afterwards: no occurrence of `anoa-term` may remain except inside the breaking-change note.",
       "priority": 6,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-016"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "README.md"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-01T01:18:10.677Z",
+      "completed_at": "2026-08-01T01:21:20.121Z",
       "error_log": []
     },
     {
@@ -354,19 +351,19 @@
       "title": "Fix AGENTS.md stack metadata and record the merged-binary convention",
       "description": "AGENTS.md currently claims this is a node-typescript API project. It is a C++17 / Qt6 / CMake desktop binary, and that wrong metadata misleads every future agent session.\n\nAcceptance criteria (AGENTS.md):\n- Project Overview: correct Type and Stack to reflect C++17 + Qt6 (Widgets, WebEngine, WebSockets, Network) built with CMake, and write a real one-line Description instead of the TODO.\n- File Structure: replace the placeholder tree with the real one — src/browser, src/cdp, src/config, src/http, src/pdf, src/terminal, plus resources/, tests/{unit,integration,e2e,regression}, .github/{workflows,homebrew,entitlements}.\n- Testing Conventions: record the actual commands — `make test` (ctest, needs -DBUILD_TESTS=ON) for QTest unit tests, vitest in tests/integration with fileParallelism false, the shell suites port_layout.test.sh / extensions.test.sh, Playwright + Puppeteer in tests/e2e, tests/regression/smoke.sh.\n- Architecture Decisions: add the merged-binary convention — one binary, `terminal` is a bare positional detected by the raw-argv pre-scan in src/main.cpp before any application object exists (QCommandLineParser needs a live QCoreApplication); terminal mode uses QCoreApplication because the primary use case is SSH with no display; terminal sources are POSIX-only and conditionally compiled; --port/--auth-token keep their browser meaning while terminal connection settings use --term-* names so no flag changes meaning by mode.\n- Known Gotchas: terminal options are CLI-only (loadConfigFile is not extended); CDP mouseWheel deltaY sign is inverted relative to /render/scroll; CDP coordinates are CSS pixels, so deviceScaleFactor must be applied; tests/unit builds anoa-config-lib from config.cpp alone, so terminal sources must never be added to it.\n- Append the session learnings to .jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/progress.txt as the protocol requires.",
       "priority": 6,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "unified-anoa-binary-terminal-cdp-ms8ngppx",
       "skill": null,
       "blocked_by": [
         "task-017"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "AGENTS.md",
         ".jonggrang/.output/features/unified-anoa-binary-terminal-cdp-ms8ngppx/progress.txt"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-01T01:22:24.269Z",
+      "completed_at": "2026-08-01T01:26:07.929Z",
       "error_log": []
     }
   ]
