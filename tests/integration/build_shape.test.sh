@@ -52,48 +52,54 @@ fi
 # regression is anyway: a new src/terminal/*.cpp appended to the unconditional
 # target_sources() block above the guard. That compiles fine everywhere except
 # the platform nobody here builds for.
-echo "=== TERM-BUILD-02: no terminal source escapes the WIN32 guard ==="
-CMAKE_FILE="$ROOT/CMakeLists.txt"
+#
+# Both bounds of the guard are checked, and so is the reference count. A "no
+# strays" assertion alone passes vacuously if every src/terminal/ line is
+# deleted or the grep breaks — the same trap TERM-BUILD-01 spells out.
+assert_guarded() {
+  local id="$1" file="$2"
 
-GUARD_START=$(grep -n '^if(NOT WIN32)' "$CMAKE_FILE" | head -1 | cut -d: -f1 || true)
-if [ -z "$GUARD_START" ]; then
-  assert_fail "TERM-BUILD-02: no 'if(NOT WIN32)' block in CMakeLists.txt at all"
-else
-  GUARD_END=$(awk -v s="$GUARD_START" 'NR > s && /^endif\(\)/ { print NR; exit }' "$CMAKE_FILE")
-  # Every line naming a terminal source, and the subset of them inside the
-  # guard. If the two lists differ, something is built on Windows that cannot
-  # compile there.
-  ALL=$(grep -n 'src/terminal/' "$CMAKE_FILE" | cut -d: -f1 | sort -n)
-  OUTSIDE=""
-  for line in $ALL; do
-    if [ "$line" -lt "$GUARD_START" ] || [ "$line" -gt "$GUARD_END" ]; then
-      OUTSIDE="$OUTSIDE $(sed -n "${line}p" "$CMAKE_FILE" | tr -d ' ')"
+  local start
+  start=$(grep -n '^if(NOT WIN32)' "$file" | head -1 | cut -d: -f1 || true)
+  if [ -z "$start" ]; then
+    assert_fail "$id: no 'if(NOT WIN32)' block in $(basename "$file") at all"
+    return
+  fi
+  local end
+  end=$(awk -v s="$start" 'NR > s && /^endif\(\)/ { print NR; exit }' "$file")
+  if [ -z "$end" ]; then
+    assert_fail "$id: the 'if(NOT WIN32)' block in $(basename "$file") is never closed"
+    return
+  fi
+
+  # Every line naming a terminal source, and the subset of them outside the
+  # guard. Anything in that subset is built on Windows and cannot compile there.
+  local all outside="" line
+  all=$(grep -n 'src/terminal/' "$file" | cut -d: -f1 | sort -n)
+  for line in $all; do
+    if [ "$line" -lt "$start" ] || [ "$line" -gt "$end" ]; then
+      outside="$outside $(sed -n "${line}p" "$file" | tr -d ' ')"
     fi
   done
 
-  COUNT=$(wc -w <<<"$ALL")
-  if [ -z "$OUTSIDE" ] && [ "$COUNT" -ge 1 ]; then
-    assert_pass "TERM-BUILD-02: all $COUNT src/terminal/ references are inside if(NOT WIN32)"
+  local count
+  count=$(wc -w <<<"$all")
+  if [ -n "$outside" ]; then
+    assert_fail "$id: outside the guard (lines $start-$end):$outside"
+  elif [ "$count" -lt 1 ]; then
+    assert_fail "$id: no src/terminal/ references in $(basename "$file") at all"
   else
-    assert_fail "TERM-BUILD-02: outside the guard:$OUTSIDE"
+    assert_pass "$id: all $count src/terminal/ references are inside if(NOT WIN32)"
   fi
-fi
+}
+
+echo "=== TERM-BUILD-02: no terminal source escapes the WIN32 guard ==="
+assert_guarded "TERM-BUILD-02" "$ROOT/CMakeLists.txt"
 
 # The unit test targets carry the same restriction for the same reason —
 # tests/unit builds terminal_ui.cpp, which does not exist on Windows either.
 echo "=== TERM-BUILD-02b: the terminal unit targets are guarded too ==="
-UNIT_FILE="$ROOT/tests/unit/CMakeLists.txt"
-if grep -q '^if(NOT WIN32)' "$UNIT_FILE"; then
-  UNIT_START=$(grep -n '^if(NOT WIN32)' "$UNIT_FILE" | head -1 | cut -d: -f1)
-  STRAY=$(grep -n 'src/terminal/' "$UNIT_FILE" | cut -d: -f1 | awk -v s="$UNIT_START" '$1 < s')
-  if [ -z "$STRAY" ]; then
-    assert_pass "TERM-BUILD-02b: tests/unit terminal targets are behind if(NOT WIN32)"
-  else
-    assert_fail "TERM-BUILD-02b: terminal sources before the guard on lines: $STRAY"
-  fi
-else
-  assert_fail "TERM-BUILD-02b: tests/unit/CMakeLists.txt has no 'if(NOT WIN32)' guard"
-fi
+assert_guarded "TERM-BUILD-02b" "$ROOT/tests/unit/CMakeLists.txt"
 
 # Summary
 echo ""

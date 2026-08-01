@@ -266,9 +266,9 @@ describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal against a fake /render/* endp
       return found.length ? found : null;
     }, 'a /render/scroll');
 
-    const CDP_DELTA_Y = -120; // what terminal_cdp.test.js asserts for this keystroke
+    // TCDP-04 asserts deltaY = -120 for this same keystroke; +120 here is the
+    // other half of the inversion.
     expect(up[0].query.get('dy')).toBe('120');
-    expect(parseInt(up[0].query.get('dy'), 10)).toBe(-CDP_DELTA_Y);
     expect(up[0].query.get('x')).toBe(String(page.x));
     expect(up[0].query.get('y')).toBe(String(page.y));
 

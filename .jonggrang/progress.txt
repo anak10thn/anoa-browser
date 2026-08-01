@@ -204,3 +204,35 @@
   terminal_ui.cpp. Also verified SANITIZE+COVERAGE together is a CMake FATAL_ERROR.
 - Sandbox: gcov 13.3.0 present, lcov/gcovr NOT installed — hence the hand-rolled
   awk table in tests/coverage.sh rather than a gcovr dependency.
+
+## Phase 16 — test quality
+
+- The one test that was actually broken: build_shape.test.sh TERM-BUILD-02b
+  only looked for src/terminal/ refs BEFORE `if(NOT WIN32)`, never past
+  `endif()`. A source appended to the bottom of tests/unit/CMakeLists.txt --
+  the realistic regression -- sailed through. TERM-BUILD-02 already got this
+  right; the two now share one assert_guarded function. Verified negatively.
+- Same file, same trap TERM-BUILD-01's comment warns about: a "no strays"
+  check passes vacuously when the grep finds nothing. Both cases now require
+  count >= 1.
+- CFG-13/CFG-14 asserted exit code 1 only, but loadConfigFile has THREE
+  exit(1) branches and CFG-23 drives the very same bad_json harness mode down
+  a different one. Exit-code-only assertions on a function with multiple exit
+  paths are worth almost nothing -- assert the message.
+- TERM-CFG-10 and -11 were each used twice (phase 15 reused IDs the plan had
+  already assigned to the ws:// / http:// cases). Renumbered to 12/13 and
+  synced phase-15-coverage.md. Check the plan's ID range before adding a case.
+- Two derived assertions removed (Math.sign of a value already compared to
+  -120; parseInt of a string already compared to '120'). They cannot fail
+  independently of the line above them. The real pin in both suites is the
+  opposite-notch assertion that follows.
+- Kept TERM-GUI-01 even though it asserts what this test file's own main()
+  builds -- it is the premise guard for TERM-GUI-02/03, which stop proving
+  anything headless if the harness silently becomes a QApplication.
+- port_layout.test.sh fails 6/14 in this sandbox: no GL, no GPU, so WebEngine
+  cannot start. All 6 are the PORT-0x browser-launching cases. Every
+  TERM-MODE-* case passes. Do not chase these here.
+- build-asan/ on disk can be STALE-partial: ctest reported ConfigTests "Not
+  Run" because only the terminal targets had been built there. `make test`
+  builds everything; a hand-driven build dir may not. Build the target before
+  believing a "Not Run".

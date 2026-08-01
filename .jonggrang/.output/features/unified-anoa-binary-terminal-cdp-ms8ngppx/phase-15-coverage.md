@@ -149,8 +149,8 @@ on the value that survived rather than only on the exit code.
 | CFG-21 | **the INI branch** — a whole second parser that had no test at all |
 | CFG-22 | an empty INI file yields the documented defaults, not zeroes |
 | CFG-23 | a path that exists but cannot be opened ≠ one that does not exist |
-| TERM-CFG-10 | `--term-port` / `--fps` reject a non-numeric value |
-| TERM-CFG-11 | `--cdp` with an unusable scheme, and a non-URL, are refused |
+| TERM-CFG-12 | `--term-port` / `--fps` reject a non-numeric value |
+| TERM-CFG-13 | `--cdp` with an unusable scheme, and a non-URL, are refused |
 
 Notes on two of them:
 

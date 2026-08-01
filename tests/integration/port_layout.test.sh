@@ -254,7 +254,7 @@ else
 fi
 
 echo "=== TERM-MODE-04: --cdp wss:// is rejected by the shipped binary ==="
-# CFG-09 covers this through the parse_args test harness; this covers the
+# TERM-CFG-09 covers this through the parse_args test harness; this covers the
 # binary a user actually runs, which is a different code path into the same
 # validation only as long as nobody moves the check.
 run_cli "$BINARY" terminal --cdp wss://example.invalid/devtools/page/X

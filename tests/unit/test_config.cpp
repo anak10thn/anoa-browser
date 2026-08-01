@@ -157,6 +157,12 @@ private slots:
     }
 
     // CFG-13: missing config file → process exits with code 1
+    //
+    // The message is asserted, not just the code. loadConfigFile() has three
+    // exit(1) branches — not found, cannot open (CFG-23) and invalid JSON
+    // (CFG-14) — so an exit-code-only assertion passes whichever one fires and
+    // would not notice the not-exists check being dropped in favour of letting
+    // the open() fail.
     void testMissingConfigFileExits()
     {
         // Run a subprocess that calls loadConfigFile on a nonexistent path.
@@ -167,11 +173,17 @@ private slots:
         env.insert("ANOA_TEST_HARNESS", "missing_config");
         proc.setProcessEnvironment(env);
         proc.start(QCoreApplication::applicationFilePath(), {});
-        proc.waitForFinished(5000);
+        QVERIFY(proc.waitForFinished(5000));
         QCOMPARE(proc.exitCode(), 1);
+        QVERIFY2(proc.readAllStandardError().contains("config file not found"),
+                 "a nonexistent path reported some other error");
     }
 
     // CFG-14: malformed JSON config → process exits with code 1
+    //
+    // Same reasoning as CFG-13, and pointed at the branch next door: CFG-23
+    // drives this very harness mode down the "cannot open" path, so without the
+    // message check the two cases are indistinguishable.
     void testMalformedJsonConfigExits()
     {
         QTemporaryDir dir;
@@ -183,8 +195,10 @@ private slots:
         env.insert("ANOA_TEST_HARNESS_PATH", path);
         proc.setProcessEnvironment(env);
         proc.start(QCoreApplication::applicationFilePath(), {});
-        proc.waitForFinished(5000);
+        QVERIFY(proc.waitForFinished(5000));
         QCOMPARE(proc.exitCode(), 1);
+        QVERIFY2(proc.readAllStandardError().contains("invalid JSON in config file"),
+                 "a syntactically broken file reported some other error");
     }
 
     // CFG-03 & CFG-04: invalid ports — tested via shell (port validation is in
@@ -336,16 +350,16 @@ private slots:
         QCOMPARE(ok.cfg["height"].toInt(), 768);
     }
 
-    // TERM-CFG-10: --term-port and --fps reject a non-numeric value before the
-    // range check ever runs. TERM-CFG-04/05 already cover the range refusals
-    // (0, 70000); this is the branch above them.
+    // TERM-CFG-12: --term-port and --fps reject a non-numeric value before the
+    // range check ever runs. TERM-CFG-05/06/07 already cover the range refusals
+    // (--term-port 0 and 70000, --fps 0); this is the branch above them.
     void testNonNumericTermPortAndFpsAreRefused()
     {
         QCOMPARE(runParseArgs({"--term-port", "abc"}).exitCode, 1);
         QCOMPARE(runParseArgs({"--fps", "abc"}).exitCode, 1);
     }
 
-    // TERM-CFG-11: a --cdp URL that parses but carries an unusable scheme is
+    // TERM-CFG-13: a --cdp URL that parses but carries an unusable scheme is
     // refused by the general validator rather than the wss:// special case
     // (TERM-CFG-09), as is a string that is not a URL at all.
     void testCdpUrlWithUnusableSchemeIsRefused()

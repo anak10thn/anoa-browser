@@ -731,11 +731,17 @@ private slots:
         QVERIFY2(!row.contains("page 1"), row.constData());
 
         // Clearing both falls back to the frame-level state, which is still
-        // "connected" here because a frame did arrive.
+        // "connected" here because a frame did arrive. All three sources have
+        // to be checked gone, not just the fallback: asserting only the absence
+        // of "connection lost" would pass just as happily if a cleared status
+        // or link were still being painted.
         ui.onStatus(QString());
         ui.onLink(QString());
         QVERIFY(feed(ui, QByteArray()));
         row = statusRow(capture.take());
+        QVERIFY2(row.contains("cdp h:1 40x20 [halfblock]"), row.constData());
+        QVERIFY2(!row.contains("reconnecting"), row.constData());
+        QVERIFY2(!row.contains("page 1"), row.constData());
         QVERIFY2(!row.contains("connection lost"), row.constData());
     }
 

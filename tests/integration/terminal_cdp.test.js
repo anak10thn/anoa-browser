@@ -137,7 +137,7 @@ const SCREENSHOT = makePng(IMAGE_W, IMAGE_H).toString('base64');
  * `targets` is what /json/list returns; pass [] for the empty-list failure
  * path, or `listBody` to answer with a byte string that is not JSON at all.
  * Every frame the client sends is recorded, so a test asserts on
- * `endpoint.calls` (all of them) or `endpoint.inputs` (the Input.* subset).
+ * `endpoint.calls` (all of them) or `endpoint.inputsOf(method)` (one method).
  */
 async function startFakeCdp({ port, targets, metrics = true, listBody = null } = {}) {
   const httpPaths = [];
@@ -204,10 +204,7 @@ async function startFakeCdp({ port, targets, metrics = true, listBody = null } =
     httpPaths,
     wsPaths,
     calls,
-    get inputs() {
-      return calls.filter((c) => c.method.startsWith('Input.'));
-    },
-    /** Every Input.* call of one method, most recent last. */
+    /** Every call of one CDP method, most recent last. */
     inputsOf(method) {
       return calls.filter((c) => c.method === method);
     },
@@ -339,7 +336,6 @@ describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal --cdp against a fake CDP endp
 
     const RENDER_SCROLL_ANGLE_DELTA = 120; // what terminal_ui.cpp hands the seam
     expect(wheels[0].params.deltaY).toBe(-RENDER_SCROLL_ANGLE_DELTA);
-    expect(Math.sign(wheels[0].params.deltaY)).toBe(-Math.sign(RENDER_SCROLL_ANGLE_DELTA));
     expect(wheels[0].params.deltaX).toBe(0);
 
     // And the opposite notch is the opposite sign, so the assertion above is
