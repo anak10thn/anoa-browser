@@ -179,11 +179,112 @@ describe('Agent CLI (Suite 8)', () => {
   // AGENT-12: grouped help, and the group names it advertises.
   it('help is grouped and every advertised group exists', () => {
     assert.equal(run(['help']).code, 0);
-    for (const group of ['browser', 'navigate', 'inspect', 'interact', 'capture', 'agents']) {
+    for (const group of ['browser', 'navigate', 'inspect', 'interact',
+                         'state', 'debug', 'capture', 'agents']) {
       const one = run(['help', group]);
       assert.equal(one.code, 0, `help ${group} failed`);
       assert.ok(one.out.length > 0, `help ${group} printed nothing`);
     }
     assert.equal(run(['help', 'nope']).code, 2);
+  });
+
+  // AGENT-13: find returns refs, so its output feeds every other command.
+  it('find locates by role, text and selector, and returns usable refs', () => {
+    anoa('open', 'example.com');
+    const byRole = anoa('find', 'role', 'link', '--json');
+    assert.equal(byRole.code, 0, byRole.err);
+    const first = JSON.parse(byRole.out).matches[0];
+    assert.ok(first, 'no link found on example.com');
+    assert.match(first.ref, /^@e\d+$/);
+
+    // The ref find minted must work in the next process, like snapshot's do.
+    assert.match(anoa('get', 'attr', first.ref, 'href').out, /^https?:\/\//);
+
+    assert.equal(anoa('find', 'text', 'Learn more').code, 0);
+    assert.equal(anoa('find', 'selector', 'a').code, 0);
+    // No match is a failure, not an empty success — an agent branches on this.
+    assert.equal(anoa('find', 'text', 'definitely-not-on-this-page').code, 1);
+  });
+
+  // AGENT-14: cookies and storage survive between processes, which is the
+  // whole reason they are worth having as commands.
+  it('cookies and storage round-trip across processes', () => {
+    anoa('open', 'example.com');
+
+    assert.equal(anoa('cookies', 'set', 'sid', 'abc123').code, 0);
+    assert.match(anoa('cookies').out, /sid=abc123/);
+    assert.equal(anoa('cookies', 'clear').code, 0);
+
+    assert.equal(anoa('storage', 'local', 'set', 'token', 'xyz789').code, 0);
+    assert.equal(anoa('storage', 'local', 'token').out, 'xyz789');
+    assert.equal(anoa('storage', 'local', 'clear').code, 0);
+    assert.match(anoa('storage', 'local').out, /empty/);
+  });
+
+  // AGENT-15: emulation actually reaches the page, checked by asking the page.
+  it('set viewport and device change what the page sees', () => {
+    assert.equal(anoa('set', 'viewport', '800', '600').code, 0);
+    assert.equal(anoa('eval', 'window.innerWidth').out, '800');
+
+    assert.equal(anoa('set', 'device', 'iphone-14').code, 0);
+    assert.equal(anoa('eval', 'window.innerWidth').out, '390');
+
+    // No name lists the presets rather than erroring.
+    assert.match(anoa('set', 'device').out, /iphone-14/);
+    assert.equal(anoa('set', 'device', 'no-such-phone').code, 1);
+  });
+
+  // AGENT-16: the recorders. Written by one process, read by another — a
+  // one-shot command cannot subscribe to CDP events in time, so this is the
+  // only shape that can report what already happened.
+  it('console, errors and network report what happened before the command ran', () => {
+    anoa('open', 'example.com');
+    anoa('console', '--clear');
+
+    anoa('eval', "console.log('recorded-marker'); console.warn('warn-marker'); 'ok'");
+    const log = anoa('console');
+    assert.equal(log.code, 0, log.err);
+    assert.match(log.out, /recorded-marker/);
+    assert.match(log.out, /warn-marker/);
+    assert.match(anoa('console', '--level', 'warn').out, /warn-marker/);
+
+    anoa('eval', "setTimeout(function(){ null.boom; }, 0); 'armed'");
+    anoa('wait', '--ms', '600');
+    assert.match(anoa('errors').out, /TypeError/);
+
+    anoa('eval', 'fetch(location.href).then(function(){return 0;}); "fired"');
+    anoa('wait', '--ms', '1200');
+    assert.match(anoa('network').out, /GET\s+200/);
+
+    anoa('console', '--clear');
+    assert.match(anoa('console').out, /nothing recorded/);
+  });
+
+  // AGENT-17: the richer waits, including the one that must not mistake a
+  // throwing expression for a failure.
+  it('wait handles text, url, fn and hidden', () => {
+    anoa('open', 'example.com');
+    assert.equal(anoa('wait', '--text', 'Example Domain', '--timeout', '5000').code, 0);
+    assert.equal(anoa('wait', '--url', 'example.com', '--timeout', '5000').code, 0);
+    // Throws until it does not — `window.__late` is undefined at first.
+    anoa('eval', 'setTimeout(function(){ window.__late = { ready: true }; }, 300); "armed"');
+    assert.equal(anoa('wait', '--fn', 'window.__late.ready', '--timeout', '5000').code, 0);
+    assert.equal(anoa('wait', '#nothing-here', '--state', 'hidden', '--timeout', '3000').code, 0);
+    // And a real timeout is a failure with a reason.
+    const late = anoa('wait', '--text', 'not-on-this-page', '--timeout', '1000');
+    assert.equal(late.code, 1);
+    assert.match(late.err, /timed out/);
+  });
+
+  // AGENT-18: the reference an agent is told to read must exist and describe
+  // the commands that exist.
+  it('skills get commands documents the real command set', () => {
+    const r = run(['skills', 'get', 'commands']);
+    assert.equal(r.code, 0);
+    for (const verb of ['snapshot', 'click', 'find', 'cookies', 'storage',
+                        'console', 'network', 'wait', 'screenshot']) {
+      assert.match(r.out, new RegExp(`anoa ${verb}`), `${verb} missing from the reference`);
+    }
+    assert.match(run(['skills', 'list']).out, /commands/);
   });
 });

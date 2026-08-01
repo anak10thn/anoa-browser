@@ -99,9 +99,89 @@ inline QLatin1String agentScript()
     return bits;
   }
 
+  // Console and network history have the same problem the refs do, in a harder
+  // form: a one-shot command attaches long after the interesting message was
+  // logged, so subscribing to CDP events at attach time is always too late.
+  // The answer is the same — keep the state in the page. These wrappers install
+  // once and buffer into window.__anoa, so `anoa console` reports what happened
+  // before it ran rather than what happens while it watches.
+  const LOG_CAP = 500;
+  function installRecorders(api) {
+    const push = (list, item) => {
+      list.push(item);
+      if (list.length > LOG_CAP) list.shift();
+    };
+
+    for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+      const original = console[level].bind(console);
+      console[level] = function (...args) {
+        try {
+          push(api.logs, {
+            level,
+            text: args.map(a => {
+              if (typeof a === 'string') return a;
+              try { return JSON.stringify(a); } catch (e) { return String(a); }
+            }).join(' ').slice(0, 2000),
+            t: Date.now(),
+          });
+        } catch (e) { /* never let recording break the page */ }
+        return original(...args);
+      };
+    }
+
+    addEventListener('error', e => push(api.errors, {
+      text: String(e.message || e.error || 'error'),
+      source: e.filename || '', line: e.lineno || 0, t: Date.now(),
+    }));
+    addEventListener('unhandledrejection', e => push(api.errors, {
+      text: 'unhandled rejection: ' + String((e.reason && e.reason.message) || e.reason),
+      source: '', line: 0, t: Date.now(),
+    }));
+
+    // fetch and XHR cover essentially all page traffic that an agent cares
+    // about. Document and subresource loads are not here — those need CDP's
+    // Network domain, which a one-shot process cannot have been subscribed to.
+    const origFetch = window.fetch;
+    if (origFetch) {
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const method = (init && init.method) || (input && input.method) || 'GET';
+        const started = Date.now();
+        return origFetch.apply(this, arguments).then(res => {
+          push(api.requests, { url, method, status: res.status, ms: Date.now() - started, t: started });
+          return res;
+        }, err => {
+          push(api.requests, { url, method, status: 0, error: String(err), ms: Date.now() - started, t: started });
+          throw err;
+        });
+      };
+    }
+
+    const origOpen = XMLHttpRequest.prototype.open;
+    const origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      this.__anoaReq = { url: String(url), method: String(method) };
+      return origOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function () {
+      const req = this.__anoaReq;
+      if (req) {
+        const started = Date.now();
+        this.addEventListener('loadend', () => {
+          push(api.requests, { url: req.url, method: req.method, status: this.status,
+                               ms: Date.now() - started, t: started });
+        });
+      }
+      return origSend.apply(this, arguments);
+    };
+  }
+
   const api = {
     v: 1,
     n: 0,
+    logs: [],
+    errors: [],
+    requests: [],
 
     // Walks the document once, assigning a ref to every interactive element
     // that does not already carry one. Existing refs are preserved so an agent
@@ -238,8 +318,92 @@ inline QLatin1String agentScript()
         size: { w: window.innerWidth, h: window.innerHeight },
       };
     },
+
+    // ── find ────────────────────────────────────────────────────────────────
+    //
+    // Locating an element by what it *is* rather than by where it sits in the
+    // DOM. Returns refs, so the result is usable by every other command.
+    find(kind, needle, nth) {
+      let pool = [];
+      const all = Array.from(document.querySelectorAll('*')).filter(visible);
+      if (kind === 'role') {
+        pool = all.filter(el => role(el) === needle);
+      } else if (kind === 'text') {
+        const want = String(needle).toLowerCase();
+        // Deepest match wins: a <button> inside a <div> both "contain" the
+        // text, and the button is what someone means.
+        pool = all.filter(el => {
+          const t = (el.textContent || '').toLowerCase();
+          if (!t.includes(want)) return false;
+          return !Array.from(el.children).some(c =>
+            (c.textContent || '').toLowerCase().includes(want));
+        });
+      } else if (kind === 'selector') {
+        try { pool = Array.from(document.querySelectorAll(needle)).filter(visible); }
+        catch (e) { return { error: 'bad selector: ' + needle }; }
+      } else {
+        return { error: 'find takes role, text or selector' };
+      }
+
+      const out = pool.map(el => {
+        let ref = el.getAttribute('data-anoa-ref');
+        if (!ref) {
+          ref = 'e' + (++api.n);
+          el.setAttribute('data-anoa-ref', ref);
+        }
+        return { ref: '@' + ref, role: role(el), name: name(el),
+                 tag: el.tagName.toLowerCase() };
+      });
+      if (typeof nth === 'number' && nth > 0) {
+        return { matches: out[nth - 1] ? [out[nth - 1]] : [], total: out.length };
+      }
+      return { matches: out, total: out.length };
+    },
+
+    // ── waits that need the page ─────────────────────────────────────────────
+    hasText(text) {
+      return { found: (document.body.innerText || '').includes(text) };
+    },
+    isHidden(selector) {
+      const el = api.resolve(selector);
+      return { hidden: !el || !visible(el) };
+    },
+
+    // ── storage ─────────────────────────────────────────────────────────────
+    storage(area, action, key, value) {
+      const store = area === 'session' ? sessionStorage : localStorage;
+      if (action === 'clear') { store.clear(); return { ok: true }; }
+      if (action === 'set') { store.setItem(key, value); return { ok: true }; }
+      if (action === 'remove') { store.removeItem(key); return { ok: true }; }
+      if (key) return { key, value: store.getItem(key) };
+      const all = {};
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        all[k] = store.getItem(k);
+      }
+      return { items: all, count: store.length };
+    },
+
+    // ── recorded history ────────────────────────────────────────────────────
+    console(level) {
+      const list = level ? api.logs.filter(l => l.level === level) : api.logs;
+      return { entries: list, count: list.length };
+    },
+    pageErrors() {
+      return { entries: api.errors, count: api.errors.length };
+    },
+    network() {
+      return { entries: api.requests, count: api.requests.length };
+    },
+    clearHistory() {
+      api.logs.length = 0;
+      api.errors.length = 0;
+      api.requests.length = 0;
+      return { ok: true };
+    },
   };
 
+  installRecorders(api);
   window.__anoa = api;
   return "ready";
 })()

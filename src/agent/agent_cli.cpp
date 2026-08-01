@@ -457,10 +457,30 @@ int cmdEval(Session &s, QStringList args, bool json)
 
 int cmdWait(Session &s, QStringList args)
 {
-    const QString selector = takeOption(args, QStringLiteral("--selector"));
-    const QString msText = takeOption(args, QStringLiteral("--ms"));
-    const bool load = takeFlag(args, QStringLiteral("--load")) || (selector.isEmpty() && msText.isEmpty());
     const int budget = takeOption(args, QStringLiteral("--timeout"), QStringLiteral("15000")).toInt();
+    const QString state = takeOption(args, QStringLiteral("--state"));
+    const QString text = takeOption(args, QStringLiteral("--text"));
+    const QString url = takeOption(args, QStringLiteral("--url"));
+    const QString fn = takeOption(args, QStringLiteral("--fn"));
+    QString selector = takeOption(args, QStringLiteral("--selector"));
+    QString msText = takeOption(args, QStringLiteral("--ms"));
+    const bool loadFlag = takeFlag(args, QStringLiteral("--load"));
+
+    // A bare positional is whichever of the two it looks like: `wait 500` is a
+    // duration, `wait "#results"` is a selector. Safe to guess, because a
+    // selector made only of digits would match nothing anyway.
+    if (!args.isEmpty() && selector.isEmpty() && msText.isEmpty()) {
+        bool numeric = false;
+        args.first().toInt(&numeric);
+        if (numeric)
+            msText = args.takeFirst();
+        else
+            selector = args.takeFirst();
+    }
+
+    const bool load = loadFlag
+                      || (selector.isEmpty() && msText.isEmpty() && text.isEmpty()
+                          && url.isEmpty() && fn.isEmpty());
 
     if (!msText.isEmpty()) {
         QEventLoop loop;
@@ -469,26 +489,42 @@ int cmdWait(Session &s, QStringList args)
         return Ok;
     }
 
+    // One condition expressed as JavaScript, whichever flag asked for it, so
+    // the poll loop below stays a single thing rather than a branch per form.
+    QString probe, what;
+    if (load) {
+        probe = QStringLiteral("document.readyState === 'complete'");
+        what = QStringLiteral("the page to finish loading");
+    } else if (!text.isEmpty()) {
+        probe = QStringLiteral("__anoa.hasText(%1).found").arg(jsString(text));
+        what = QStringLiteral("the text \"%1\"").arg(text);
+    } else if (!url.isEmpty()) {
+        probe = QStringLiteral("location.href.includes(%1)").arg(jsString(url));
+        what = QStringLiteral("the url to contain \"%1\"").arg(url);
+    } else if (!fn.isEmpty()) {
+        probe = QStringLiteral("!!(%1)").arg(fn);
+        what = QStringLiteral("the condition");
+    } else if (state == QStringLiteral("hidden")) {
+        probe = QStringLiteral("__anoa.isHidden(%1).hidden").arg(jsString(selector));
+        what = QStringLiteral("%1 to disappear").arg(selector);
+    } else {
+        probe = QStringLiteral("__anoa.exists(%1).found").arg(jsString(selector));
+        what = QStringLiteral("%1 to appear").arg(selector);
+    }
+
     QElapsedTimer clock;
     clock.start();
     QString e;
     while (clock.elapsed() < budget) {
-        if (load) {
-            if (s.evaluate(QStringLiteral("document.readyState"), &e).toString()
-                == QStringLiteral("complete"))
-                return Ok;
-        } else {
-            const QJsonValue v =
-                s.evaluate(QStringLiteral("__anoa.exists(%1)").arg(jsString(selector)), &e);
-            if (v.toObject().value(QStringLiteral("found")).toBool())
-                return Ok;
-        }
+        // A throwing --fn means "not yet", not "broken": `window.app.ready`
+        // throws until `app` exists, which is precisely what is being awaited.
+        if (s.evaluate(probe, &e).toBool())
+            return Ok;
         QEventLoop wait;
         QTimer::singleShot(100, &wait, &QEventLoop::quit);
         wait.exec();
     }
-    return fail(load ? QStringLiteral("page did not finish loading in %1ms").arg(budget)
-                     : QStringLiteral("%1 did not appear in %2ms").arg(selector).arg(budget));
+    return fail(QStringLiteral("timed out after %1ms waiting for %2").arg(budget).arg(what));
 }
 
 int cmdScroll(Session &s, QStringList args)
@@ -563,6 +599,381 @@ int cmdPdf(Session &s, QStringList args)
     return writeDecoded(path, r.result.value(QStringLiteral("data")).toString(), "pdf");
 }
 
+// ── cookies ─────────────────────────────────────────────────────────────────
+
+int cmdCookies(Session &s, QStringList args, bool json)
+{
+    const QString action = args.isEmpty() ? QStringLiteral("get") : args.takeFirst();
+
+    if (action == QStringLiteral("clear")) {
+        const CdpResult r = s.call(QStringLiteral("Network.clearBrowserCookies"));
+        return r.ok ? Ok : fail(QStringLiteral("clear failed: %1").arg(r.errorMessage));
+    }
+
+    if (action == QStringLiteral("set")) {
+        if (args.size() < 2)
+            return fail(QStringLiteral("cookies set needs a name and a value"), Usage);
+        QString e;
+        const QJsonValue info = s.evaluate(QStringLiteral("__anoa.info()"), &e);
+        QJsonObject p;
+        p[QStringLiteral("name")] = args.at(0);
+        p[QStringLiteral("value")] = args.at(1);
+        // Scope it to the page being viewed unless told otherwise — a cookie
+        // with no url is rejected, and guessing a domain is worse than using
+        // the one the user is looking at.
+        p[QStringLiteral("url")] = takeOption(args, QStringLiteral("--url"),
+                                              info.toObject().value(QStringLiteral("url")).toString());
+        const CdpResult r = s.call(QStringLiteral("Network.setCookie"), p);
+        if (!r.ok)
+            return fail(QStringLiteral("set failed: %1").arg(r.errorMessage));
+        if (!r.result.value(QStringLiteral("success")).toBool(true))
+            return fail(QStringLiteral("the browser refused the cookie"));
+        out() << "set " << args.at(0) << Qt::endl;
+        return Ok;
+    }
+
+    if (action != QStringLiteral("get"))
+        return fail(QStringLiteral("cookies takes get, set or clear"), Usage);
+
+    const CdpResult r = s.call(QStringLiteral("Network.getCookies"));
+    if (!r.ok)
+        return fail(QStringLiteral("cookies failed: %1").arg(r.errorMessage));
+    const QJsonArray cookies = r.result.value(QStringLiteral("cookies")).toArray();
+    if (json) {
+        printJson(QJsonObject{{"cookies", cookies}, {"count", cookies.size()}});
+    } else {
+        for (const QJsonValue &c : cookies) {
+            const QJsonObject o = c.toObject();
+            out() << QStringLiteral("%1  %2=%3")
+                         .arg(o.value(QStringLiteral("domain")).toString(), -28)
+                         .arg(o.value(QStringLiteral("name")).toString(),
+                              o.value(QStringLiteral("value")).toString().left(60))
+                  << Qt::endl;
+        }
+        if (cookies.isEmpty())
+            out() << "no cookies" << Qt::endl;
+    }
+    return Ok;
+}
+
+// ── storage ─────────────────────────────────────────────────────────────────
+
+int cmdStorage(Session &s, QStringList args, bool json)
+{
+    if (args.isEmpty())
+        return fail(QStringLiteral("storage needs an area: local or session"), Usage);
+    const QString area = args.takeFirst();
+    if (area != QStringLiteral("local") && area != QStringLiteral("session"))
+        return fail(QStringLiteral("storage area must be local or session"), Usage);
+
+    QString action = QStringLiteral("get"), key, value;
+    if (!args.isEmpty()) {
+        if (args.first() == QStringLiteral("set") || args.first() == QStringLiteral("clear")
+            || args.first() == QStringLiteral("remove")) {
+            action = args.takeFirst();
+        }
+        if (!args.isEmpty())
+            key = args.takeFirst();
+        if (!args.isEmpty())
+            value = args.takeFirst();
+    }
+    if (action == QStringLiteral("set") && (key.isEmpty() || value.isNull()))
+        return fail(QStringLiteral("storage set needs a key and a value"), Usage);
+
+    QString e;
+    const QJsonValue v = s.evaluate(QStringLiteral("__anoa.storage(%1, %2, %3, %4)")
+                                        .arg(jsString(area), jsString(action),
+                                             key.isEmpty() ? QStringLiteral("null") : jsString(key),
+                                             value.isNull() ? QStringLiteral("null")
+                                                            : jsString(value)),
+                                    &e);
+    if (v.isNull() || v.isUndefined())
+        return fail(e.isEmpty() ? QStringLiteral("storage failed") : e);
+    const QJsonObject o = v.toObject();
+    if (json) {
+        printJson(o);
+    } else if (o.contains(QStringLiteral("items"))) {
+        const QJsonObject items = o.value(QStringLiteral("items")).toObject();
+        for (auto it = items.begin(); it != items.end(); ++it)
+            out() << QStringLiteral("%1  %2").arg(it.key(), -24).arg(it.value().toString().left(80))
+                  << Qt::endl;
+        if (items.isEmpty())
+            out() << "empty" << Qt::endl;
+    } else if (o.contains(QStringLiteral("value"))) {
+        out() << o.value(QStringLiteral("value")).toVariant().toString() << Qt::endl;
+    } else {
+        out() << "ok" << Qt::endl;
+    }
+    return Ok;
+}
+
+// ── set: viewport, device, geolocation, offline, headers, media ─────────────
+
+// A small table rather than a device database. These are the ones people
+// actually name; anything else is `set viewport w h scale`, which is what the
+// presets expand to anyway.
+struct DevicePreset {
+    const char *name;
+    int width;
+    int height;
+    double scale;
+    bool mobile;
+};
+const DevicePreset kDevices[] = {
+    {"iphone-se", 375, 667, 2.0, true},   {"iphone-14", 390, 844, 3.0, true},
+    {"iphone-14-pro-max", 430, 932, 3.0, true}, {"pixel-7", 412, 915, 2.625, true},
+    {"ipad", 810, 1080, 2.0, true},       {"ipad-pro", 1024, 1366, 2.0, true},
+    {"desktop", 1280, 720, 1.0, false},   {"desktop-hidpi", 1440, 900, 2.0, false},
+};
+
+int applyViewport(Session &s, int w, int h, double scale, bool mobile)
+{
+    QJsonObject p;
+    p[QStringLiteral("width")] = w;
+    p[QStringLiteral("height")] = h;
+    p[QStringLiteral("deviceScaleFactor")] = scale;
+    p[QStringLiteral("mobile")] = mobile;
+    const CdpResult r = s.call(QStringLiteral("Emulation.setDeviceMetricsOverride"), p);
+    if (!r.ok)
+        return fail(QStringLiteral("viewport failed: %1").arg(r.errorMessage));
+    out() << w << "x" << h << " @" << scale << (mobile ? " mobile" : "") << Qt::endl;
+    return Ok;
+}
+
+int cmdSet(Session &s, QStringList args)
+{
+    if (args.isEmpty())
+        return fail(QStringLiteral("set takes viewport, device, geo, offline, headers or media"),
+                    Usage);
+    const QString what = args.takeFirst();
+
+    if (what == QStringLiteral("viewport")) {
+        if (args.size() < 2)
+            return fail(QStringLiteral("set viewport needs a width and a height"), Usage);
+        const double scale = args.size() > 2 ? args.at(2).toDouble() : 1.0;
+        return applyViewport(s, args.at(0).toInt(), args.at(1).toInt(),
+                             scale > 0 ? scale : 1.0, false);
+    }
+
+    if (what == QStringLiteral("device")) {
+        if (args.isEmpty()) {
+            for (const DevicePreset &d : kDevices)
+                out() << QStringLiteral("  %1  %2x%3 @%4")
+                             .arg(QLatin1String(d.name), -20)
+                             .arg(d.width).arg(d.height).arg(d.scale)
+                      << Qt::endl;
+            return Ok;
+        }
+        const QString wanted = args.first().toLower().replace(QLatin1Char(' '), QLatin1Char('-'));
+        for (const DevicePreset &d : kDevices) {
+            if (wanted == QLatin1String(d.name))
+                return applyViewport(s, d.width, d.height, d.scale, d.mobile);
+        }
+        return fail(QStringLiteral("no device preset '%1' — run `anoa set device` for the list")
+                        .arg(args.first()));
+    }
+
+    if (what == QStringLiteral("geo")) {
+        if (args.size() < 2)
+            return fail(QStringLiteral("set geo needs a latitude and a longitude"), Usage);
+        QJsonObject p;
+        p[QStringLiteral("latitude")] = args.at(0).toDouble();
+        p[QStringLiteral("longitude")] = args.at(1).toDouble();
+        p[QStringLiteral("accuracy")] = 10;
+        const CdpResult r = s.call(QStringLiteral("Emulation.setGeolocationOverride"), p);
+        return r.ok ? Ok : fail(QStringLiteral("geo failed: %1").arg(r.errorMessage));
+    }
+
+    if (what == QStringLiteral("offline")) {
+        const bool on = args.isEmpty() || args.first() != QStringLiteral("off");
+        QJsonObject p;
+        p[QStringLiteral("offline")] = on;
+        p[QStringLiteral("latency")] = 0;
+        p[QStringLiteral("downloadThroughput")] = -1;
+        p[QStringLiteral("uploadThroughput")] = -1;
+        const CdpResult r = s.call(QStringLiteral("Network.emulateNetworkConditions"), p);
+        if (!r.ok)
+            return fail(QStringLiteral("offline failed: %1").arg(r.errorMessage));
+        out() << (on ? "offline" : "online") << Qt::endl;
+        return Ok;
+    }
+
+    if (what == QStringLiteral("headers")) {
+        if (args.isEmpty())
+            return fail(QStringLiteral("set headers needs a JSON object"), Usage);
+        QJsonParseError perr{};
+        const QJsonDocument doc = QJsonDocument::fromJson(args.first().toUtf8(), &perr);
+        if (!doc.isObject())
+            return fail(QStringLiteral("headers must be a JSON object: %1").arg(perr.errorString()),
+                        Usage);
+        QJsonObject p;
+        p[QStringLiteral("headers")] = doc.object();
+        const CdpResult r = s.call(QStringLiteral("Network.setExtraHTTPHeaders"), p);
+        return r.ok ? Ok : fail(QStringLiteral("headers failed: %1").arg(r.errorMessage));
+    }
+
+    if (what == QStringLiteral("media")) {
+        const QString scheme = args.isEmpty() ? QStringLiteral("light") : args.first();
+        QJsonObject feature;
+        feature[QStringLiteral("name")] = QStringLiteral("prefers-color-scheme");
+        feature[QStringLiteral("value")] = scheme;
+        QJsonObject p;
+        p[QStringLiteral("features")] = QJsonArray{feature};
+        const CdpResult r = s.call(QStringLiteral("Emulation.setEmulatedMedia"), p);
+        if (!r.ok)
+            return fail(QStringLiteral("media failed: %1").arg(r.errorMessage));
+        out() << scheme << Qt::endl;
+        return Ok;
+    }
+
+    return fail(QStringLiteral("unknown set target: %1").arg(what), Usage);
+}
+
+// ── find ────────────────────────────────────────────────────────────────────
+
+int cmdFind(Session &s, QStringList args, bool json)
+{
+    if (args.size() < 2)
+        return fail(QStringLiteral("find needs a kind and a value — "
+                                   "try: anoa find role button"),
+                    Usage);
+    const QString kind = args.takeFirst();
+    const QString needle = args.takeFirst();
+    const int nth = takeOption(args, QStringLiteral("--nth"), QStringLiteral("0")).toInt();
+
+    QString e;
+    const QJsonValue v = s.evaluate(QStringLiteral("__anoa.find(%1, %2, %3)")
+                                        .arg(jsString(kind), jsString(needle))
+                                        .arg(nth),
+                                    &e);
+    const QJsonObject o = v.toObject();
+    if (o.contains(QStringLiteral("error")))
+        return fail(o.value(QStringLiteral("error")).toString());
+    if (v.isNull() || v.isUndefined())
+        return fail(e.isEmpty() ? QStringLiteral("find failed") : e);
+
+    if (json) {
+        printJson(o);
+        return Ok;
+    }
+    const QJsonArray matches = o.value(QStringLiteral("matches")).toArray();
+    for (const QJsonValue &m : matches) {
+        const QJsonObject el = m.toObject();
+        out() << QStringLiteral("  %1  %2  %3")
+                     .arg(el.value(QStringLiteral("ref")).toString(), -5)
+                     .arg(el.value(QStringLiteral("role")).toString(), -9)
+                     .arg(el.value(QStringLiteral("name")).toString())
+              << Qt::endl;
+    }
+    if (matches.isEmpty()) {
+        out() << "no match" << Qt::endl;
+        return Failed;
+    }
+    return Ok;
+}
+
+// ── console, errors, network ────────────────────────────────────────────────
+
+int cmdRecorded(Session &s, const QString &verb, QStringList args, bool json)
+{
+    if (takeFlag(args, QStringLiteral("--clear"))) {
+        QString e;
+        s.evaluate(QStringLiteral("__anoa.clearHistory()"), &e);
+        return e.isEmpty() ? Ok : fail(e);
+    }
+
+    const QString level = takeOption(args, QStringLiteral("--level"));
+    QString call;
+    if (verb == QStringLiteral("console"))
+        call = QStringLiteral("__anoa.console(%1)")
+                   .arg(level.isEmpty() ? QStringLiteral("null") : jsString(level));
+    else if (verb == QStringLiteral("errors"))
+        call = QStringLiteral("__anoa.pageErrors()");
+    else
+        call = QStringLiteral("__anoa.network()");
+
+    QString e;
+    const QJsonValue v = s.evaluate(call, &e);
+    if (v.isNull() || v.isUndefined())
+        return fail(e.isEmpty() ? QStringLiteral("%1 failed").arg(verb) : e);
+    const QJsonObject o = v.toObject();
+
+    if (json) {
+        printJson(o);
+        return Ok;
+    }
+    const QJsonArray entries = o.value(QStringLiteral("entries")).toArray();
+    for (const QJsonValue &en : entries) {
+        const QJsonObject x = en.toObject();
+        if (verb == QStringLiteral("network")) {
+            out() << QStringLiteral("  %1  %2  %3ms  %4")
+                         .arg(x.value(QStringLiteral("method")).toString(), -6)
+                         .arg(x.value(QStringLiteral("status")).toInt())
+                         .arg(x.value(QStringLiteral("ms")).toInt())
+                         .arg(x.value(QStringLiteral("url")).toString())
+                  << Qt::endl;
+        } else if (verb == QStringLiteral("errors")) {
+            out() << "  " << x.value(QStringLiteral("text")).toString();
+            const QString src = x.value(QStringLiteral("source")).toString();
+            if (!src.isEmpty())
+                out() << "  (" << src << ":" << x.value(QStringLiteral("line")).toInt() << ")";
+            out() << Qt::endl;
+        } else {
+            out() << QStringLiteral("  %1  %2")
+                         .arg(x.value(QStringLiteral("level")).toString(), -5)
+                         .arg(x.value(QStringLiteral("text")).toString())
+                  << Qt::endl;
+        }
+    }
+    if (entries.isEmpty()) {
+        // Say why it might be empty rather than leaving the agent guessing:
+        // the recorder only sees what happened after the page last loaded.
+        out() << "nothing recorded since the page loaded" << Qt::endl;
+    }
+    return Ok;
+}
+
+// ── mouse ───────────────────────────────────────────────────────────────────
+
+int cmdMouse(Session &s, QStringList args)
+{
+    if (args.isEmpty())
+        return fail(QStringLiteral("mouse takes move, down, up or wheel"), Usage);
+    const QString action = args.takeFirst();
+
+    QJsonObject p;
+    if (action == QStringLiteral("wheel")) {
+        if (args.isEmpty())
+            return fail(QStringLiteral("mouse wheel needs a dy"), Usage);
+        p[QStringLiteral("type")] = QStringLiteral("mouseWheel");
+        p[QStringLiteral("x")] = args.size() > 2 ? args.at(1).toInt() : 10;
+        p[QStringLiteral("y")] = args.size() > 2 ? args.at(2).toInt() : 10;
+        p[QStringLiteral("deltaY")] = args.at(0).toInt();
+        p[QStringLiteral("deltaX")] = 0;
+    } else {
+        if (args.size() < 2 && action == QStringLiteral("move"))
+            return fail(QStringLiteral("mouse move needs x and y"), Usage);
+        p[QStringLiteral("x")] = args.size() > 0 ? args.at(0).toInt() : 0;
+        p[QStringLiteral("y")] = args.size() > 1 ? args.at(1).toInt() : 0;
+        p[QStringLiteral("button")] = QStringLiteral("left");
+        if (action == QStringLiteral("move")) {
+            p[QStringLiteral("type")] = QStringLiteral("mouseMoved");
+        } else if (action == QStringLiteral("down")) {
+            p[QStringLiteral("type")] = QStringLiteral("mousePressed");
+            p[QStringLiteral("clickCount")] = 1;
+            p[QStringLiteral("buttons")] = 1;
+        } else if (action == QStringLiteral("up")) {
+            p[QStringLiteral("type")] = QStringLiteral("mouseReleased");
+            p[QStringLiteral("clickCount")] = 1;
+            p[QStringLiteral("buttons")] = 0;
+        } else {
+            return fail(QStringLiteral("unknown mouse action: %1").arg(action), Usage);
+        }
+    }
+    const CdpResult r = s.call(QStringLiteral("Input.dispatchMouseEvent"), p);
+    return r.ok ? Ok : fail(QStringLiteral("mouse failed: %1").arg(r.errorMessage));
+}
+
 int cmdStatus(Session &s, bool json)
 {
     QString e;
@@ -595,7 +1006,10 @@ bool isAgentCommand(const QString &verb)
         QStringLiteral("wait"),   QStringLiteral("scroll"),   QStringLiteral("back"),
         QStringLiteral("forward"), QStringLiteral("reload"),  QStringLiteral("screenshot"),
         QStringLiteral("pdf"),    QStringLiteral("status"),   QStringLiteral("skills"),
-        QStringLiteral("help"),
+        QStringLiteral("help"),   QStringLiteral("cookies"),  QStringLiteral("storage"),
+        QStringLiteral("set"),    QStringLiteral("find"),     QStringLiteral("console"),
+        QStringLiteral("errors"), QStringLiteral("network"),  QStringLiteral("mouse"),
+        QStringLiteral("close"),
     };
     return verbs.contains(verb);
 }
@@ -663,6 +1077,28 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
         return cmdPdf(session, args);
     if (verb == QStringLiteral("status"))
         return cmdStatus(session, json);
+    if (verb == QStringLiteral("cookies"))
+        return cmdCookies(session, args, json);
+    if (verb == QStringLiteral("storage"))
+        return cmdStorage(session, args, json);
+    if (verb == QStringLiteral("set"))
+        return cmdSet(session, args);
+    if (verb == QStringLiteral("find"))
+        return cmdFind(session, args, json);
+    if (verb == QStringLiteral("console") || verb == QStringLiteral("errors")
+        || verb == QStringLiteral("network"))
+        return cmdRecorded(session, verb, args, json);
+    if (verb == QStringLiteral("mouse"))
+        return cmdMouse(session, args);
+    if (verb == QStringLiteral("close")) {
+        const CdpResult r = session.call(QStringLiteral("Browser.close"));
+        // QtWebEngine does not implement Browser.close; say so plainly rather
+        // than reporting a CDP error the user cannot act on.
+        if (!r.ok)
+            return fail(QStringLiteral("this browser cannot be closed over CDP — "
+                                       "stop the process that started it"));
+        return Ok;
+    }
 
     return fail(QStringLiteral("unknown command: %1").arg(verb), Usage);
 }

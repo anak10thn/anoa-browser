@@ -103,7 +103,138 @@ typing. It attaches to the same running browser, so it can be left open in one
 pane while commands run in another.
 )";
 
-const char kIndex[] = R"(core   the workflow: start a browser, snapshot, act by ref
+const char kCommands[] = R"(# `anoa` command reference
+
+Every command attaches to a browser that is already running. Start one with
+`anoa --headless --port 9222 &`. Exit codes: `0` ok, `1` the command failed,
+`2` bad usage, `3` nothing is listening. Add `--json` to any command for
+structured output, and `--port` / `--host` / `--token` to reach a browser
+somewhere else.
+
+`<target>` below is either a ref from a snapshot (`@e2`) or any CSS selector.
+
+## Navigate
+
+| Command | Does |
+|---|---|
+| `anoa open <url>` | go to a url; the scheme is optional |
+| `anoa back` / `forward` / `reload` | move through history, one entry at a time |
+| `anoa wait --load` | wait for the page to finish loading |
+| `anoa wait <css>` | wait for an element to appear |
+| `anoa wait <css> --state hidden` | wait for one to go away |
+| `anoa wait --text "<text>"` | wait for text to appear anywhere on the page |
+| `anoa wait --url "<fragment>"` | wait for the url to contain something |
+| `anoa wait --fn "<js>"` | wait for a JS expression to be truthy |
+| `anoa wait --ms <n>` | wait a fixed time — the last resort |
+
+`--timeout <ms>` bounds any wait (default 15000). A bare argument is read as a
+duration when it is a number and as a selector otherwise.
+
+## Inspect
+
+| Command | Does |
+|---|---|
+| `anoa snapshot` | page outline plus interactive elements, with refs |
+| `anoa snapshot -i` | interactive elements only |
+| `anoa find role <role>` | locate by role: button, link, textbox, checkbox, … |
+| `anoa find text <text>` | locate by visible text; the deepest match wins |
+| `anoa find selector <css>` | locate by CSS, returned as refs |
+| `anoa get text [<target>]` | visible text of the page, or of one element |
+| `anoa get html <target>` | outer HTML |
+| `anoa get value <target>` | current form value |
+| `anoa get attr <target> <name>` | one attribute |
+| `anoa eval "<js>"` | evaluate an expression in the page |
+| `anoa status` | what the browser is attached to right now |
+
+`find` takes `--nth <n>` to keep only the nth match, 1-based.
+
+Prefer `get text` over `get html`: HTML costs far more tokens and rarely says
+more. Use `snapshot` when you need to *act*, `get text` when you need to *read*.
+
+## Interact
+
+| Command | Does |
+|---|---|
+| `anoa click <target>` | click, hit-tested — refuses if something covers it |
+| `anoa fill <target> <text>` | write into a field and fire input/change |
+| `anoa type <text>` | type into whatever has focus |
+| `anoa press <key>` | Enter, Tab, Escape, ArrowDown, … |
+| `anoa scroll [--up] [--by <px>]` | scroll the page |
+| `anoa scroll --top` / `--bottom` | jump to either end |
+| `anoa mouse move <x> <y>` | move the pointer |
+| `anoa mouse down` / `up [x] [y]` | press or release — for drags |
+| `anoa mouse wheel <dy> [x] [y]` | wheel at a position |
+
+## State
+
+| Command | Does |
+|---|---|
+| `anoa cookies` | list cookies |
+| `anoa cookies set <name> <value>` | write one, scoped to the current page |
+| `anoa cookies clear` | clear them all |
+| `anoa storage local` | everything in localStorage |
+| `anoa storage local <key>` | one key |
+| `anoa storage local set <k> <v>` | write one |
+| `anoa storage local remove <k>` | delete one |
+| `anoa storage local clear` | empty it |
+| `anoa storage session …` | the same, for sessionStorage |
+| `anoa set viewport <w> <h> [scale]` | resize the page |
+| `anoa set device [name]` | a preset; with no name, lists them |
+| `anoa set geo <lat> <lng>` | override geolocation |
+| `anoa set offline [on\|off]` | cut the page off from the network |
+| `anoa set headers '<json>'` | extra HTTP headers on every request |
+| `anoa set media dark\|light` | emulate prefers-color-scheme |
+
+`cookies set` scopes to the page you are on; pass `--url` to scope it elsewhere.
+
+## Debug
+
+| Command | Does |
+|---|---|
+| `anoa console [--level <lvl>]` | console output, newest last |
+| `anoa errors` | uncaught exceptions and rejections |
+| `anoa network` | fetch/XHR the page made: method, status, ms |
+
+All three take `--clear` to forget what has been recorded.
+
+These are recorded **inside the page**, which is what lets them report what
+happened *before* the command ran — a one-shot process could never have
+subscribed to the events in time. Consequences worth knowing:
+
+- The buffer starts empty on every page load. "nothing recorded since the page
+  loaded" means exactly that, not that nothing happened earlier.
+- It holds the last 500 entries of each kind.
+- Only `fetch` and `XMLHttpRequest` are seen. Document navigations, images,
+  stylesheets and other subresource loads are not.
+
+## Capture
+
+| Command | Does |
+|---|---|
+| `anoa screenshot [file]` | PNG of the viewport (default screenshot.png) |
+| `anoa pdf [file]` | PDF of the page (default page.pdf) |
+
+## Agents
+
+| Command | Does |
+|---|---|
+| `anoa help [group]` | grouped command list, or one group |
+| `anoa skills list` | what this binary carries |
+| `anoa skills get core` | the workflow: how to drive a page |
+| `anoa skills get commands` | this document |
+| `anoa close` | ask the browser to exit |
+
+## Not implemented
+
+Worth knowing so you do not reach for them: there is no React introspection, no
+Web Vitals, no accessibility audit, no credential vault, no MCP server, no
+plugin system, and no request interception — `anoa network` observes, it cannot
+block or rewrite. Tabs cannot be created over CDP either; the embedded engine
+does not implement `Target.createTarget`.
+)";
+
+const char kIndex[] = R"(core       the workflow: start a browser, snapshot, act by ref
+commands   every command, with its arguments
 )";
 
 QTextStream &out()
@@ -126,6 +257,10 @@ int runSkillsCommand(const QStringList &args)
         const QString name = args.size() > 1 ? args.at(1) : QStringLiteral("core");
         if (name == QStringLiteral("core")) {
             out() << QLatin1String(kCore);
+            return 0;
+        }
+        if (name == QStringLiteral("commands")) {
+            out() << QLatin1String(kCommands);
             return 0;
         }
         err << "anoa: no skill named '" << name << "' — try: anoa skills list" << Qt::endl;

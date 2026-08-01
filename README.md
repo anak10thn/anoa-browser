@@ -237,12 +237,49 @@ Clicks are hit-tested against the point they land on:
 anoa: @e7 is covered by <div> Accept cookies — dismiss it, then re-snapshot
 ```
 
+### Beyond the core loop
+
+```bash
+anoa find role button                 # locate by role, text or CSS — all return refs
+anoa find text "Sign in" --nth 2
+
+anoa cookies                          # cookies and storage
+anoa cookies set sid abc123
+anoa storage local set token xyz
+anoa storage session clear
+
+anoa set viewport 390 844 3           # emulation
+anoa set device iphone-14             # …or a preset; no name lists them
+anoa set media dark
+anoa set offline on
+
+anoa console                          # what the page logged
+anoa errors                           # uncaught exceptions
+anoa network                          # fetch/XHR it made: method, status, ms
+
+anoa wait --text "Welcome"            # richer waits
+anoa wait --url "/dashboard"
+anoa wait --fn "window.app?.ready"
+anoa wait "#spinner" --state hidden
+```
+
+`console`, `errors` and `network` are recorded **inside the page**, which is
+what lets them report what happened *before* the command ran — a one-shot
+process could never have subscribed to the events in time. The buffer resets on
+every page load and holds the last 500 entries; only `fetch` and `XMLHttpRequest`
+are seen, not document or subresource loads.
+
 Add `--json` to any command for structured output. Exit codes are meaningful:
 `0` success, `1` the command failed, `2` bad usage, `3` no browser is listening.
 
-`anoa help` lists every command grouped by what it does; `anoa help interact`
-prints one group. For agents, `anoa skills get core` prints the full workflow
-straight from the binary, so instructions can never drift from the CLI.
+`anoa help` lists every command grouped by what it does; `anoa help state`
+prints one group. For agents, **`anoa skills get commands`** is the full
+reference and `anoa skills get core` is the workflow — both printed straight
+from the binary, so instructions can never drift from the CLI you have.
+
+Not implemented, so you know not to reach for them: React introspection, Web
+Vitals, accessibility audits, a credential vault, an MCP server, plugins, and
+request interception — `anoa network` observes, it cannot block or rewrite.
 
 ---
 
