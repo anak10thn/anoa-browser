@@ -162,8 +162,26 @@ done
 unset IFS
 
 if [ "$on_path" -eq 1 ]; then
-    say ""
-    say "Try it:  anoa terminal"
+    # Being on PATH is not the same as winning it. An earlier install through
+    # Homebrew or a package manager keeps answering to `anoa` from a directory
+    # that comes first, so the version just installed is not the one that runs
+    # and the bug it fixed appears to survive the upgrade.
+    winner="$(command -v anoa 2>/dev/null || true)"
+    if [ -n "$winner" ] && [ "$winner" != "$LINK" ] \
+       && [ "$(readlink -f "$winner" 2>/dev/null)" != "$(readlink -f "$LINK" 2>/dev/null)" ]; then
+        other_version="$("$winner" --version 2>/dev/null | head -1)"
+        warn ""
+        warn "Another anoa comes first on your PATH and will run instead:"
+        warn "  ${winner}${other_version:+  (${other_version})}"
+        warn "  just installed: ${LINK}  (${VERSION})"
+        warn ""
+        warn "Remove the other one, or put ${BIN_DIR} ahead of it."
+        say ""
+        say "Try this one directly:  ${LINK} terminal"
+    else
+        say ""
+        say "Try it:  anoa terminal"
+    fi
 else
     say ""
     warn "${BIN_DIR} is not on your PATH. Add it:"
