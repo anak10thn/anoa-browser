@@ -338,4 +338,20 @@ describe('Agent CLI (Suite 8)', () => {
     }
     assert.match(run(['skills', 'list']).out, /commands/);
   });
+
+  // AGENT-19: a mistyped subcommand has to be reported as one. Nothing reads
+  // positionalArguments(), so the word used to be discarded and a browser
+  // started in its place — a stray window on a desktop, and SIGABRT under
+  // "Could not load the Qt platform plugin xcb" over SSH.
+  it('an unknown subcommand is an error, not a browser', () => {
+    const r = run(['blahblah']);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /unknown command 'blahblah'/);
+    assert.match(r.err, /anoa help/);
+    // The real verbs, and the words that are not verbs but are still
+    // legitimate first arguments, must not be caught by it.
+    assert.equal(anoa('status').code, 0);
+    assert.equal(run(['--version']).code, 0);
+    assert.equal(run(['help']).code, 0);
+  });
 });

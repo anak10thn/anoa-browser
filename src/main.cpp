@@ -90,6 +90,22 @@ int main(int argc, char *argv[])
         const size_t n = std::strlen(name);
         return std::strncmp(arg, name, n) == 0 && (arg[n] == '\0' || arg[n] == '=');
     };
+
+    // A mistyped subcommand used to start a browser. Nothing reads
+    // positionalArguments() and Config has no URL field, so QCommandLineParser
+    // discarded the word and the process carried on as if the line had been
+    // bare `anoa` — opening a window on a desktop, and on a headless box dying
+    // as "Could not load the Qt platform plugin xcb", which describes nothing
+    // the user did. Only the first argument is examined: a later bare word can
+    // be an option's value (`--port 9222`), and telling those apart would mean
+    // duplicating every option's arity here.
+    if (argc > 1 && argv[1][0] != '-' && std::strcmp(argv[1], "terminal") != 0
+        && !isAgentCommand(QString::fromLocal8Bit(argv[1]))) {
+        QTextStream(stderr) << "anoa: unknown command '" << argv[1] << "' — try: anoa help"
+                            << Qt::endl;
+        return 2;
+    }
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--headless") == 0) {
             qputenv("QT_QPA_PLATFORM", "offscreen");
