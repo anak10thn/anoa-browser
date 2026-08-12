@@ -1,8 +1,15 @@
 #include "http/http_server.h"
 
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QWebEnginePage>
+#include <QWebEngineView>
 
 #include "browser/anoa_browser.h"
+#include "browser/tab_ids.h"
 
 #include <QBuffer>
 #include <QEventLoop>
@@ -86,6 +93,61 @@ struct HtmlCaptureState {
     bool waiting = true;
     QEventLoop *loop = nullptr;
 };
+
+QByteArray HttpServer::rebuildTargetList(const QByteArray &rewritten,
+                                         const QString &hostName) const
+{
+    if (!m_browser)
+        return rewritten;
+
+    const QJsonArray upstream = QJsonDocument::fromJson(rewritten).array();
+
+    // Title and url come from Chromium where it has them: it knows the live
+    // document, while the view's own properties lag a navigation slightly.
+    QHash<QString, QJsonObject> byTargetId;
+    for (const QJsonValue &value : upstream) {
+        const QJsonObject target = value.toObject();
+        byTargetId.insert(target.value(QStringLiteral("id")).toString(), target);
+    }
+
+    QList<TabTargetInfo> tabs;
+    const QString activeId = m_browser->activeTabId();
+    for (const QString &tabId : m_browser->tabIds()) {
+        TabTargetInfo info;
+        info.tabId = tabId;
+        info.chromiumTargetId = m_browser->chromiumTargetId(tabId);
+        info.active = (tabId == activeId);
+
+        const QJsonObject target = byTargetId.value(info.chromiumTargetId);
+        info.title = target.value(QStringLiteral("title")).toString();
+        info.url = target.value(QStringLiteral("url")).toString();
+        if (info.url.isEmpty()) {
+            if (QWebEngineView *view = m_browser->viewFor(tabId)) {
+                info.url = view->url().toString();
+                info.title = view->title();
+            }
+        }
+        tabs.append(info);
+    }
+
+    QJsonArray out = buildTargetList(tabs, hostName, m_proxyPort);
+    // Nothing resolved yet — task-004's lookup is still in flight. Answering an
+    // empty array here would show a client zero targets where it sees one
+    // today, which reads as "the browser has no pages" rather than "ask again".
+    if (out.isEmpty())
+        return rewritten;
+
+    // Everything that is not a page — service workers, iframes — keeps its
+    // upstream entry, already host-rewritten, so no client loses a target it
+    // can see today.
+    for (const QJsonValue &value : upstream) {
+        const QJsonObject target = value.toObject();
+        if (target.value(QStringLiteral("type")).toString() != QLatin1String("page"))
+            out.append(target);
+    }
+
+    return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
 
 void HttpServer::handleNewConnection()
 {
@@ -204,6 +266,13 @@ void HttpServer::handleNewConnection()
             );
             // Rewrite any remaining bare 127.0.0.1 references.
             body.replace(QByteArrayLiteral("127.0.0.1"), hostName.toUtf8());
+
+            // The target list is rebuilt from the registry rather than
+            // byte-patched, because a tab id is ours and appears nowhere in
+            // Chromium's answer. /json/version is left alone: its
+            // webSocketDebuggerUrl is the browser endpoint, not a page.
+            if (path != QLatin1String("/json/version"))
+                body = rebuildTargetList(body, hostName);
         } else {
             body = R"({"error":"upstream unavailable"})";
             statusCode = 503;

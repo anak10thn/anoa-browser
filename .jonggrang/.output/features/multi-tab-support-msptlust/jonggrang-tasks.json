@@ -91,20 +91,20 @@
       "title": "Rebuild /json and /json/list from the tab registry instead of byte-replacing",
       "description": "Today /json and /json/list are Chromium's response with the host:port bytes swapped, which cannot carry an anoa tab id. Make them parse-and-rebuild.\n\nsrc/http/http_server.cpp:\n- Keep the existing bounded (5s) upstream fetch of the same path from 127.0.0.1:<debugPort> and the existing Host-header host extraction.\n- For /json and /json/list: parse the upstream body as a JSON array. Build one entry per registry tab with buildTargetList() from task-001, passing the extracted host and m_proxyPort, filling title/url from the matching upstream entry (falling back to the tab's own view url/title) and marking the active tab with anoaActive. Emit the tab entries FIRST, in creation order.\n- Upstream entries whose type is NOT \"page\" (service workers, iframes and the like) are appended afterwards with today's host:port rewrite applied, so no client loses a target it can see today.\n- Fallback that must not be skipped: if no tab has a resolved target id yet (task-004 still in flight), fall back to today's byte-rewritten body verbatim rather than answering an empty array. A client polling /json/list at startup must never see zero targets where it sees one today.\n- /json/version keeps the existing byte rewrite untouched - its webSocketDebuggerUrl is the browser endpoint, not a page.\n- Preserve the current 503 {\"error\":\"upstream unavailable\"} path and the Content-Type/close behaviour of sendResponse.\n\nAcceptance:\n- With one tab, GET /json/list returns exactly one page entry, \"anoaTabId\":\"t1\", \"anoaActive\":true, and a webSocketDebuggerUrl whose port is config.port+2 and whose host is whatever the client sent in Host.\n- `cd tests/integration && npx vitest run http_server.test.js` passes; Playwright/Puppeteer connectOverCDP against a running binary still attaches (tests/e2e).\n- Trailing-slash normalisation (/json/list/) still works - Playwright relies on it.",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-001",
         "task-004"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/http/http_server.cpp",
         "src/http/http_server.h"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:01:59.148Z",
+      "completed_at": "2026-08-12T15:04:42.086Z",
       "error_log": []
     },
     {
