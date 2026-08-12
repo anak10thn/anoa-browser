@@ -332,3 +332,27 @@
   root, mapping old -> new. Deleting the old cask/formula without them strands
   existing installs: `brew upgrade` reports "No available formula or cask" and
   they silently stop receiving updates.
+
+- GLVND libraries (libGL, libGLX, libGLdispatch, libEGL, libOpenGL) must not sit
+  in front of the host's. Their whole job is to locate the graphics driver
+  installed on the running machine, so a vendored copy hunts for the build box's
+  driver instead: "qglx_findConfig: Failed to finding matching FBConfig" then
+  abort, on a desktop whose own GL is fine. They cannot just be dropped either --
+  the binary links libOpenGL.so.0 directly and Debian's libgl1 does not provide
+  it, so excluding them outright kills even --headless, which needs no GL at all.
+  The bundle keeps them in lib/gl, outside the search path, and anoa.sh appends
+  that directory only when the host has no libOpenGL.so.0.
+
+- qputenv("QTWEBENGINE_CHROMIUM_FLAGS", ...) overwrites. AnoaBrowser discarded
+  whatever the caller had exported, so the escape hatch in our own README
+  (QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu) did nothing, and the Dockerfile's
+  --disable-gpu was dropped on every run. Inherited flags are appended now, last,
+  so a deliberate override wins. Verified by --single-process producing zero
+  QtWebEngineProcess helpers.
+
+- Do not trust an x86_64 container on Apple Silicon for graphics work. qemu
+  breaks Mesa's software renderer ("LLVM ERROR: 64-bit code requested on a
+  subtarget that doesn't support it", "qemu: uncaught target signal 6") and the
+  published build fails there identically to a broken one, so the run proves
+  nothing either way. The container job in container.yml runs on a real x86_64
+  runner and is the trustworthy signal.
