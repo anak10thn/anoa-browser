@@ -37,7 +37,6 @@ RUN set -eux; \
         libxrandr2 \
         libxkbcommon0 \
         libxkbfile1 \
-        libgbm1 \
         libdrm2 \
         libasound2 \
         libcups2 \
@@ -46,6 +45,13 @@ RUN set -eux; \
         libatspi2.0-0 \
         libxshmfence1 \
         libglib2.0-0 \
+        # The GL stack comes from the host, never from the bundle: libGL and
+        # friends are dispatch layers that load *this* machine's driver, and a
+        # vendored copy looks for one that is not here.
+        libgl1 \
+        libglx-mesa0 \
+        libegl1 \
+        libgbm1 \
         libfontconfig1 \
         libfreetype6 \
         libdbus-1-3 \

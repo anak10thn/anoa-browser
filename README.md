@@ -112,6 +112,23 @@ tar xzf anoa-linux-x86_64.tar.gz
 
 Always go through `anoa.sh`: the raw executable next to it has none of that environment set up, in terminal mode as much as in browser mode.
 
+**Headed mode needs the host's OpenGL.** The bundle deliberately does not carry
+`libGL`/`libEGL` — they are dispatch layers that load *your* machine's driver, so
+a vendored copy looks for one that is not there. On a bare server install:
+
+```bash
+sudo apt install libgl1 libglx-mesa0 libegl1      # Debian/Ubuntu
+```
+
+If your GL still cannot satisfy Chromium — `Could not initialize GLX` — fall back
+to software rendering:
+
+```bash
+QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu" anoa
+```
+
+`--headless` and `anoa terminal` never open a window and are unaffected either way.
+
 ### Container (Docker / Podman)
 
 ```bash

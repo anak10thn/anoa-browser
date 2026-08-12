@@ -50,6 +50,18 @@ jobs:
           bundle=dist/anoa
           mkdir -p "$bundle"/lib "$bundle"/lib/qt6/libexec "$bundle"/resources "$bundle"/translations/qtwebengine_locales
 
+          # Libraries that must come from the host, never from the bundle.
+          #
+          # glibc and friends for the usual reason. The GL stack for a sharper
+          # one: libGL/libGLX/libGLdispatch/libEGL are GLVND *dispatch* layers
+          # whose whole job is to find the driver installed on this machine —
+          # Mesa DRI, NVIDIA, whatever it is. Ship our own and it looks for
+          # drivers that match the build box instead, which is exactly the
+          # "qglx_findConfig: Failed to finding matching FBConfig / Could not
+          # initialize GLX" that a user hit on a normal desktop. libdrm and
+          # libgbm talk to the kernel and have the same constraint.
+          HOST_LIBS='^libc\.so|^libm\.so|^libpthread\.so|^libdl\.so|^librt\.so|^ld-linux|^libGL\.|^libGLX\.|^libGLdispatch\.|^libEGL\.|^libOpenGL\.|^libglapi\.|^libdrm\.|^libgbm\.'
+
           # Binary — one executable; terminal mode is `anoa terminal`.
           cp build/anoa "$bundle/anoa"
           chmod +x "$bundle/anoa"
@@ -60,7 +72,7 @@ jobs:
           # Pass 1: direct deps of the binary
           ldd "$bundle/anoa" | grep "=> /" | awk '{print $3}' | sort -u | while read lib; do
             base=$(basename "$lib")
-            echo "$base" | grep -qE '^libc\.so|^libm\.so|^libpthread\.so|^libdl\.so|^librt\.so|^ld-linux' && continue
+            echo "$base" | grep -qE "$HOST_LIBS" && continue
             cp -vn "$lib" "$bundle/lib/" 2>/dev/null || true
           done
 
@@ -106,7 +118,7 @@ jobs:
             find "$bundle/lib" -name '*.so*' -type f -print0 | while IFS= read -r -d '' f; do
               ldd "$f" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read lib; do
                 base=$(basename "$lib")
-                echo "$base" | grep -qE '^libc\.so|^libm\.so|^libpthread\.so|^libdl\.so|^librt\.so|^ld-linux' && continue
+                echo "$base" | grep -qE "$HOST_LIBS" && continue
                 cp -n "$lib" "$bundle/lib/" 2>/dev/null || true
               done
             done

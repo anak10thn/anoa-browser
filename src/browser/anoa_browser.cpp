@@ -80,6 +80,20 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
         flags += " --no-sandbox";
     if (m_config.headless)
         flags += " --disable-gpu";
+
+    // Keep whatever the caller already put there.
+    //
+    // This used to be a plain qputenv, which silently discarded it — including
+    // the QTWEBENGINE_CHROMIUM_FLAGS our own Dockerfile sets and our own docs
+    // tell people to set. So the documented escape hatch for a machine whose GL
+    // stack cannot satisfy Chromium ("Could not initialize GLX") did nothing at
+    // all, and neither did the container's --disable-gpu.
+    //
+    // Ours go first so the caller's win on any flag Chromium resolves
+    // last-wins; theirs are the deliberate override.
+    const QByteArray inherited = qgetenv("QTWEBENGINE_CHROMIUM_FLAGS").trimmed();
+    if (!inherited.isEmpty())
+        flags += " " + inherited;
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", flags);
 
     if (m_config.headless)
