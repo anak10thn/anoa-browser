@@ -12,8 +12,16 @@ static QString stubResult(const QJsonObject &cmd)
     return QJsonDocument(resp).toJson(QJsonDocument::Compact);
 }
 
-QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *page)
+QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *page,
+                                      bool *deferred,
+                                      const std::function<void(const QString &)> &sendLater)
 {
+    // No handler defers yet; task-008 is the first. Cleared up front so a
+    // caller never reads a stale value from its own stack.
+    if (deferred)
+        *deferred = false;
+    Q_UNUSED(sendLater)
+
     const QString method = cmd.value(QStringLiteral("method")).toString();
     const int dotPos = method.indexOf(QLatin1Char('.'));
     if (dotPos < 0)

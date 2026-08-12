@@ -29,6 +29,10 @@ public:
 
 private:
     QWebEnginePage *pageForClient(QWebSocket *client) const;
+    // A reply the handler will produce later, aimed at one client. Guarded by a
+    // QPointer and a state check because the client may well be gone by then,
+    // and by a one-shot flag because a command gets exactly one answer.
+    std::function<void(const QString &)> makeDeferredSender(QWebSocket *client) const;
 
 private slots:
     void onNewConnection();

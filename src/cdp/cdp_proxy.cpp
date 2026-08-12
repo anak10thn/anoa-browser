@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QHostAddress>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QUrlQuery>
@@ -45,6 +46,23 @@ void CdpProxy::stop()
     }
     m_clientToUpstream.clear();
     m_upstreamToClient.clear();
+}
+
+std::function<void(const QString &)> CdpProxy::makeDeferredSender(QWebSocket *client) const
+{
+    // QPointer, not the raw socket: the answer arrives on a later turn of the
+    // event loop, by which time the client may have disconnected and been
+    // deleted. Dropping a reply on a dead socket is correct; writing to freed
+    // memory is not.
+    QPointer<QWebSocket> guard(client);
+    auto answered = std::make_shared<bool>(false);
+    return [guard, answered](const QString &reply) {
+        if (*answered)
+            return; // one command, one answer
+        *answered = true;
+        if (guard && guard->state() == QAbstractSocket::ConnectedState)
+            guard->sendTextMessage(reply);
+    };
 }
 
 QWebEnginePage *CdpProxy::pageForClient(QWebSocket *client) const
@@ -132,11 +150,18 @@ void CdpProxy::onClientMessage(const QString &message)
     }
 
     QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
-    const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client));
+    bool deferred = false;
+    const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client),
+                                                          &deferred,
+                                                          makeDeferredSender(client));
     if (!handled.isEmpty()) {
         client->sendTextMessage(handled);
         return;
     }
+    // Ours, but not answerable yet. Nothing goes upstream: the reply will come
+    // through the callback above.
+    if (deferred)
+        return;
     // Optionally rewrite the command before forwarding (e.g. strip synthetic context IDs).
     const QJsonObject rewritten = CdpExtensions::rewritePassthrough(cmd);
     if (!rewritten.isEmpty()) {
@@ -159,7 +184,12 @@ void CdpProxy::onUpstreamConnected()
         if (!client)
             continue;
         QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
-        const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client));
+        bool deferred = false;
+        const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client),
+                                                              &deferred,
+                                                              makeDeferredSender(client));
+        if (deferred)
+            continue;
         if (!handled.isEmpty()) {
             client->sendTextMessage(handled);
             continue;

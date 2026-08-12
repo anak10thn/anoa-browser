@@ -133,21 +133,21 @@
       "title": "Give CdpExtensions a deferred-reply path so a command can be answered later",
       "description": "CdpExtensions::processCommand can only answer synchronously (non-empty string = handled, empty = pass through). Target.createTarget cannot work that way: a page exists before its DevTools target does, so the target id is not known in the same turn. Add an asynchronous answer without ever blocking.\n\nsrc/cdp/cdp_extensions.h + .cpp:\n- Extend the entry point to: static QString processCommand(const QJsonObject &cmd, QWebEnginePage *page, bool *deferred, const std::function<void(const QString &)> &sendLater). Contract, documented in the header: a non-empty return means answered now; an empty return with *deferred == false means pass through upstream unchanged; an empty return with *deferred == true means nothing goes upstream and exactly one reply will arrive through sendLater on a later turn of the event loop.\n- Every existing handler (Profiler, HeapProfiler, Security, Browser, Page.printToPDF) keeps its current behaviour and never sets *deferred.\n- No nested QEventLoop anywhere - this is the same signals/slots-not-blocking-calls rule FrameBackend follows.\n\nsrc/cdp/cdp_proxy.cpp:\n- Build the sendLater callback around a QPointer<QWebSocket> for the client and check state() == ConnectedState before writing, because the client may disconnect while the command is outstanding. Dropping the reply on a dead socket is correct; crashing is not.\n- When *deferred is set, do not forward upstream and do not reply now.\n- Guarantee at most one reply per command id: the callback must be safe to invoke only once, and a handler that never calls it must not wedge the connection (task-008 supplies the timeout).\n\nAcceptance: `make build` warning-clean; `cd tests/integration && npx vitest run cdp_extensions.test.js cdp_proxy.test.js` passes with no change in the stubbed domains' responses.",
       "priority": 3,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-003"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/cdp/cdp_extensions.h",
         "src/cdp/cdp_extensions.cpp",
         "src/cdp/cdp_proxy.h",
         "src/cdp/cdp_proxy.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:08:22.522Z",
+      "completed_at": "2026-08-12T15:09:20.217Z",
       "error_log": []
     },
     {
