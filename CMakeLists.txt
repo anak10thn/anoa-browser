@@ -57,6 +57,8 @@ target_sources(anoa PRIVATE
     src/browser/anoa_browser.cpp
     src/browser/browser_window.cpp
     src/browser/browser_window.h
+    src/browser/tab_ids.cpp
+    src/browser/tab_ids.h
     src/http/http_server.cpp
     src/cdp/cdp_proxy.cpp
     src/cdp/cdp_client.cpp

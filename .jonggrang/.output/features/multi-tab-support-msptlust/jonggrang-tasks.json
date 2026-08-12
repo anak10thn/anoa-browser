@@ -1,0 +1,462 @@
+{
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Core-only tab id minting and /json/list shaping helper, with its own unit lib",
+      "description": "Add src/browser/tab_ids.h + src/browser/tab_ids.cpp: a Qt6::Core-only helper holding the two pieces of tab logic that are testable without WebEngine.\n\nAPI:\n- class TabIdMinter { QString next(); } producing monotonic short ids t1, t2, t3 ... An id is never reused after its tab closes (the counter only goes up), because an agent may hold a captured id.\n- bool isValidTabId(const QString &id) - matches ^t[1-9][0-9]*$ exactly; used by the CLI and the HTTP layer to reject junk before it reaches the registry.\n- struct TabTargetInfo { QString tabId; QString chromiumTargetId; QString title; QString url; QString browserContextId; bool active = false; };\n- QJsonArray buildTargetList(const QList<TabTargetInfo> &tabs, const QString &host, quint16 proxyPort) - one JSON object per tab in the given order, each with: \"id\" = chromiumTargetId, \"anoaTabId\" = tabId, \"anoaActive\" = active, \"type\" = \"page\", \"title\", \"url\", \"webSocketDebuggerUrl\" = ws://<host>:<proxyPort>/devtools/page/<chromiumTargetId>, \"devtoolsFrontendUrl\" in the same shape Chromium emits. Entries with an empty chromiumTargetId are omitted (they are not attachable yet).\n\nConstraints:\n- Qt6::Core only: QString/QStringList/QJsonArray/QJsonObject/QRegularExpression. No QtGui, QtNetwork, QtWebSockets or WebEngine include may ever appear here - the unit CI job builds no WebEngine.\n- ASCII-only string literals (AGENTS.md).\n\nWiring:\n- Add src/browser/tab_ids.cpp to target_sources(anoa ...) in CMakeLists.txt.\n- Add a FOURTH unit target anoa-tab-ids-lib in tests/unit/CMakeLists.txt, mirroring how anoa-config-lib is declared (Qt6::Core only). Never fold this source into anoa-config-lib.\n- Add tests/unit/test_tab_ids.cpp (QTest) covering: minting is monotonic and never recycles a closed id; isValidTabId accepts t1/t12 and rejects \"\", \"t\", \"t0\", \"T1\", \"t01\", \"tab1\", \"t1 \"; buildTargetList emits one entry per tab, points webSocketDebuggerUrl at the proxy port (not the debug port), marks exactly the active tab, and omits unresolved tabs. Register it with add_test the same way the existing unit tests are.\n- Add the new lib to the gcov target list in tests/coverage.sh so `make coverage` covers it and the COVERAGE_MIN gate still applies.\n\nAcceptance: `make test` builds and all ctest cases pass; `make build` stays warning-clean under -Wall -Wextra -Wpedantic.",
+      "priority": 1,
+      "status": "completed",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [],
+      "passes": true,
+      "files": [
+        "src/browser/tab_ids.h",
+        "src/browser/tab_ids.cpp",
+        "CMakeLists.txt",
+        "tests/unit/CMakeLists.txt",
+        "tests/unit/test_tab_ids.cpp",
+        "tests/coverage.sh"
+      ],
+      "started_at": "2026-08-12T08:55:22.745Z",
+      "completed_at": "2026-08-12T08:58:34.717Z",
+      "error_log": []
+    },
+    {
+      "id": "task-002",
+      "title": "AnoaBrowser becomes a tab container owning N views with a stable-id registry",
+      "description": "Turn AnoaBrowser from a QWebEngineView subclass into a QWidget container that owns a registry of N views, one per tab. init() must still create EXACTLY ONE tab so nothing observable changes yet.\n\nsrc/browser/anoa_browser.h + .cpp:\n- class AnoaBrowser : public QWidget, holding a QStackedLayout with zero margins and zero spacing, so the active view fills the container exactly. This is load-bearing: HttpServer reports the container's width()/height() as the coordinate space /render/click is measured in, and grab() must capture the page and nothing else.\n- struct Tab { QString id; QWebEngineView *view; QWebEngineProfile *profile; QString chromiumTargetId; }; kept in a QList<Tab> in creation order.\n- Registry API: QString newTab(const QUrl &url = QUrl()); bool closeTab(const QString &id); bool selectTab(const QString &id); QStringList tabIds() const; QString activeTabId() const; int tabCount() const; QWebEngineView *viewFor(const QString &id) const; QWebEnginePage *pageFor(const QString &id) const; QWebEngineView *activeView() const.\n- Ids come from TabIdMinter (task-001).\n- Signals: tabCreated(QString id), tabClosed(QString id), tabActivated(QString id), activeUrlChanged(QUrl), activeTitleChanged(QString), activeLoadFinished(bool). The last three exist because BrowserWindow can no longer connect to one fixed view - it needs the signals of whichever tab is active, re-routed on tabActivated.\n- Delegating accessors that KEEP TODAY'S NAMES so existing call sites compile with no change of meaning, all acting on the active tab: QWebEnginePage *page() const, void load(const QUrl &), void back(), void forward(), void reload(), QUrl url() const, QString title() const. sendClick/sendScroll/sendText/sendKey now dispatch to the active view's focusProxy exactly as they dispatch to the view today.\n- Factor today's per-view setup out of init() into a private QWebEngineView *createView(QWebEngineProfile *profile) so every tab gets identical settings, viewport size and offscreen/headless handling. init() calls newTab() once and then applies whatever process-wide setup it does today.\n- Closing the last tab is refused (closeTab returns false, no view destroyed): one process still means at least one page. Closing the ACTIVE tab activates the next tab in creation order, or the previous one if it was last.\n- Profiles are unchanged in this task: every tab uses the single m_profile. setupNamedProfile and loadExtensions keep their current behaviour. Per-tab profiles are task-009.\n- Ownership is Qt parent-child throughout; no manual delete of a view outside closeTab, and closeTab deletes the view before dropping any profile reference.\n\nAcceptance: the file compiles on its own terms; single-tab behaviour is byte-identical (same view settings, same geometry, same signal timing). Consumers are updated in task-003, so the tree may not link until that task lands - do not leave dead compatibility shims behind to fake it.",
+      "priority": 1,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-001"
+      ],
+      "passes": false,
+      "files": [
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-003",
+      "title": "Rework ownership and every view consumer for the container AnoaBrowser",
+      "description": "Make the tree build and behave identically with one tab, now that AnoaBrowser is a QWidget container rather than a QWebEngineView.\n\nsrc/main.cpp:\n- AnoaBrowser stays on the stack. Re-verify the declaration order comment: `window` is declared after `browser` so BrowserWindow is destroyed first and releases the view it borrowed. The container must survive that release without a double free.\n- cdpProxy.setPage(browser.page()) still works via the delegating accessor for now (task-006 replaces it with a per-connection lookup).\n\nsrc/browser/browser_window.h + .cpp:\n- Connect the address field, history buttons and bookmark star to AnoaBrowser's activeUrlChanged / activeTitleChanged / activeLoadFinished instead of a single view's signals; refreshHistoryButtons() queries the ACTIVE page's history.\n- The reparent/release contract in the constructor/destructor comments must be re-read and updated to say it reparents the container, not the view. The toolbar stays a sibling wrapper - anything inside the container appears in every screenshot and shifts the coordinate space.\n\nsrc/http/http_server.cpp:\n- Route grab(), width(), height(), page(), load(), back(), forward(), reload() through the container's active-tab accessors. No behaviour change and no new query params here (that is task-014).\n\nsrc/terminal/inprocess_frame_backend.h + .cpp:\n- Still takes AnoaBrowser * and captures the active tab. Multi-tab in the embedded viewer is out of scope, so it simply follows the active tab.\n\nAcceptance:\n- `make build` links and is warning-clean under -Wall -Wextra -Wpedantic.\n- `bash tests/regression/smoke.sh` passes (ANOA_BINARY=./build/anoa).\n- `cd tests/integration && npx vitest run` passes unchanged, in particular http_server.test.js and render_endpoints.test.js.\n- /render/screenshot.png still reports X-Anoa-Viewport-Width/Height equal to the view geometry, and a click at those coordinates still lands where it landed before.",
+      "priority": 1,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-002"
+      ],
+      "passes": false,
+      "files": [
+        "src/main.cpp",
+        "src/browser/browser_window.h",
+        "src/browser/browser_window.cpp",
+        "src/http/http_server.cpp",
+        "src/terminal/inprocess_frame_backend.h",
+        "src/terminal/inprocess_frame_backend.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-004",
+      "title": "Resolve and cache the tab-id to Chromium-target-id mapping per tab",
+      "description": "Every tab needs the Chromium DevTools target id of its page, because that is what a CDP client dials and what /json/list and Target.* must report. Qt exposes no such API on QWebEnginePage, so it is discovered from Chromium's own discovery endpoint and cached.\n\nsrc/browser/anoa_browser.h + .cpp:\n- AnoaBrowser learns the internal Chromium debugging port (config.port + 1; take it from the Config it already holds rather than adding a parameter to any caller).\n- After a tab's view is created, GET http://127.0.0.1:<debugPort>/json/list with QNetworkAccessManager and pick the type==\"page\" entry whose id is not already claimed by another tab in the registry, disambiguating on url/title when more than one is unclaimed. Cache it in Tab::chromiumTargetId.\n- A page target appears a beat after the view, so retry with a short bounded backoff (e.g. 100ms, 200ms, 400ms, 800ms, up to about 5s) and then give up leaving the id empty.\n- This MUST be asynchronous: QNetworkAccessManager + signals, resolved on a later turn of the event loop. No nested QEventLoop - a seam is crossed by signals/slots and never by a blocking call (AGENTS.md Code Patterns).\n- API: QString chromiumTargetId(const QString &tabId) const; QString tabIdForTargetId(const QString &targetId) const; signal tabTargetResolved(QString tabId, QString targetId).\n- Invalidate and re-resolve when a page is recreated: connect QWebEnginePage::renderProcessTerminated and clear that tab's cached id, then re-run resolution. A stale target id is worse than a missing one - a client would dial a dead route.\n- closeTab clears the mapping for that tab.\n\nAcceptance: with the single tab created by init(), chromiumTargetId(\"t1\") is non-empty within a couple of seconds of startup and matches the id Chromium reports on port+1 for that page; `make build` stays warning-clean. The mapping becomes observable through /json/list in task-005.",
+      "priority": 2,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-003"
+      ],
+      "passes": false,
+      "files": [
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-005",
+      "title": "Rebuild /json and /json/list from the tab registry instead of byte-replacing",
+      "description": "Today /json and /json/list are Chromium's response with the host:port bytes swapped, which cannot carry an anoa tab id. Make them parse-and-rebuild.\n\nsrc/http/http_server.cpp:\n- Keep the existing bounded (5s) upstream fetch of the same path from 127.0.0.1:<debugPort> and the existing Host-header host extraction.\n- For /json and /json/list: parse the upstream body as a JSON array. Build one entry per registry tab with buildTargetList() from task-001, passing the extracted host and m_proxyPort, filling title/url from the matching upstream entry (falling back to the tab's own view url/title) and marking the active tab with anoaActive. Emit the tab entries FIRST, in creation order.\n- Upstream entries whose type is NOT \"page\" (service workers, iframes and the like) are appended afterwards with today's host:port rewrite applied, so no client loses a target it can see today.\n- Fallback that must not be skipped: if no tab has a resolved target id yet (task-004 still in flight), fall back to today's byte-rewritten body verbatim rather than answering an empty array. A client polling /json/list at startup must never see zero targets where it sees one today.\n- /json/version keeps the existing byte rewrite untouched - its webSocketDebuggerUrl is the browser endpoint, not a page.\n- Preserve the current 503 {\"error\":\"upstream unavailable\"} path and the Content-Type/close behaviour of sendResponse.\n\nAcceptance:\n- With one tab, GET /json/list returns exactly one page entry, \"anoaTabId\":\"t1\", \"anoaActive\":true, and a webSocketDebuggerUrl whose port is config.port+2 and whose host is whatever the client sent in Host.\n- `cd tests/integration && npx vitest run http_server.test.js` passes; Playwright/Puppeteer connectOverCDP against a running binary still attaches (tests/e2e).\n- Trailing-slash normalisation (/json/list/) still works - Playwright relies on it.",
+      "priority": 2,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-001",
+        "task-004"
+      ],
+      "passes": false,
+      "files": [
+        "src/http/http_server.cpp",
+        "src/http/http_server.h"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-006",
+      "title": "CdpProxy resolves a page per connection from the dial path instead of holding one m_page",
+      "description": "CdpProxy currently holds a single QWebEnginePage set once from main.cpp, so a locally-handled command (Page.printToPDF, Security.*) always acts on the first tab no matter which tab the client attached to.\n\nsrc/cdp/cdp_proxy.h + .cpp:\n- Replace `QWebEnginePage *m_page` and setPage() with a lookup installed by the owner: void setPageResolver(std::function<QWebEnginePage *(const QString &targetId)> resolver). Keep src/cdp free of any dependency on src/browser - a std::function is the seam, not an AnoaBrowser include.\n- In onNewConnection, extract the target id from the client's dial path (/devtools/page/<targetId>) and remember it per connection. Resolve the page lazily on each message rather than once at connect time, so a mapping that resolves late (task-004 backoff) still produces the right page.\n- A connection whose path carries no page target id (the browser-level endpoint) resolves to the active tab's page, which is exactly today's behaviour.\n- Pass the resolved page into CdpExtensions::processCommand for that connection.\n- Clean the per-connection entry up in onClientDisconnected alongside the existing map cleanup.\n\nsrc/main.cpp:\n- Install the resolver as a lambda over the browser registry: target id -> tabIdForTargetId -> pageFor, with the empty-target-id case answering browser.page().\n\nAcceptance: `make build` warning-clean; `cd tests/integration && npx vitest run cdp_proxy.test.js pdf_handler.test.js cdp_extensions.test.js` passes; with two tabs, a client attached to tab 2's webSocketDebuggerUrl gets tab 2's content from Page.printToPDF (asserted in task-021).",
+      "priority": 2,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-004"
+      ],
+      "passes": false,
+      "files": [
+        "src/cdp/cdp_proxy.h",
+        "src/cdp/cdp_proxy.cpp",
+        "src/main.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-007",
+      "title": "Give CdpExtensions a deferred-reply path so a command can be answered later",
+      "description": "CdpExtensions::processCommand can only answer synchronously (non-empty string = handled, empty = pass through). Target.createTarget cannot work that way: a page exists before its DevTools target does, so the target id is not known in the same turn. Add an asynchronous answer without ever blocking.\n\nsrc/cdp/cdp_extensions.h + .cpp:\n- Extend the entry point to: static QString processCommand(const QJsonObject &cmd, QWebEnginePage *page, bool *deferred, const std::function<void(const QString &)> &sendLater). Contract, documented in the header: a non-empty return means answered now; an empty return with *deferred == false means pass through upstream unchanged; an empty return with *deferred == true means nothing goes upstream and exactly one reply will arrive through sendLater on a later turn of the event loop.\n- Every existing handler (Profiler, HeapProfiler, Security, Browser, Page.printToPDF) keeps its current behaviour and never sets *deferred.\n- No nested QEventLoop anywhere - this is the same signals/slots-not-blocking-calls rule FrameBackend follows.\n\nsrc/cdp/cdp_proxy.cpp:\n- Build the sendLater callback around a QPointer<QWebSocket> for the client and check state() == ConnectedState before writing, because the client may disconnect while the command is outstanding. Dropping the reply on a dead socket is correct; crashing is not.\n- When *deferred is set, do not forward upstream and do not reply now.\n- Guarantee at most one reply per command id: the callback must be safe to invoke only once, and a handler that never calls it must not wedge the connection (task-008 supplies the timeout).\n\nAcceptance: `make build` warning-clean; `cd tests/integration && npx vitest run cdp_extensions.test.js cdp_proxy.test.js` passes with no change in the stubbed domains' responses.",
+      "priority": 3,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-003"
+      ],
+      "passes": false,
+      "files": [
+        "src/cdp/cdp_extensions.h",
+        "src/cdp/cdp_extensions.cpp",
+        "src/cdp/cdp_proxy.h",
+        "src/cdp/cdp_proxy.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-008",
+      "title": "Answer Target.getTargets, createTarget, closeTarget and activateTarget from the registry",
+      "description": "These four are currently passed to an engine that rejects them. Handle them locally against the tab registry.\n\nNew src/cdp/tab_host.h - a pure-virtual interface so src/cdp stays free of WebEngine registry types:\n- class TabHost { virtual QString newTab(const QUrl &url, const QString &profileName, bool isolated) = 0; virtual bool closeTab(const QString &tabId) = 0; virtual bool selectTab(const QString &tabId) = 0; virtual QStringList tabIds() const = 0; virtual QString activeTabId() const = 0; virtual QString targetIdFor(const QString &tabId) const = 0; virtual QString tabIdForTargetId(const QString &targetId) const = 0; virtual QString titleFor/urlFor/browserContextIdFor(const QString &tabId) const = 0; virtual void whenTargetResolved(const QString &tabId, std::function<void(QString targetId)> cb) = 0; }\nAnoaBrowser implements it (src/browser/anoa_browser.h/.cpp); main.cpp hands the pointer to CdpProxy, which hands it to CdpExtensions alongside the page.\n\nsrc/cdp/cdp_extensions.cpp handleTarget:\n- Target.getTargets -> {\"targetInfos\":[...]} with one entry per tab: targetId = the Chromium target id, type \"page\", title, url, attached, canAccessOpener false, browserContextId (synthetic __anoa_default__ for now; task-010 makes it real per profile).\n- Target.activateTarget -> selectTab(tabIdForTargetId(params.targetId)); empty result on success, CDP error -32000 \"No target with given id\" when unknown.\n- Target.closeTarget -> closeTab(...) and {\"success\":true|false}; false (not an error) when the last tab is refused, matching the registry contract.\n- Target.createTarget -> newTab(params.url), then use the DEFERRED path from task-007: register whenTargetResolved and reply {\"targetId\":\"<chromium target id>\"} when it lands. Bound the wait (about 10s) and answer a CDP error -32000 with a plain message on expiry, so a client is never left hanging. Also accept the optional anoa params anoaProfile (string) and anoaIsolated (bool) and pass them to newTab - the CLI in task-012 sends them.\n- Target.getTargetInfo for a known target id answers from the registry too; anything else in the Target domain keeps its current behaviour.\n- rewritePassthrough: the Target.createTarget __anoa_default__ stripping is now unreachable for handled commands. Delete it deliberately and say why in a comment, rather than leaving a branch nothing can enter.\n\nAcceptance: over the proxy, Target.getTargets lists every tab; Target.createTarget returns a targetId that then appears in /json/list with a fresh anoaTabId; activateTarget changes which entry has anoaActive; closeTarget removes it. `make build` warning-clean.",
+      "priority": 3,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-007",
+        "task-004"
+      ],
+      "passes": false,
+      "files": [
+        "src/cdp/tab_host.h",
+        "src/cdp/cdp_extensions.h",
+        "src/cdp/cdp_extensions.cpp",
+        "src/cdp/cdp_proxy.h",
+        "src/cdp/cdp_proxy.cpp",
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp",
+        "src/main.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-009",
+      "title": "Per-tab profiles: shared by default, named-persistent or isolated on request",
+      "description": "Move QWebEngineProfile ownership into the registry so a tab can have its own cookie jar and storage.\n\nsrc/browser/anoa_browser.h + .cpp:\n- A profile registry keyed by name: QWebEngineProfile *profileFor(const QString &name, bool isolated). A named profile is persistent, stored under config.profileDir/<name>, and CREATED ONCE - two tabs naming the same profile share one QWebEngineProfile object, because two Qt profiles over one on-disk path is a corruption risk, not a duplicate. `isolated` yields a fresh off-the-record (unnamed) profile per tab. Neither given means today's default profile, so a login in one tab is a login everywhere, exactly as now.\n- Reference-count each profile by the tabs using it. A profile MUST outlive every page using it: closeTab destroys the view first, then drops the reference, and the profile object is destroyed only when its last tab goes. The default profile is never destroyed while the process lives.\n- newTab gains the parameters: QString newTab(const QUrl &url = QUrl(), const QString &profileName = QString(), bool isolated = false).\n- setupNamedProfile keeps working for the process-wide --profile flag and seeds the registry with that profile as the default, so `anoa --profile work` behaves exactly as it does today.\n- loadExtensions stays process-wide against the default profile; extensions per tab are out of scope. Say so in a comment where a reader would otherwise expect per-profile loading.\n- Expose what tests need without leaking internals: QString profileNameFor(const QString &tabId) const and bool tabsShareProfile(const QString &a, const QString &b) const.\n\nAcceptance: two tabs created with the same --profile name share one profile object (tabsShareProfile true); an isolated tab's cookies are invisible to the shared tab and vice versa; closing one of two tabs sharing a profile leaves the other fully working (no use-after-free, run it under the sanitizer build if convenient); `make build` warning-clean.",
+      "priority": 4,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-003"
+      ],
+      "passes": false,
+      "files": [
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-010",
+      "title": "Report a per-tab profile as a real browserContextId in Target.*",
+      "description": "A tab with its own profile should look like its own browser context to a CDP client, instead of every tab reporting the synthetic __anoa_default__.\n\nsrc/browser/anoa_browser.h + .cpp:\n- Mint a stable context id per profile OBJECT (not per tab): keep __anoa_default__ for the shared/default profile so nothing changes for today's clients, and mint anoa-ctx-<n> for each additional profile the registry creates. Two tabs sharing a profile report the same id; an isolated tab gets its own. Implement browserContextIdFor(tabId) from task-008's TabHost.\n\nsrc/cdp/cdp_extensions.cpp:\n- Target.getTargets / getTargetInfo / createTarget report that id.\n- Target.createTarget honours an incoming browserContextId that the registry minted (create the tab on that profile) and rejects an unknown one with a CDP error rather than silently using the default.\n- rewritePassthrough: strip ANY anoa-minted context id (the __anoa_default__ case plus the anoa-ctx-* ones) before a command goes upstream, for the same reason the default one is stripped today - Chromium knows none of them.\n- Target.createBrowserContext keeps returning the synthetic id and stays documented as out of scope.\n\nAcceptance: with one shared tab and one isolated tab, Target.getTargets reports two distinct browserContextIds; two tabs on the same named profile report one shared id; no passthrough command reaches Chromium carrying an anoa-minted id.",
+      "priority": 4,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-008",
+        "task-009"
+      ],
+      "passes": false,
+      "files": [
+        "src/browser/anoa_browser.h",
+        "src/browser/anoa_browser.cpp",
+        "src/cdp/cdp_extensions.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-011",
+      "title": "--tab <id> resolved at the CDP target-selection seam, defaulting to the active tab",
+      "description": "The agent CLI is a CDP client that already picks one page target out of /json/list. --tab narrows that one pick, so no command has to thread a tab through its own arguments.\n\nsrc/cdp/cdp_client.h + .cpp:\n- PageTarget gains anoaTabId and anoaActive, read from the /json/list entries task-005 emits.\n- Add void setTabFilter(const QString &tabId), consulted in onDiscoveryFinished: with a filter, pick the entry whose anoaTabId equals it; if none matches, failDiscovery with \"no tab <id> at host:port (saw: t1, t2)\" listing the ids that do exist.\n- With no filter, prefer the entry with anoaActive true, falling back to the first page entry. A non-anoa endpoint has no such field and therefore behaves exactly as today, including the existing \"N page targets ... attaching to [0]\" warning.\n- That warning lists anoa tab ids when present and suggests `--tab <id>` alongside the existing `--cdp <webSocketDebuggerUrl>` advice.\n\nsrc/agent/agent_cli.cpp:\n- runAgentCommand reads --tab with takeOption alongside --host/--port/--token, BEFORE Session::attach, and validates it with isValidTabId() from task-001 - a malformed value is a Usage error (exit 2) with one line on stderr. Never let QCommandLineParser see it: the verb already took the rest of the line.\n- Session::attach takes the tab id and calls setTabFilter before connectToEndpoint.\n\nAcceptance: every existing invocation with no --tab still reaches the active tab and its exit codes are unchanged; `anoa --tab t2 get text` reads tab 2's page; `anoa --tab t9 get text` on a two-tab browser exits non-zero naming t1 and t2; `anoa --tab bogus get text` exits 2.",
+      "priority": 5,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-005"
+      ],
+      "passes": false,
+      "files": [
+        "src/cdp/cdp_client.h",
+        "src/cdp/cdp_client.cpp",
+        "src/agent/agent_cli.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-012",
+      "title": "anoa tab new | list | close | select",
+      "description": "src/agent/agent_cli.cpp:\n- Teach isAgentCommand() the verb \"tab\" (add it to the static verbs list) so main.cpp's pre-scan hands it the rest of the line and a bare `anoa tab` is not mistaken for a browser start.\n- Add cmdTab(session, args, json) dispatched from runAgentCommand. These commands act on the BROWSER, not on one page, so they attach with no tab filter and use the browser-level Target.* methods the proxy answers from the registry (task-008) regardless of which page the client attached to.\n- `anoa tab new [url] [--profile <name>] [--isolated]` -> Target.createTarget with url (scheme optional, reuse the same url normalisation `anoa open` uses) plus anoaProfile/anoaIsolated params; prints the new id alone on stdout (\"t3\"), or {\"tab\":\"t3\",\"targetId\":\"...\"} with --json. --profile and --isolated together is a Usage error.\n- `anoa tab list` -> Target.getTargets mapped back to tab ids: one line per tab, `t1 * https://example.com - Title` with the asterisk on the active tab; --json prints an array of {tab,active,url,title,profile}.\n- `anoa tab close <id>` -> Target.closeTarget. Refusing to close the last tab prints one plain line (\"anoa: t1 is the only tab; stop the browser instead\") and exits non-zero rather than reporting a CDP error the user cannot act on - the same courtesy `anoa close` already extends for Browser.close.\n- `anoa tab select <id>` -> Target.activateTarget, silent on success.\n- A missing or unknown subcommand, or a missing/malformed id, is a Usage error (exit 2) with one line on stderr. A bare `anoa tab` prints the usage line and exits 2.\n- Ids are validated with isValidTabId() before any call goes out.\n\nAcceptance: the four subcommands work against a running browser; ids printed by `tab new` are accepted by `--tab` and by `tab close`; exit codes follow the suite's existing Ok/Usage/NoBrowser convention.",
+      "priority": 5,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-008",
+        "task-009",
+        "task-011"
+      ],
+      "passes": false,
+      "files": [
+        "src/agent/agent_cli.cpp",
+        "src/agent/agent_cli.h"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-013",
+      "title": "Document the tab verb and --tab in anoa help and skills get commands",
+      "description": "Two e2e tests assert these documents match the real command set, so they fail the moment the verb lands undocumented. This task is part of the CLI phase, not the docs sweep.\n\nsrc/agent/agent_help.cpp:\n- Add a TABS group to kGroups: the four `anoa tab ...` subcommands with their flags, plus one sentence that every other command takes --tab <id> and defaults to the active tab. Every group name printed by printAgentHelp() must resolve through printAgentHelpGroup() - the AGENT-12 case walks them all.\n- Add a `--tab <id>` line to the BROWSER group's \"Reaching a browser from an agent command\" block, next to --port/--host/--token.\n\nsrc/agent/agent_skill.cpp:\n- The `skills get commands` document gains the tab commands in the same table/format it already uses, and the --tab option. AGENT-18 matches on `anoa <verb>` appearing for the real command set.\n\nAcceptance: `anoa help` exits 0 and lists tabs; `anoa help tabs` exits 0 with content; `anoa --help` and `anoa -h` still print byte-identical output to `anoa help` (AGENT-12b); `cd tests/e2e && node --test agent_cli.test.js` passes AGENT-12, AGENT-12b and AGENT-18. Remember QT_QPA_PLATFORM=offscreen when running --help by hand.",
+      "priority": 5,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-012"
+      ],
+      "passes": false,
+      "files": [
+        "src/agent/agent_help.cpp",
+        "src/agent/agent_skill.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-014",
+      "title": "?tab=<id> on the /render/* endpoints",
+      "description": "src/http/http_server.cpp:\n- Every /render/* endpoint accepts an optional `tab` query parameter: screenshot.png, screenshot.ppm, html, navigate, back, forward, reload, and the input endpoints (click, scroll, type, key) plus any cookie/storage endpoints served under /render. Absent means the active tab, byte-identical to today.\n- Resolve the value with isValidTabId() and the registry. A malformed or unknown id answers 404 with {\"error\":\"no tab <id>\"} and never falls back to the active tab silently - a caller that names the wrong tab must find out.\n- The geometry headers X-Anoa-Viewport-Width/Height report the TARGETED tab's view geometry, and screenshots capture that tab's view. Note that a non-active tab's view is not the one on screen; capture it with the same grab() path on that view.\n- The existing /render/ -> /render redirect must preserve the query string (it already does - keep it that way).\n\nAcceptance: with one tab every /render/* request is byte-identical to before; ?tab=t2 acts on tab 2; ?tab=t9 and ?tab=junk both return 404 with the error body; `cd tests/integration && npx vitest run render_endpoints.test.js` passes. The assertions for the new behaviour land in task-021.",
+      "priority": 6,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-003"
+      ],
+      "passes": false,
+      "files": [
+        "src/http/http_server.cpp",
+        "src/http/http_server.h"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-015",
+      "title": "Tab strip in BrowserWindow, outside the view",
+      "description": "src/browser/browser_window.h + .cpp:\n- Add a tab strip: one button per tab labelled with a short title, the active one visually distinct, an x per tab to close it and a + to open one. It calls AnoaBrowser's selectTab/closeTab/newTab.\n- It lives OUTSIDE AnoaBrowser, as a sibling of the view in this window, for the same load-bearing reason the toolbar does: anything inside the container appears in every screenshot and shifts the coordinate space every /render/click is measured in. Do not add it to the container's layout under any circumstances.\n- Consistent with the auto-hiding nav bar: when auto-hide is on the strip overlays with the toolbar and appears on the same pointer-at-the-top-edge trigger; when it is off, layoutToolbar() reserves the strip's height too so neither overlaps the view. resizeEvent keeps both positioned.\n- Shown only when tabCount() > 1, so today's single-tab window looks exactly as it does now.\n- Rebuild on tabCreated / tabClosed / tabActivated; keep the rebuild cheap enough to be safe on every signal.\n- Headless mode still builds no window at all - none of this is reachable there.\n\nAcceptance: a headed run with two tabs shows the strip and switching tabs works; with one tab the window is visually unchanged; /render/screenshot.png dimensions and X-Anoa-Viewport-Width/Height are identical whether the strip is visible or not - that invariant is the whole reason for the placement, so verify it rather than assuming it.",
+      "priority": 6,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-003"
+      ],
+      "passes": false,
+      "files": [
+        "src/browser/browser_window.h",
+        "src/browser/browser_window.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-016",
+      "title": "Terminal viewer: tab switching and a tab field in the status bar",
+      "description": "src/terminal/render_http_client.h + .cpp:\n- Carry an optional tab id and append ?tab=<id> to every /render request, which is what gives the HTTP backend tab switching now that task-014 has landed. Setting it changes which tab subsequent frames and input go to.\n\nsrc/terminal/frame_backend.h:\n- If the seam needs a tab notion at all, keep it minimal (e.g. a virtual setTab(const QString &) defaulting to a no-op) so the CDP and in-process backends are unaffected. The in-process embedded viewer stays on the active tab - multi-tab there is out of scope.\n\nsrc/terminal/terminal_ui.h + .cpp:\n- A tab-switch key alongside the existing Ctrl-L / Ctrl-R / Ctrl-B bindings. Pick one free binding (Ctrl-N for next tab is the obvious one), document it wherever the others are documented, and reject nothing silently.\n- A status-bar field showing the current tab (\"t2/3\"), fitted into the existing field-yielding budget with a DEFINED priority relative to the link field - the row is already over budget at 100 columns and the link yields by design, so state where the tab field sits in that order.\n\ntests/unit/test_terminal_ui.cpp:\n- Cases for the new key handling and the status-bar field, driven through the public feedInput() with a stub FrameBackend and WITHOUT calling begin(), so geometry stays the 80x24 constant. Redirect stdout as the existing cases do. New cases go ABOVE testQuitSignalStopsTheFrameLoop, which must remain last because the quit flag has no reset.\n\nAcceptance: `make test` passes; a pty session against a two-tab browser switches tabs with the binding and the status bar shows which tab is displayed; single-tab viewer output is unchanged.",
+      "priority": 6,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-014"
+      ],
+      "passes": false,
+      "files": [
+        "src/terminal/render_http_client.h",
+        "src/terminal/render_http_client.cpp",
+        "src/terminal/frame_backend.h",
+        "src/terminal/terminal_ui.h",
+        "src/terminal/terminal_ui.cpp",
+        "tests/unit/test_terminal_ui.cpp"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-017",
+      "title": "Docs sweep: README, docs/, AGENTS.md",
+      "description": "README.md:\n- Delete the \"Not implemented\" claim about tabs and fix the CDP support table row \"Target.createTarget - the embedded engine cannot create tabs over CDP\", which is now false: it is answered from the registry.\n- Document `anoa tab new|list|close|select`, `--tab <id>` on every agent command, `?tab=<id>` on /render/*, per-tab profiles (--profile <name> for a persistent named session, --isolated for an ephemeral one) and the one-entry-per-tab shape of /json/list including anoaTabId/anoaActive.\n- Keep the three-port layout description as is - it did not change.\n- Say plainly what is still out of scope so the next reader does not re-derive it: no Target.createBrowserContext with real profiles, no tab groups/pinning/reordering/session restore, one window per process, no multi-tab in the embedded terminal browser, no per-tab viewport emulation, extensions stay process-wide.\n\ndocs/BUILDING.md:\n- Mention the fourth Qt6::Core-only unit target anoa-tab-ids-lib from task-001 wherever the existing three are listed, and that `make coverage` now includes it.\n\nAGENTS.md:\n- Under Architecture Decisions, add: ids are anoa's not Chromium's and why; --tab resolves at the CDP target-selection seam rather than per command; the tab strip lives outside the view (with the screenshot/coordinate-space reason); CdpExtensions answers asynchronously rather than blocking on page creation; two tabs naming one profile share one QWebEngineProfile because two Qt profiles over one on-disk path corrupt it.\n- Under Jonggrang Notes -> Patterns Discovered, add the fourth unit lib note, keeping the existing rule that a WebEngine source is never folded into a Core-only target.\n\nAcceptance: no document still claims tabs are unimplemented; every command and flag shipped in phases 5 and 6 appears in the README.",
+      "priority": 7,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": null,
+      "blocked_by": [
+        "task-010",
+        "task-013",
+        "task-015",
+        "task-016"
+      ],
+      "passes": false,
+      "files": [
+        "README.md",
+        "docs/BUILDING.md",
+        "AGENTS.md"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-018",
+      "title": "Teach the embedded core skill and .claude/skills/anoa/SKILL.md about tabs",
+      "description": "src/agent/agent_skill.cpp:\n- The embedded core skill document (the narrative one an agent reads before driving the browser, not the command table task-013 updated) explains: how to open a tab and keep its id, that no --tab means the active tab, that refs are per-tab because they live in the DOM as data-anoa-ref and therefore never resolve across tabs, and that parallel agent work wants `anoa tab new --isolated` while a shared login wants the default profile.\n- Keep the existing tone and the ASCII-only rule for the embedded strings.\n\n.claude/skills/anoa/SKILL.md:\n- The same guidance in brief, in the format that file already uses.\n\nAcceptance: `anoa skills list` and `anoa skills get <each name>` exit 0; the e2e AGENT-18 case still passes; nothing in either document tells an agent that tabs do not exist.",
+      "priority": 7,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": "anoa",
+      "blocked_by": [
+        "task-013"
+      ],
+      "passes": false,
+      "files": [
+        "src/agent/agent_skill.cpp",
+        ".claude/skills/anoa/SKILL.md"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-019",
+      "title": "E2E: multi-tab agent CLI behaviour",
+      "description": "Extend tests/e2e/agent_cli.test.js using its existing run()/anoa() helpers and the attach-to-an-already-running-browser contract (this suite does NOT start the binary). Add fixtures under tests/fixtures if two distinct local pages are needed.\n\nCases:\n- Two tabs hold independent pages: `tab new <urlB>` then assert `--tab t1 get text` and `--tab t2 get text` return the two different documents.\n- `tab list` shows both ids with exactly one active marker, and --json parses to two entries.\n- Refs are per tab: snapshot t1, take a ref, and assert using it with --tab t2 fails with a non-zero exit and a message that names the unresolvable ref rather than silently acting on the wrong element.\n- Closing a non-active tab: it disappears from `tab list` and the active tab is untouched.\n- Closing the ACTIVE tab: another tab becomes active and a following command with NO --tab hits that new active tab.\n- Closing the last remaining tab is refused with a non-zero exit and a plain message.\n- Every command with no --tab hits the active tab: after `tab select t2`, a bare `get text`, `snapshot`, `screenshot` and `eval` all act on t2.\n- Unknown tab: `--tab t9` exits non-zero and names the ids that exist; `--tab junk` exits 2.\n\nRestore the tab set at the end of each case (or use a fresh tab per case) so the suite's later cases still see a single-tab browser where they expect one.\n\nAcceptance: `cd tests/e2e && node --test agent_cli.test.js` passes with the new cases and no previously passing case regresses.",
+      "priority": 8,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": "core/testing",
+      "blocked_by": [
+        "task-012",
+        "task-013"
+      ],
+      "passes": false,
+      "files": [
+        "tests/e2e/agent_cli.test.js",
+        "tests/fixtures"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-020",
+      "title": "E2E: /json/list reports one entry per tab and Target.createTarget works for CDP clients",
+      "description": "tests/e2e/playwright.test.ts:\n- A case asserting GET /json/list returns one entry per tab, each carrying anoaTabId and anoaActive, and each webSocketDebuggerUrl pointing at the proxy port (config.port+2) with the requested Host - not the internal debug port.\n- connectOverCDP still attaches and still sees the pages it sees today (regression guard on the parse-and-rebuild).\n- context.newPage() / Target.createTarget now succeeds: assert the page count grows and that /json/list agrees with it, including a fresh anoaTabId for the new page. This is the row the README used to list as unsupported.\n\ntests/e2e/puppeteer.test.js:\n- Update any assertion that depends on the old target-count or the byte-replaced body shape.\n\nFollow the suite conventions: both files attach to an already-running anoa and never start one; keep them runnable with `npx playwright test` and `node --test puppeteer.test.js`.\n\nAcceptance: both e2e suites pass against a binary built from this branch.",
+      "priority": 8,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": "core/testing",
+      "blocked_by": [
+        "task-005",
+        "task-008"
+      ],
+      "passes": false,
+      "files": [
+        "tests/e2e/playwright.test.ts",
+        "tests/e2e/puppeteer.test.js"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    },
+    {
+      "id": "task-021",
+      "title": "Integration: ?tab= routing, per-tab profile isolation, per-connection CDP page and Target.*",
+      "description": "Add cases to the vitest integration suite. Each file starts and kills its own anoa on the ANOA_BINARY/ANOA_PORT contract, and fileParallelism stays false - do not add a file that assumes otherwise.\n\ntests/integration/render_endpoints.test.js:\n- ?tab=<id> selects that tab for screenshot/html/navigate/input; absent means the active tab; ?tab=t9 and ?tab=junk both return 404 with the error body; X-Anoa-Viewport-* describe the targeted tab.\n\ntests/integration/profiles.test.js:\n- A tab opened with --isolated has a cookie jar the shared tab cannot see, in both directions.\n- Two tabs on the same named profile share cookies.\n- Closing one of two tabs sharing a profile leaves the other working (the profile outlives its pages).\n\ntests/integration/cdp_proxy.test.js:\n- A client attached to tab 2's webSocketDebuggerUrl gets tab 2 for locally-handled commands: Page.printToPDF renders tab 2's document, not tab 1's.\n\ntests/integration/cdp_extensions.test.js:\n- Target.getTargets lists every tab with its targetId and browserContextId (one shared id for shared-profile tabs, a distinct one for an isolated tab); Target.activateTarget moves anoaActive; Target.closeTarget returns success true and then false for the last tab; Target.createTarget returns a targetId that /json/list then reports.\n\nAcceptance: `cd tests/integration && npx vitest run` passes in full, and `bash tests/regression/smoke.sh` still passes.",
+      "priority": 8,
+      "status": "pending",
+      "feature_id": "multi-tab-support-msptlust",
+      "skill": "core/testing",
+      "blocked_by": [
+        "task-006",
+        "task-008",
+        "task-009",
+        "task-014"
+      ],
+      "passes": false,
+      "files": [
+        "tests/integration/render_endpoints.test.js",
+        "tests/integration/profiles.test.js",
+        "tests/integration/cdp_proxy.test.js",
+        "tests/integration/cdp_extensions.test.js",
+        "tests/integration/helpers.js"
+      ],
+      "started_at": null,
+      "completed_at": null,
+      "error_log": []
+    }
+  ]
+}

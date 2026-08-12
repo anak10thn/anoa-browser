@@ -379,3 +379,8 @@
 - Watch out for pkill -f matching the ssh command line itself: `pkill -f "port
   9333"` over ssh kills the shell running it, and the command returns silently
   with no output. `pkill -x anoa` matches the process, not the sentence about it.
+
+- tests/coverage.sh names its build targets twice: once in TARGETS (the gcov
+  object paths it measures) and once in the `cmake --build --target` list. Adding
+  a unit lib to only the first passes `make test` and then fails `make coverage`
+  with "Not Run", because the test binary was never built into build-coverage.
