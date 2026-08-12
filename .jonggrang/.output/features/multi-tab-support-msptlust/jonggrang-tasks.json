@@ -112,20 +112,20 @@
       "title": "CdpProxy resolves a page per connection from the dial path instead of holding one m_page",
       "description": "CdpProxy currently holds a single QWebEnginePage set once from main.cpp, so a locally-handled command (Page.printToPDF, Security.*) always acts on the first tab no matter which tab the client attached to.\n\nsrc/cdp/cdp_proxy.h + .cpp:\n- Replace `QWebEnginePage *m_page` and setPage() with a lookup installed by the owner: void setPageResolver(std::function<QWebEnginePage *(const QString &targetId)> resolver). Keep src/cdp free of any dependency on src/browser - a std::function is the seam, not an AnoaBrowser include.\n- In onNewConnection, extract the target id from the client's dial path (/devtools/page/<targetId>) and remember it per connection. Resolve the page lazily on each message rather than once at connect time, so a mapping that resolves late (task-004 backoff) still produces the right page.\n- A connection whose path carries no page target id (the browser-level endpoint) resolves to the active tab's page, which is exactly today's behaviour.\n- Pass the resolved page into CdpExtensions::processCommand for that connection.\n- Clean the per-connection entry up in onClientDisconnected alongside the existing map cleanup.\n\nsrc/main.cpp:\n- Install the resolver as a lambda over the browser registry: target id -> tabIdForTargetId -> pageFor, with the empty-target-id case answering browser.page().\n\nAcceptance: `make build` warning-clean; `cd tests/integration && npx vitest run cdp_proxy.test.js pdf_handler.test.js cdp_extensions.test.js` passes; with two tabs, a client attached to tab 2's webSocketDebuggerUrl gets tab 2's content from Page.printToPDF (asserted in task-021).",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-004"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/cdp/cdp_proxy.h",
         "src/cdp/cdp_proxy.cpp",
         "src/main.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:04:56.783Z",
+      "completed_at": "2026-08-12T15:07:41.816Z",
       "error_log": []
     },
     {
