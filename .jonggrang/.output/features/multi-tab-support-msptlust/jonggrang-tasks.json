@@ -27,19 +27,19 @@
       "title": "AnoaBrowser becomes a tab container owning N views with a stable-id registry",
       "description": "Turn AnoaBrowser from a QWebEngineView subclass into a QWidget container that owns a registry of N views, one per tab. init() must still create EXACTLY ONE tab so nothing observable changes yet.\n\nsrc/browser/anoa_browser.h + .cpp:\n- class AnoaBrowser : public QWidget, holding a QStackedLayout with zero margins and zero spacing, so the active view fills the container exactly. This is load-bearing: HttpServer reports the container's width()/height() as the coordinate space /render/click is measured in, and grab() must capture the page and nothing else.\n- struct Tab { QString id; QWebEngineView *view; QWebEngineProfile *profile; QString chromiumTargetId; }; kept in a QList<Tab> in creation order.\n- Registry API: QString newTab(const QUrl &url = QUrl()); bool closeTab(const QString &id); bool selectTab(const QString &id); QStringList tabIds() const; QString activeTabId() const; int tabCount() const; QWebEngineView *viewFor(const QString &id) const; QWebEnginePage *pageFor(const QString &id) const; QWebEngineView *activeView() const.\n- Ids come from TabIdMinter (task-001).\n- Signals: tabCreated(QString id), tabClosed(QString id), tabActivated(QString id), activeUrlChanged(QUrl), activeTitleChanged(QString), activeLoadFinished(bool). The last three exist because BrowserWindow can no longer connect to one fixed view - it needs the signals of whichever tab is active, re-routed on tabActivated.\n- Delegating accessors that KEEP TODAY'S NAMES so existing call sites compile with no change of meaning, all acting on the active tab: QWebEnginePage *page() const, void load(const QUrl &), void back(), void forward(), void reload(), QUrl url() const, QString title() const. sendClick/sendScroll/sendText/sendKey now dispatch to the active view's focusProxy exactly as they dispatch to the view today.\n- Factor today's per-view setup out of init() into a private QWebEngineView *createView(QWebEngineProfile *profile) so every tab gets identical settings, viewport size and offscreen/headless handling. init() calls newTab() once and then applies whatever process-wide setup it does today.\n- Closing the last tab is refused (closeTab returns false, no view destroyed): one process still means at least one page. Closing the ACTIVE tab activates the next tab in creation order, or the previous one if it was last.\n- Profiles are unchanged in this task: every tab uses the single m_profile. setupNamedProfile and loadExtensions keep their current behaviour. Per-tab profiles are task-009.\n- Ownership is Qt parent-child throughout; no manual delete of a view outside closeTab, and closeTab deletes the view before dropping any profile reference.\n\nAcceptance: the file compiles on its own terms; single-tab behaviour is byte-identical (same view settings, same geometry, same signal timing). Consumers are updated in task-003, so the tree may not link until that task lands - do not leave dead compatibility shims behind to fake it.",
       "priority": 1,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-001"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/browser/anoa_browser.h",
         "src/browser/anoa_browser.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T09:01:38.408Z",
+      "completed_at": "2026-08-12T09:01:38.442Z",
       "error_log": []
     },
     {
