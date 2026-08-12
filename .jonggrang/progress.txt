@@ -393,3 +393,16 @@
 - /render/click takes its coordinates as QUERY PARAMETERS, not a JSON body.
   A POST with a JSON payload returns "invalid coordinates" as a 400, which is
   easy to misread as the click having missed its target.
+
+- Target.getTargetInfo must pass through for ids the registry does not know.
+  Chromium owns targets we never registered — the browser target itself, service
+  workers, a popup from window.open — and answering "No target with given id"
+  for those broke Playwright's connectOverCDP outright: it asks about the
+  browser target during the handshake, and a client cannot attach to a browser
+  that denies its own existence. Applies to any Target command that can name a
+  non-tab target.
+
+- Playwright's afterAll calls browser.close(), which on a connectOverCDP
+  connection closes the real browser. Chaining the Playwright suite into another
+  e2e suite that attaches to the same instance therefore fails the second one
+  for reasons that have nothing to do with the code under test.

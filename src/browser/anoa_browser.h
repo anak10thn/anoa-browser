@@ -9,6 +9,7 @@
 #include <QWidget>
 
 #include "../config/config.h"
+#include "../cdp/tab_host.h"
 #include "tab_ids.h"
 
 class QNetworkAccessManager;
@@ -24,7 +25,7 @@ class QWebEngineView;
 // HttpServer reports this widget's width()/height() as the coordinate space
 // /render/click is measured in, and grab() must capture the page and nothing
 // else. A margin here would silently shift every synthetic click.
-class AnoaBrowser : public QWidget
+class AnoaBrowser : public QWidget, public TabHost
 {
     Q_OBJECT
 
@@ -39,12 +40,22 @@ public:
     void clearStorage(const QUrl &origin);
 
     // ── the registry ────────────────────────────────────────────────────────
-    QString newTab(const QUrl &url = QUrl());
+    // TabHost. profileName and isolated are carried now and given meaning in
+    // task-009; every tab still shares the one profile.
+    QString newTab(const QUrl &url = QUrl(), const QString &profileName = QString(),
+                   bool isolated = false) override;
     // Refuses to close the last tab: one process still means at least one page.
-    bool closeTab(const QString &id);
-    bool selectTab(const QString &id);
-    QStringList tabIds() const;
-    QString activeTabId() const;
+    bool closeTab(const QString &id) override;
+    bool selectTab(const QString &id) override;
+    QStringList tabIds() const override;
+    QString activeTabId() const override;
+    QString targetIdFor(const QString &tabId) const override;
+    QString tabIdForTargetId(const QString &targetId) const override;
+    QString titleFor(const QString &tabId) const override;
+    QString urlFor(const QString &tabId) const override;
+    QString browserContextIdFor(const QString &tabId) const override;
+    void whenTargetResolved(const QString &tabId,
+                            std::function<void(const QString &targetId)> cb) override;
     int tabCount() const;
     QWebEngineView *viewFor(const QString &id) const;
     QWebEnginePage *pageFor(const QString &id) const;
@@ -55,7 +66,6 @@ public:
     // it is discovered from Chromium's own discovery endpoint and cached. Empty
     // until resolution succeeds — a page exists a beat before its target does.
     QString chromiumTargetId(const QString &tabId) const;
-    QString tabIdForTargetId(const QString &targetId) const;
 
     // ── the active tab, under the names call sites already use ──────────────
     // These keep working exactly as they did when this class was the view, so

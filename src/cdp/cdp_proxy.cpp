@@ -38,6 +38,11 @@ void CdpProxy::setPageResolver(std::function<QWebEnginePage *(const QString &)> 
     m_pageResolver = std::move(resolver);
 }
 
+void CdpProxy::setTabHost(TabHost *tabs)
+{
+    m_tabs = tabs;
+}
+
 void CdpProxy::stop()
 {
     m_server->close();
@@ -151,7 +156,7 @@ void CdpProxy::onClientMessage(const QString &message)
 
     QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
     bool deferred = false;
-    const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client),
+    const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client), m_tabs,
                                                           &deferred,
                                                           makeDeferredSender(client));
     if (!handled.isEmpty()) {
@@ -185,7 +190,7 @@ void CdpProxy::onUpstreamConnected()
             continue;
         QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
         bool deferred = false;
-        const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client),
+        const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client), m_tabs,
                                                               &deferred,
                                                               makeDeferredSender(client));
         if (deferred)

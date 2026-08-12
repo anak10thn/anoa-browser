@@ -1,6 +1,8 @@
 #include "cdp/cdp_extensions.h"
+#include "cdp/tab_host.h"
 #include "pdf/pdf_handler.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -13,14 +15,12 @@ static QString stubResult(const QJsonObject &cmd)
 }
 
 QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *page,
-                                      bool *deferred,
+                                      TabHost *tabs, bool *deferred,
                                       const std::function<void(const QString &)> &sendLater)
 {
-    // No handler defers yet; task-008 is the first. Cleared up front so a
-    // caller never reads a stale value from its own stack.
+    // Cleared up front so a caller never reads a stale value off its own stack.
     if (deferred)
         *deferred = false;
-    Q_UNUSED(sendLater)
 
     const QString method = cmd.value(QStringLiteral("method")).toString();
     const int dotPos = method.indexOf(QLatin1Char('.'));
@@ -38,7 +38,7 @@ QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *pa
     if (domain == QLatin1String("Browser"))
         return handleBrowser(cmd);
     if (domain == QLatin1String("Target"))
-        return handleTarget(cmd);
+        return handleTarget(cmd, tabs, deferred, sendLater);
     if (method == QLatin1String("Page.printToPDF")) {
         // Only use Qt's PdfHandler when we have a page reference.
         // Without a page (e.g. in the proxy path), pass through to Chromium which
@@ -75,19 +75,11 @@ QString CdpExtensions::handleSecurity(const QJsonObject &cmd, QWebEnginePage *pa
 QJsonObject CdpExtensions::rewritePassthrough(const QJsonObject &cmd)
 {
     const QString method = cmd.value(QStringLiteral("method")).toString();
-    // Strip synthetic browserContextId (__anoa_default__) inserted by handleTarget
-    // so Chromium uses its default context instead of an unknown context ID.
-    if (method == QLatin1String("Target.createTarget")) {
-        const QJsonObject params = cmd.value(QStringLiteral("params")).toObject();
-        const QString ctxId = params.value(QStringLiteral("browserContextId")).toString();
-        if (ctxId == QLatin1String("__anoa_default__")) {
-            QJsonObject modified = cmd;
-            QJsonObject p = params;
-            p.remove(QStringLiteral("browserContextId"));
-            modified[QStringLiteral("params")] = p;
-            return modified;
-        }
-    }
+    // Target.createTarget used to be forwarded with its synthetic
+    // browserContextId stripped, because Chromium would reject an id it never
+    // issued. handleTarget answers that command from the registry now and never
+    // forwards it, so the branch had become unreachable — deleted rather than
+    // left as a path nothing can enter.
     return QJsonObject(); // no rewrite needed
 }
 
@@ -107,22 +99,144 @@ QString CdpExtensions::handleBrowser(const QJsonObject &cmd)
     return QString(); // pass through
 }
 
-QString CdpExtensions::handleTarget(const QJsonObject &cmd)
+namespace {
+
+// { "id": <n>, "result": <result> }
+QString cdpResult(const QJsonObject &cmd, const QJsonObject &result)
+{
+    QJsonObject resp;
+    resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
+    resp[QStringLiteral("result")] = result;
+    return QJsonDocument(resp).toJson(QJsonDocument::Compact);
+}
+
+// { "id": <n>, "error": { "code": -32000, "message": ... } }
+QString cdpError(const QJsonObject &cmd, const QString &message)
+{
+    QJsonObject error;
+    error[QStringLiteral("code")] = -32000;
+    error[QStringLiteral("message")] = message;
+    QJsonObject resp;
+    resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
+    resp[QStringLiteral("error")] = error;
+    return QJsonDocument(resp).toJson(QJsonDocument::Compact);
+}
+
+QJsonObject targetInfoFor(TabHost *tabs, const QString &tabId)
+{
+    QJsonObject info;
+    info[QStringLiteral("targetId")] = tabs->targetIdFor(tabId);
+    info[QStringLiteral("type")] = QStringLiteral("page");
+    info[QStringLiteral("title")] = tabs->titleFor(tabId);
+    info[QStringLiteral("url")] = tabs->urlFor(tabId);
+    info[QStringLiteral("attached")] = (tabId == tabs->activeTabId());
+    info[QStringLiteral("canAccessOpener")] = false;
+    info[QStringLiteral("browserContextId")] = tabs->browserContextIdFor(tabId);
+    return info;
+}
+
+} // namespace
+
+QString CdpExtensions::handleTarget(const QJsonObject &cmd, TabHost *tabs, bool *deferred,
+                                    const std::function<void(const QString &)> &sendLater)
 {
     const QString method = cmd.value(QStringLiteral("method")).toString();
-    // QtWebEngine Chromium does not support multiple browser contexts (incognito).
-    // Return a synthetic context ID so clients like Playwright can proceed;
-    // rewritePassthrough() strips this ID before commands reach Chromium.
+    const QJsonObject params = cmd.value(QStringLiteral("params")).toObject();
+
+    // QtWebEngine Chromium does not support multiple browser contexts
+    // (incognito). A synthetic id lets clients like Playwright proceed.
     if (method == QLatin1String("Target.createBrowserContext")) {
         QJsonObject result;
         result[QStringLiteral("browserContextId")] = QStringLiteral("__anoa_default__");
-        QJsonObject resp;
-        resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
-        resp[QStringLiteral("result")] = result;
-        return QJsonDocument(resp).toJson(QJsonDocument::Compact);
+        return cdpResult(cmd, result);
     }
-    if (method == QLatin1String("Target.disposeBrowserContext")) {
+    if (method == QLatin1String("Target.disposeBrowserContext"))
         return stubResult(cmd);
+
+    // Everything below answers from the registry. Without one there is nothing
+    // to answer from, so it passes upstream exactly as it did before.
+    if (!tabs)
+        return QString();
+
+    if (method == QLatin1String("Target.getTargets")) {
+        QJsonArray infos;
+        for (const QString &tabId : tabs->tabIds()) {
+            if (tabs->targetIdFor(tabId).isEmpty())
+                continue; // not attachable yet, the same rule /json/list follows
+            infos.append(targetInfoFor(tabs, tabId));
+        }
+        QJsonObject result;
+        result[QStringLiteral("targetInfos")] = infos;
+        return cdpResult(cmd, result);
     }
+
+    if (method == QLatin1String("Target.getTargetInfo")) {
+        const QString tabId =
+            tabs->tabIdForTargetId(params.value(QStringLiteral("targetId")).toString());
+        // An id we do not know is not an error: Chromium owns targets we never
+        // registered — the browser target itself, service workers, a popup
+        // opened by window.open — and it is authoritative for those.
+        //
+        // Answering "No target with given id" here broke connectOverCDP
+        // outright: Playwright asks about the browser target during handshake,
+        // and a client cannot attach to a browser that denies its own existence.
+        if (tabId.isEmpty())
+            return QString(); // pass through
+        QJsonObject result;
+        result[QStringLiteral("targetInfo")] = targetInfoFor(tabs, tabId);
+        return cdpResult(cmd, result);
+    }
+
+    if (method == QLatin1String("Target.activateTarget")) {
+        const QString tabId =
+            tabs->tabIdForTargetId(params.value(QStringLiteral("targetId")).toString());
+        if (tabId.isEmpty() || !tabs->selectTab(tabId))
+            return cdpError(cmd, QStringLiteral("No target with given id"));
+        return cdpResult(cmd, QJsonObject());
+    }
+
+    if (method == QLatin1String("Target.closeTarget")) {
+        const QString tabId =
+            tabs->tabIdForTargetId(params.value(QStringLiteral("targetId")).toString());
+        if (tabId.isEmpty())
+            return cdpError(cmd, QStringLiteral("No target with given id"));
+        // Refusing the last tab is not an error: the registry declines, and the
+        // client is told plainly that the close did not happen.
+        QJsonObject result;
+        result[QStringLiteral("success")] = tabs->closeTab(tabId);
+        return cdpResult(cmd, result);
+    }
+
+    if (method == QLatin1String("Target.createTarget")) {
+        // The one command that cannot answer in this turn: the page exists
+        // before its DevTools target does. Nothing goes upstream, and the reply
+        // arrives through sendLater once the id lands.
+        if (!deferred || !sendLater)
+            return QString();
+
+        const QUrl url(params.value(QStringLiteral("url")).toString());
+        // anoa-only parameters, sent by our own CLI. A client that does not know
+        // them gets the shared profile, which is what every client expects.
+        const QString profileName = params.value(QStringLiteral("anoaProfile")).toString();
+        const bool isolated = params.value(QStringLiteral("anoaIsolated")).toBool();
+
+        const QString tabId = tabs->newTab(url, profileName, isolated);
+        if (tabId.isEmpty())
+            return cdpError(cmd, QStringLiteral("Could not create target"));
+
+        *deferred = true;
+        const QJsonObject request = cmd;
+        tabs->whenTargetResolved(tabId, [request, sendLater](const QString &targetId) {
+            if (targetId.isEmpty()) {
+                sendLater(cdpError(request, QStringLiteral("Target did not register")));
+                return;
+            }
+            QJsonObject result;
+            result[QStringLiteral("targetId")] = targetId;
+            sendLater(cdpResult(request, result));
+        });
+        return QString();
+    }
+
     return QString(); // pass through
 }

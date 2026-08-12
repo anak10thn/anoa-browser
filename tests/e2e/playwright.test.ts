@@ -97,9 +97,15 @@ test('context.cookies() rejects (Storage.getCookies not supported)', async () =>
   await expect(context.cookies()).rejects.toThrow();
 });
 
-// PW-11: browser.newPage() is expected to fail — document the expected behavior
-test('browser.newPage() throws (Target.createTarget not supported)', async () => {
-  await expect(browser.newPage()).rejects.toThrow();
+// PW-11: browser.newPage() works — Target.createTarget is answered from the tab
+// registry. This assertion used to be the opposite, and documented the
+// limitation as permanent; it fails now because the limitation is gone.
+test('browser.newPage() opens a real second page', async () => {
+  const before = context.pages().length;
+  const opened = await browser.newPage();
+  expect(opened).toBeTruthy();
+  expect(context.pages().length).toBe(before + 1);
+  await opened.close();
 });
 
 // PW-12

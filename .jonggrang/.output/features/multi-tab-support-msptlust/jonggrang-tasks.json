@@ -155,14 +155,14 @@
       "title": "Answer Target.getTargets, createTarget, closeTarget and activateTarget from the registry",
       "description": "These four are currently passed to an engine that rejects them. Handle them locally against the tab registry.\n\nNew src/cdp/tab_host.h - a pure-virtual interface so src/cdp stays free of WebEngine registry types:\n- class TabHost { virtual QString newTab(const QUrl &url, const QString &profileName, bool isolated) = 0; virtual bool closeTab(const QString &tabId) = 0; virtual bool selectTab(const QString &tabId) = 0; virtual QStringList tabIds() const = 0; virtual QString activeTabId() const = 0; virtual QString targetIdFor(const QString &tabId) const = 0; virtual QString tabIdForTargetId(const QString &targetId) const = 0; virtual QString titleFor/urlFor/browserContextIdFor(const QString &tabId) const = 0; virtual void whenTargetResolved(const QString &tabId, std::function<void(QString targetId)> cb) = 0; }\nAnoaBrowser implements it (src/browser/anoa_browser.h/.cpp); main.cpp hands the pointer to CdpProxy, which hands it to CdpExtensions alongside the page.\n\nsrc/cdp/cdp_extensions.cpp handleTarget:\n- Target.getTargets -> {\"targetInfos\":[...]} with one entry per tab: targetId = the Chromium target id, type \"page\", title, url, attached, canAccessOpener false, browserContextId (synthetic __anoa_default__ for now; task-010 makes it real per profile).\n- Target.activateTarget -> selectTab(tabIdForTargetId(params.targetId)); empty result on success, CDP error -32000 \"No target with given id\" when unknown.\n- Target.closeTarget -> closeTab(...) and {\"success\":true|false}; false (not an error) when the last tab is refused, matching the registry contract.\n- Target.createTarget -> newTab(params.url), then use the DEFERRED path from task-007: register whenTargetResolved and reply {\"targetId\":\"<chromium target id>\"} when it lands. Bound the wait (about 10s) and answer a CDP error -32000 with a plain message on expiry, so a client is never left hanging. Also accept the optional anoa params anoaProfile (string) and anoaIsolated (bool) and pass them to newTab - the CLI in task-012 sends them.\n- Target.getTargetInfo for a known target id answers from the registry too; anything else in the Target domain keeps its current behaviour.\n- rewritePassthrough: the Target.createTarget __anoa_default__ stripping is now unreachable for handled commands. Delete it deliberately and say why in a comment, rather than leaving a branch nothing can enter.\n\nAcceptance: over the proxy, Target.getTargets lists every tab; Target.createTarget returns a targetId that then appears in /json/list with a fresh anoaTabId; activateTarget changes which entry has anoaActive; closeTarget removes it. `make build` warning-clean.",
       "priority": 3,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-007",
         "task-004"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/cdp/tab_host.h",
         "src/cdp/cdp_extensions.h",
@@ -173,8 +173,8 @@
         "src/browser/anoa_browser.cpp",
         "src/main.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:09:53.274Z",
+      "completed_at": "2026-08-12T15:19:49.919Z",
       "error_log": []
     },
     {

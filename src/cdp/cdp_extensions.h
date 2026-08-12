@@ -7,6 +7,7 @@
 #include <QString>
 
 class QWebEnginePage;
+class TabHost;
 
 class CdpExtensions : public QObject {
     Q_OBJECT
@@ -27,6 +28,7 @@ public:
     // sendLater must be invoked at most once per command, and the caller is
     // responsible for a handler that never invokes it at all.
     static QString processCommand(const QJsonObject &cmd, QWebEnginePage *page,
+                                  TabHost *tabs = nullptr,
                                   bool *deferred = nullptr,
                                   const std::function<void(const QString &)> &sendLater = {});
 
@@ -38,5 +40,6 @@ private:
     static QString handleHeapProfiler(const QJsonObject &cmd);
     static QString handleSecurity(const QJsonObject &cmd, QWebEnginePage *page);
     static QString handleBrowser(const QJsonObject &cmd);
-    static QString handleTarget(const QJsonObject &cmd);
+    static QString handleTarget(const QJsonObject &cmd, TabHost *tabs, bool *deferred,
+                                const std::function<void(const QString &)> &sendLater);
 };

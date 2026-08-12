@@ -297,6 +297,7 @@ int main(int argc, char *argv[])
     // The proxy answers some commands itself and needs the page the client is
     // actually attached to, not the first tab. It is handed a lookup rather
     // than a pointer so src/cdp keeps knowing nothing about src/browser.
+    cdpProxy.setTabHost(&browser);
     cdpProxy.setPageResolver([&browser](const QString &targetId) -> QWebEnginePage * {
         if (targetId.isEmpty())
             return browser.page(); // browser-level endpoint: the active tab

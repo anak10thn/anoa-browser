@@ -162,8 +162,13 @@ int AnoaBrowser::indexOf(const QString &id) const
     return -1;
 }
 
-QString AnoaBrowser::newTab(const QUrl &url)
+QString AnoaBrowser::newTab(const QUrl &url, const QString &profileName, bool isolated)
 {
+    // Carried, not yet honoured: every tab shares m_profile until task-009
+    // gives the registry profiles of its own.
+    Q_UNUSED(profileName)
+    Q_UNUSED(isolated)
+
     Tab tab;
     tab.id = m_minter.next();
     tab.profile = m_profile;
@@ -286,6 +291,52 @@ QString AnoaBrowser::chromiumTargetId(const QString &tabId) const
 {
     const int idx = indexOf(tabId);
     return idx < 0 ? QString() : m_tabs.at(idx).chromiumTargetId;
+}
+
+QString AnoaBrowser::targetIdFor(const QString &tabId) const
+{
+    return chromiumTargetId(tabId);
+}
+
+QString AnoaBrowser::titleFor(const QString &tabId) const
+{
+    QWebEngineView *view = viewFor(tabId);
+    return view ? view->title() : QString();
+}
+
+QString AnoaBrowser::urlFor(const QString &tabId) const
+{
+    QWebEngineView *view = viewFor(tabId);
+    return view ? view->url().toString() : QString();
+}
+
+QString AnoaBrowser::browserContextIdFor(const QString &tabId) const
+{
+    Q_UNUSED(tabId)
+    // One profile for every tab, so one context. Task-010 reports a real id per
+    // profile once tabs can have their own.
+    return QStringLiteral("__anoa_default__");
+}
+
+void AnoaBrowser::whenTargetResolved(const QString &tabId,
+                                     std::function<void(const QString &)> cb)
+{
+    const QString already = chromiumTargetId(tabId);
+    if (!already.isEmpty()) {
+        cb(already);
+        return;
+    }
+    // One shot: disconnected as soon as this tab's id lands, so a later tab
+    // resolving does not fire someone else's callback.
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(this, &AnoaBrowser::tabTargetResolved, this,
+                    [this, tabId, cb, conn](const QString &resolvedTab,
+                                            const QString &targetId) {
+                        if (resolvedTab != tabId)
+                            return;
+                        disconnect(*conn);
+                        cb(targetId);
+                    });
 }
 
 QString AnoaBrowser::tabIdForTargetId(const QString &targetId) const

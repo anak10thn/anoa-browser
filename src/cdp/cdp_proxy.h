@@ -10,6 +10,7 @@
 #include <QWebSocketServer>
 
 class QWebEnginePage;
+class TabHost;
 
 class CdpProxy : public QObject {
     Q_OBJECT
@@ -26,6 +27,9 @@ public:
     // callable the owner installs. An empty target id means the browser-level
     // endpoint, which resolves to the active tab.
     void setPageResolver(std::function<QWebEnginePage *(const QString &targetId)> resolver);
+    // The tab registry, for the Target domain. Also an interface rather than a
+    // browser type, for the same reason the resolver is a callable.
+    void setTabHost(TabHost *tabs);
 
 private:
     QWebEnginePage *pageForClient(QWebSocket *client) const;
@@ -56,4 +60,5 @@ private:
     quint16 m_debugPort;
     QString m_authToken;
     std::function<QWebEnginePage *(const QString &)> m_pageResolver;
+    TabHost *m_tabs = nullptr;
 };
