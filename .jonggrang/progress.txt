@@ -356,3 +356,26 @@
   published build fails there identically to a broken one, so the run proves
   nothing either way. The container job in container.yml runs on a real x86_64
   runner and is the trustworthy signal.
+
+- libX11 and libstdc++ are host-first libraries, alongside GL and glibc. The
+  host's Mesa is dlopen()ed into the process and built against the host's copy
+  of both, so ours in front leaves it unable to offer a usable FBConfig. Found
+  by bisecting the bundle one library at a time on a real Ubuntu 24.04 box with
+  glxinfo counting configs: 320 without the bundle, 0 with either of those two,
+  320 with every other library in it. glxinfo is a far cheaper probe than
+  launching the browser, and it isolates the cause in one number.
+
+- Host-first cannot be decided per directory. GL spans libgl1, libglx0,
+  libopengl0, libegl1 and libglvnd0, all separately installable, so one sentinel
+  file answers for the set and is wrong in both directions — on one machine,
+  libGL.so.1 alone meant ours shadowed the host's (GLX died), and libOpenGL.so.0
+  alone meant the host's was kept and the binary would not start for want of
+  libEGL.so.1. anoa.sh asks ldconfig per library and symlinks in only the gaps.
+
+- Testing on a real Linux box beats any amount of reasoning about one. Xvfb
+  with +extension GLX reproduces a desktop GLX failure faithfully; llm.irawan.science
+  did in minutes what an emulated container could not do at all.
+
+- Watch out for pkill -f matching the ssh command line itself: `pkill -f "port
+  9333"` over ssh kills the shell running it, and the command returns silently
+  with no output. `pkill -x anoa` matches the process, not the sentence about it.

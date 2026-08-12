@@ -112,11 +112,13 @@ tar xzf anoa-linux-x86_64.tar.gz
 
 Always go through `anoa.sh`: the raw executable next to it has none of that environment set up, in terminal mode as much as in browser mode.
 
-**Headed mode uses your machine's OpenGL.** The bundle carries a copy of the GL
-dispatch libraries, but only reaches for it when the host has none — those
-libraries exist to find *your* graphics driver, so preferring a vendored copy is
-what produces `Could not initialize GLX` on a desktop that works fine otherwise.
-Nothing to install on a normal desktop; on a bare server that wants a window:
+**Headed mode uses your machine's own libraries.** The OpenGL dispatch
+libraries, libX11 and libstdc++ are taken from your system whenever it has
+them, and the bundle's copies fill in only what is genuinely missing — your
+graphics driver is loaded into the process and is built against your system's,
+so a vendored copy in front of it is what produces `Could not initialize GLX`
+on a desktop that is otherwise perfectly healthy. Nothing to install on a
+normal desktop; on a bare server that wants a window:
 
 ```bash
 sudo apt install libgl1 libglx-mesa0 libegl1 libopengl0   # Debian/Ubuntu
