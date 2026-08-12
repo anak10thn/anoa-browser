@@ -182,19 +182,19 @@
       "title": "Per-tab profiles: shared by default, named-persistent or isolated on request",
       "description": "Move QWebEngineProfile ownership into the registry so a tab can have its own cookie jar and storage.\n\nsrc/browser/anoa_browser.h + .cpp:\n- A profile registry keyed by name: QWebEngineProfile *profileFor(const QString &name, bool isolated). A named profile is persistent, stored under config.profileDir/<name>, and CREATED ONCE - two tabs naming the same profile share one QWebEngineProfile object, because two Qt profiles over one on-disk path is a corruption risk, not a duplicate. `isolated` yields a fresh off-the-record (unnamed) profile per tab. Neither given means today's default profile, so a login in one tab is a login everywhere, exactly as now.\n- Reference-count each profile by the tabs using it. A profile MUST outlive every page using it: closeTab destroys the view first, then drops the reference, and the profile object is destroyed only when its last tab goes. The default profile is never destroyed while the process lives.\n- newTab gains the parameters: QString newTab(const QUrl &url = QUrl(), const QString &profileName = QString(), bool isolated = false).\n- setupNamedProfile keeps working for the process-wide --profile flag and seeds the registry with that profile as the default, so `anoa --profile work` behaves exactly as it does today.\n- loadExtensions stays process-wide against the default profile; extensions per tab are out of scope. Say so in a comment where a reader would otherwise expect per-profile loading.\n- Expose what tests need without leaking internals: QString profileNameFor(const QString &tabId) const and bool tabsShareProfile(const QString &a, const QString &b) const.\n\nAcceptance: two tabs created with the same --profile name share one profile object (tabsShareProfile true); an isolated tab's cookies are invisible to the shared tab and vice versa; closing one of two tabs sharing a profile leaves the other fully working (no use-after-free, run it under the sanitizer build if convenient); `make build` warning-clean.",
       "priority": 4,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-003"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/browser/anoa_browser.h",
         "src/browser/anoa_browser.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:25:19.403Z",
+      "completed_at": "2026-08-12T15:27:45.434Z",
       "error_log": []
     },
     {

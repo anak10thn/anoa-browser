@@ -164,15 +164,12 @@ int AnoaBrowser::indexOf(const QString &id) const
 
 QString AnoaBrowser::newTab(const QUrl &url, const QString &profileName, bool isolated)
 {
-    // Carried, not yet honoured: every tab shares m_profile until task-009
-    // gives the registry profiles of its own.
-    Q_UNUSED(profileName)
-    Q_UNUSED(isolated)
-
     Tab tab;
     tab.id = m_minter.next();
-    tab.profile = m_profile;
-    tab.view = createView(m_profile);
+    tab.profileName = profileName;
+    tab.profile = profileFor(profileName, isolated);
+    tab.view = createView(tab.profile);
+    m_profileUsers[tab.profile] += 1;
 
     m_tabs.append(tab);
     m_stack->addWidget(tab.view);
@@ -212,9 +209,14 @@ bool AnoaBrowser::closeTab(const QString &id)
 
     const bool wasActive = (m_activeTabId == id);
     QWebEngineView *view = m_tabs.at(idx).view;
+    QWebEngineProfile *profile = m_tabs.at(idx).profile;
     m_tabs.removeAt(idx);
     m_stack->removeWidget(view);
+    // The view goes first and the profile reference after it. A profile
+    // destroyed while a page still holds it is a use-after-free inside
+    // Chromium, not a leak we would notice later.
     delete view;
+    releaseProfile(profile);
 
     if (wasActive) {
         // The next tab in creation order, or the previous one if the closed tab
@@ -287,6 +289,62 @@ QWebEngineView *AnoaBrowser::activeView() const
     return viewFor(m_activeTabId);
 }
 
+QWebEngineProfile *AnoaBrowser::profileFor(const QString &name, bool isolated)
+{
+    // Off-the-record and unnamed: a fresh jar per tab, gone when the tab goes.
+    // Asked for explicitly, because it is the opposite of what a browser
+    // normally does with a login.
+    if (isolated)
+        return new QWebEngineProfile(this);
+
+    if (name.isEmpty())
+        return m_profile; // the shared default
+
+    // Created once per name. Two QWebEngineProfile objects over one on-disk
+    // path corrupt each other's storage; this is not an optimisation.
+    if (QWebEngineProfile *existing = m_profilesByName.value(name))
+        return existing;
+
+    auto *profile = new QWebEngineProfile(name, this);
+    profile->setPersistentStoragePath(QDir(m_config.profileDir).filePath(name));
+    profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    m_profilesByName.insert(name, profile);
+    return profile;
+}
+
+void AnoaBrowser::releaseProfile(QWebEngineProfile *profile)
+{
+    if (!profile)
+        return;
+    const int left = m_profileUsers.value(profile) - 1;
+    if (left > 0) {
+        m_profileUsers[profile] = left;
+        return;
+    }
+    m_profileUsers.remove(profile);
+    // The default outlives every tab: the process still holds it, and
+    // setupNamedProfile may have made it the --profile one.
+    if (profile == m_profile)
+        return;
+    m_profilesByName.remove(m_profilesByName.key(profile));
+    profile->deleteLater();
+}
+
+QString AnoaBrowser::profileNameFor(const QString &tabId) const
+{
+    const int idx = indexOf(tabId);
+    return idx < 0 ? QString() : m_tabs.at(idx).profileName;
+}
+
+bool AnoaBrowser::tabsShareProfile(const QString &a, const QString &b) const
+{
+    const int ia = indexOf(a);
+    const int ib = indexOf(b);
+    if (ia < 0 || ib < 0)
+        return false;
+    return m_tabs.at(ia).profile == m_tabs.at(ib).profile;
+}
+
 QString AnoaBrowser::chromiumTargetId(const QString &tabId) const
 {
     const int idx = indexOf(tabId);
@@ -330,11 +388,11 @@ void AnoaBrowser::whenTargetResolved(const QString &tabId,
     // resolving does not fire someone else's callback.
     auto conn = std::make_shared<QMetaObject::Connection>();
     *conn = connect(this, &AnoaBrowser::tabTargetResolved, this,
-                    [this, tabId, cb, conn](const QString &resolvedTab,
-                                            const QString &targetId) {
+                    [tabId, cb, conn](const QString &resolvedTab,
+                                      const QString &targetId) {
                         if (resolvedTab != tabId)
                             return;
-                        disconnect(*conn);
+                        QObject::disconnect(*conn);
                         cb(targetId);
                     });
 }
@@ -481,6 +539,10 @@ void AnoaBrowser::init()
 
 void AnoaBrowser::loadExtensions(const QStringList &paths)
 {
+    // Process-wide, against the default profile only. Extensions per tab are
+    // out of scope, so a tab on a named or isolated profile gets none of these
+    // scripts — which is why this reads m_profile rather than walking the
+    // profile registry.
     for (const QString &path : paths) {
         if (!QDir(path).exists()) {
             qWarning("Extension path does not exist, skipping: %s", qPrintable(path));

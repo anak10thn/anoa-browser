@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QNetworkCookie>
 #include <QPoint>
@@ -40,8 +41,8 @@ public:
     void clearStorage(const QUrl &origin);
 
     // ── the registry ────────────────────────────────────────────────────────
-    // TabHost. profileName and isolated are carried now and given meaning in
-    // task-009; every tab still shares the one profile.
+    // TabHost. Neither profile argument given means the shared default, so a
+    // login in one tab is a login everywhere — today's behaviour.
     QString newTab(const QUrl &url = QUrl(), const QString &profileName = QString(),
                    bool isolated = false) override;
     // Refuses to close the last tab: one process still means at least one page.
@@ -66,6 +67,10 @@ public:
     // it is discovered from Chromium's own discovery endpoint and cached. Empty
     // until resolution succeeds — a page exists a beat before its target does.
     QString chromiumTargetId(const QString &tabId) const;
+
+    // What a test needs to see about profiles, without handing out the objects.
+    QString profileNameFor(const QString &tabId) const;
+    bool tabsShareProfile(const QString &a, const QString &b) const;
 
     // ── the active tab, under the names call sites already use ──────────────
     // These keep working exactly as they did when this class was the view, so
@@ -100,6 +105,11 @@ private:
     // viewport size, same headless handling.
     QWebEngineView *createView(QWebEngineProfile *profile);
     int indexOf(const QString &id) const;
+    // One object per name. Two Qt profiles over one on-disk path is a
+    // corruption risk, not a duplicate, so a name is looked up before it is
+    // created.
+    QWebEngineProfile *profileFor(const QString &name, bool isolated);
+    void releaseProfile(QWebEngineProfile *profile);
     // Asynchronous by construction: a seam is crossed by signals, never by a
     // blocking call, and the answer does not exist yet when the tab is created.
     void resolveTargetId(const QString &tabId, int attempt);
@@ -108,6 +118,7 @@ private:
         QString id;
         QWebEngineView *view = nullptr;
         QWebEngineProfile *profile = nullptr;
+        QString profileName; // empty = the shared default
         QString chromiumTargetId;
     };
 
@@ -116,6 +127,11 @@ private:
     QStackedLayout *m_stack;
     QNetworkAccessManager *m_nam;
     QList<Tab> m_tabs; // creation order
+    // Named profiles, and how many tabs still hold each one. A profile has to
+    // outlive every page using it, so it is destroyed only when its last tab
+    // goes — and never for the default, which lives as long as the process.
+    QHash<QString, QWebEngineProfile *> m_profilesByName;
+    QHash<QWebEngineProfile *, int> m_profileUsers;
     QString m_activeTabId;
     TabIdMinter m_minter;
 };
