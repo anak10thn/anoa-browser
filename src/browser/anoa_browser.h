@@ -55,6 +55,8 @@ public:
     QString titleFor(const QString &tabId) const override;
     QString urlFor(const QString &tabId) const override;
     QString browserContextIdFor(const QString &tabId) const override;
+    bool knowsBrowserContext(const QString &contextId) const override;
+    QString newTabInBrowserContext(const QUrl &url, const QString &contextId) override;
     void whenTargetResolved(const QString &tabId,
                             std::function<void(const QString &targetId)> cb) override;
     int tabCount() const;
@@ -101,6 +103,14 @@ signals:
     void activeLoadFinished(bool ok);
 
 private:
+    struct Tab {
+        QString id;
+        QWebEngineView *view = nullptr;
+        QWebEngineProfile *profile = nullptr;
+        QString profileName; // empty = the shared default
+        QString chromiumTargetId;
+    };
+
     // Every tab is built here so they are identical: same settings, same
     // viewport size, same headless handling.
     QWebEngineView *createView(QWebEngineProfile *profile);
@@ -109,18 +119,13 @@ private:
     // corruption risk, not a duplicate, so a name is looked up before it is
     // created.
     QWebEngineProfile *profileFor(const QString &name, bool isolated);
+    // The half of tab creation both entry points share, once the profile is
+    // decided.
+    QString finishNewTab(Tab &tab, const QUrl &url);
     void releaseProfile(QWebEngineProfile *profile);
     // Asynchronous by construction: a seam is crossed by signals, never by a
     // blocking call, and the answer does not exist yet when the tab is created.
     void resolveTargetId(const QString &tabId, int attempt);
-
-    struct Tab {
-        QString id;
-        QWebEngineView *view = nullptr;
-        QWebEngineProfile *profile = nullptr;
-        QString profileName; // empty = the shared default
-        QString chromiumTargetId;
-    };
 
     Config m_config;
     QWebEngineProfile *m_profile;
@@ -132,6 +137,11 @@ private:
     // goes — and never for the default, which lives as long as the process.
     QHash<QString, QWebEngineProfile *> m_profilesByName;
     QHash<QWebEngineProfile *, int> m_profileUsers;
+    // A CDP browser context is a profile as a client sees it. Minted per
+    // profile OBJECT, so two tabs sharing a profile report one id and an
+    // isolated tab reports its own.
+    QHash<QWebEngineProfile *, QString> m_contextIds;
+    int m_nextContextId = 0;
     QString m_activeTabId;
     TabIdMinter m_minter;
 };

@@ -31,6 +31,11 @@ public:
     virtual QString titleFor(const QString &tabId) const = 0;
     virtual QString urlFor(const QString &tabId) const = 0;
     virtual QString browserContextIdFor(const QString &tabId) const = 0;
+    // A context id this registry minted, and a tab created inside it. Returns
+    // empty for an id we never issued, so the caller can say so rather than
+    // quietly opening the tab somewhere else.
+    virtual bool knowsBrowserContext(const QString &contextId) const = 0;
+    virtual QString newTabInBrowserContext(const QUrl &url, const QString &contextId) = 0;
 
     // Calls back once the tab has a Chromium target id — immediately if it
     // already has one. This is what makes Target.createTarget answerable at

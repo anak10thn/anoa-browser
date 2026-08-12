@@ -406,3 +406,9 @@
   connection closes the real browser. Chaining the Playwright suite into another
   e2e suite that attaches to the same instance therefore fails the second one
   for reasons that have nothing to do with the code under test.
+
+- The e2e suites assume a browser with ONE tab: they take contexts()[0].pages()[0]
+  and reason about counts. Running them against an instance left holding tabs
+  from an earlier probe silently changes which page they drive, and a case can
+  drop out of the run entirely. Start a fresh browser per suite now that tabs
+  exist.

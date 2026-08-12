@@ -171,6 +171,20 @@ QString AnoaBrowser::newTab(const QUrl &url, const QString &profileName, bool is
     tab.view = createView(tab.profile);
     m_profileUsers[tab.profile] += 1;
 
+    return finishNewTab(tab, url);
+}
+
+QString AnoaBrowser::finishNewTab(Tab &tab, const QUrl &url)
+{
+    // Every profile a client can name needs a stable id, minted once per
+    // profile object so two tabs sharing one report the same context.
+    if (!m_contextIds.contains(tab.profile)) {
+        m_contextIds.insert(tab.profile,
+                            tab.profile == m_profile
+                                ? QStringLiteral("__anoa_default__")
+                                : QStringLiteral("anoa-ctx-%1").arg(++m_nextContextId));
+    }
+
     m_tabs.append(tab);
     m_stack->addWidget(tab.view);
 
@@ -327,6 +341,7 @@ void AnoaBrowser::releaseProfile(QWebEngineProfile *profile)
     if (profile == m_profile)
         return;
     m_profilesByName.remove(m_profilesByName.key(profile));
+    m_contextIds.remove(profile);
     profile->deleteLater();
 }
 
@@ -370,10 +385,44 @@ QString AnoaBrowser::urlFor(const QString &tabId) const
 
 QString AnoaBrowser::browserContextIdFor(const QString &tabId) const
 {
-    Q_UNUSED(tabId)
-    // One profile for every tab, so one context. Task-010 reports a real id per
-    // profile once tabs can have their own.
-    return QStringLiteral("__anoa_default__");
+    const int idx = indexOf(tabId);
+    if (idx < 0)
+        return QStringLiteral("__anoa_default__");
+    return m_contextIds.value(m_tabs.at(idx).profile,
+                              QStringLiteral("__anoa_default__"));
+}
+
+bool AnoaBrowser::knowsBrowserContext(const QString &contextId) const
+{
+    if (contextId == QLatin1String("__anoa_default__"))
+        return true;
+    for (auto it = m_contextIds.constBegin(); it != m_contextIds.constEnd(); ++it) {
+        if (it.value() == contextId)
+            return true;
+    }
+    return false;
+}
+
+QString AnoaBrowser::newTabInBrowserContext(const QUrl &url, const QString &contextId)
+{
+    if (contextId.isEmpty() || contextId == QLatin1String("__anoa_default__"))
+        return newTab(url);
+
+    // The context names a profile we already hold, so the new tab joins it
+    // rather than creating a second object over the same storage.
+    for (auto it = m_contextIds.constBegin(); it != m_contextIds.constEnd(); ++it) {
+        if (it.value() != contextId)
+            continue;
+        QWebEngineProfile *profile = it.key();
+        Tab tab;
+        tab.id = m_minter.next();
+        tab.profile = profile;
+        tab.profileName = m_profilesByName.key(profile);
+        tab.view = createView(profile);
+        m_profileUsers[profile] += 1;
+        return finishNewTab(tab, url);
+    }
+    return QString(); // not ours
 }
 
 void AnoaBrowser::whenTargetResolved(const QString &tabId,

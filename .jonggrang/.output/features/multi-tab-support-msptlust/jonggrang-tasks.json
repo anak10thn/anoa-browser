@@ -202,21 +202,21 @@
       "title": "Report a per-tab profile as a real browserContextId in Target.*",
       "description": "A tab with its own profile should look like its own browser context to a CDP client, instead of every tab reporting the synthetic __anoa_default__.\n\nsrc/browser/anoa_browser.h + .cpp:\n- Mint a stable context id per profile OBJECT (not per tab): keep __anoa_default__ for the shared/default profile so nothing changes for today's clients, and mint anoa-ctx-<n> for each additional profile the registry creates. Two tabs sharing a profile report the same id; an isolated tab gets its own. Implement browserContextIdFor(tabId) from task-008's TabHost.\n\nsrc/cdp/cdp_extensions.cpp:\n- Target.getTargets / getTargetInfo / createTarget report that id.\n- Target.createTarget honours an incoming browserContextId that the registry minted (create the tab on that profile) and rejects an unknown one with a CDP error rather than silently using the default.\n- rewritePassthrough: strip ANY anoa-minted context id (the __anoa_default__ case plus the anoa-ctx-* ones) before a command goes upstream, for the same reason the default one is stripped today - Chromium knows none of them.\n- Target.createBrowserContext keeps returning the synthetic id and stays documented as out of scope.\n\nAcceptance: with one shared tab and one isolated tab, Target.getTargets reports two distinct browserContextIds; two tabs on the same named profile report one shared id; no passthrough command reaches Chromium carrying an anoa-minted id.",
       "priority": 4,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-008",
         "task-009"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/browser/anoa_browser.h",
         "src/browser/anoa_browser.cpp",
         "src/cdp/cdp_extensions.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:28:14.602Z",
+      "completed_at": "2026-08-12T15:31:22.348Z",
       "error_log": []
     },
     {

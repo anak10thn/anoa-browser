@@ -74,12 +74,20 @@ QString CdpExtensions::handleSecurity(const QJsonObject &cmd, QWebEnginePage *pa
 
 QJsonObject CdpExtensions::rewritePassthrough(const QJsonObject &cmd)
 {
-    const QString method = cmd.value(QStringLiteral("method")).toString();
-    // Target.createTarget used to be forwarded with its synthetic
-    // browserContextId stripped, because Chromium would reject an id it never
-    // issued. handleTarget answers that command from the registry now and never
-    // forwards it, so the branch had become unreachable — deleted rather than
-    // left as a path nothing can enter.
+    // Chromium knows none of the browser context ids anoa mints, so any command
+    // still carrying one would be rejected outright. createTarget is answered
+    // locally and never reaches here, but Storage and Target commands can carry
+    // the same field, so the strip is by field rather than by method.
+    const QJsonObject params = cmd.value(QStringLiteral("params")).toObject();
+    const QString ctxId = params.value(QStringLiteral("browserContextId")).toString();
+    if (ctxId == QLatin1String("__anoa_default__")
+        || ctxId.startsWith(QLatin1String("anoa-ctx-"))) {
+        QJsonObject modified = cmd;
+        QJsonObject p = params;
+        p.remove(QStringLiteral("browserContextId"));
+        modified[QStringLiteral("params")] = p;
+        return modified;
+    }
     return QJsonObject(); // no rewrite needed
 }
 
@@ -220,7 +228,19 @@ QString CdpExtensions::handleTarget(const QJsonObject &cmd, TabHost *tabs, bool 
         const QString profileName = params.value(QStringLiteral("anoaProfile")).toString();
         const bool isolated = params.value(QStringLiteral("anoaIsolated")).toBool();
 
-        const QString tabId = tabs->newTab(url, profileName, isolated);
+        // A context we minted means "open it beside the tabs already there";
+        // one we never issued is a mistake worth saying out loud, rather than
+        // quietly opening the tab in the default profile instead.
+        const QString contextId = params.value(QStringLiteral("browserContextId")).toString();
+        QString tabId;
+        if (!contextId.isEmpty()) {
+            if (!tabs->knowsBrowserContext(contextId))
+                return cdpError(cmd, QStringLiteral("Failed to find browser context with id ")
+                                         + contextId);
+            tabId = tabs->newTabInBrowserContext(url, contextId);
+        } else {
+            tabId = tabs->newTab(url, profileName, isolated);
+        }
         if (tabId.isEmpty())
             return cdpError(cmd, QStringLiteral("Could not create target"));
 
