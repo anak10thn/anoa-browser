@@ -20,6 +20,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWebEngineHistory>
+#include <QWebEnginePage>
 
 #include "browser/anoa_browser.h"
 #include "common/url_input.h"
@@ -141,9 +142,12 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     bar->addWidget(m_menuButton);
     setStyleSheet(QString::fromLatin1(kToolbarStyle));
 
-    // The toolbar is deliberately NOT in the layout. Only the view is, and the
-    // toolbar is positioned by hand across the top with the layout's top margin
-    // reserving the space for it.
+    // The toolbar is deliberately NOT in the layout. Only the tab container is,
+    // and the toolbar is positioned by hand across the top with the layout's top
+    // margin reserving the space for it. It stays a sibling of the container for
+    // the same reason it is not inside the view: anything within the container
+    // appears in every screenshot and shifts the coordinate space clicks are
+    // measured in.
     //
     // That indirection is what makes auto-hide possible without touching the
     // view's geometry: revealing the bar over the page must not resize the
@@ -161,9 +165,15 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     connect(m_forward, &QToolButton::clicked, m_view, &AnoaBrowser::forward);
     connect(reload, &QToolButton::clicked, m_view, &AnoaBrowser::reload);
     connect(m_urlEdit, &QLineEdit::returnPressed, this, &BrowserWindow::onUrlEntered);
-    connect(m_view, &AnoaBrowser::urlChanged, this, &BrowserWindow::onUrlChanged);
-    connect(m_view, &AnoaBrowser::loadFinished, this,
+    // The container's active* signals, not one view's: which view is showing
+    // can change under us, and the address field has to follow whichever tab
+    // is active rather than the one that happened to exist at startup.
+    connect(m_view, &AnoaBrowser::activeUrlChanged, this, &BrowserWindow::onUrlChanged);
+    connect(m_view, &AnoaBrowser::activeLoadFinished, this,
             [this](bool) { refreshHistoryButtons(); });
+    // Switching tabs changes no page, so nothing above fires for it.
+    connect(m_view, &AnoaBrowser::tabActivated, this,
+            [this](const QString &) { refreshHistoryButtons(); });
 
     refreshHistoryButtons();
 
@@ -297,8 +307,13 @@ void BrowserWindow::rebuildMenu()
 
 BrowserWindow::~BrowserWindow()
 {
+    // The container is borrowed, not owned: it lives on main()'s stack and is
+    // declared before this window so it outlives it. Releasing it here keeps
+    // Qt's parent-child teardown from deleting a stack object. What is released
+    // is the whole tab container, so every view inside it goes with it and none
+    // is left parented to a window that no longer exists.
     if (m_view) {
-        m_view->hide(); // so releasing it does not flash a bare top-level view
+        m_view->hide(); // so releasing it does not flash a bare top-level widget
         m_view->setParent(nullptr);
     }
 }
@@ -323,6 +338,11 @@ void BrowserWindow::onUrlChanged(const QUrl &url)
 
 void BrowserWindow::refreshHistoryButtons()
 {
-    m_back->setEnabled(m_view->history()->canGoBack());
-    m_forward->setEnabled(m_view->history()->canGoForward());
+    // The active tab's history. Each tab keeps its own, so these buttons mean
+    // "back in what you are looking at", not "back in the first tab opened".
+    QWebEnginePage *page = m_view->page();
+    const bool canBack = page && page->history()->canGoBack();
+    const bool canForward = page && page->history()->canGoForward();
+    m_back->setEnabled(canBack);
+    m_forward->setEnabled(canForward);
 }

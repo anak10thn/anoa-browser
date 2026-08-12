@@ -47,13 +47,13 @@
       "title": "Rework ownership and every view consumer for the container AnoaBrowser",
       "description": "Make the tree build and behave identically with one tab, now that AnoaBrowser is a QWidget container rather than a QWebEngineView.\n\nsrc/main.cpp:\n- AnoaBrowser stays on the stack. Re-verify the declaration order comment: `window` is declared after `browser` so BrowserWindow is destroyed first and releases the view it borrowed. The container must survive that release without a double free.\n- cdpProxy.setPage(browser.page()) still works via the delegating accessor for now (task-006 replaces it with a per-connection lookup).\n\nsrc/browser/browser_window.h + .cpp:\n- Connect the address field, history buttons and bookmark star to AnoaBrowser's activeUrlChanged / activeTitleChanged / activeLoadFinished instead of a single view's signals; refreshHistoryButtons() queries the ACTIVE page's history.\n- The reparent/release contract in the constructor/destructor comments must be re-read and updated to say it reparents the container, not the view. The toolbar stays a sibling wrapper - anything inside the container appears in every screenshot and shifts the coordinate space.\n\nsrc/http/http_server.cpp:\n- Route grab(), width(), height(), page(), load(), back(), forward(), reload() through the container's active-tab accessors. No behaviour change and no new query params here (that is task-014).\n\nsrc/terminal/inprocess_frame_backend.h + .cpp:\n- Still takes AnoaBrowser * and captures the active tab. Multi-tab in the embedded viewer is out of scope, so it simply follows the active tab.\n\nAcceptance:\n- `make build` links and is warning-clean under -Wall -Wextra -Wpedantic.\n- `bash tests/regression/smoke.sh` passes (ANOA_BINARY=./build/anoa).\n- `cd tests/integration && npx vitest run` passes unchanged, in particular http_server.test.js and render_endpoints.test.js.\n- /render/screenshot.png still reports X-Anoa-Viewport-Width/Height equal to the view geometry, and a click at those coordinates still lands where it landed before.",
       "priority": 1,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-002"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/main.cpp",
         "src/browser/browser_window.h",
@@ -62,8 +62,8 @@
         "src/terminal/inprocess_frame_backend.h",
         "src/terminal/inprocess_frame_backend.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T09:02:00.196Z",
+      "completed_at": "2026-08-12T09:04:50.620Z",
       "error_log": []
     },
     {

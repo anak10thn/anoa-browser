@@ -384,3 +384,12 @@
   object paths it measures) and once in the `cmake --build --target` list. Adding
   a unit lib to only the first passes `make test` and then fails `make coverage`
   with "Not Run", because the test binary was never built into build-coverage.
+
+- `make test` builds the main anoa target too, not just the unit libs. A commit
+  that deliberately leaves the tree unlinkable (task-002 of multi-tab did)
+  therefore cannot run the unit suite at all — grepping its output for "tests
+  passed" silently finds nothing rather than failing loudly.
+
+- /render/click takes its coordinates as QUERY PARAMETERS, not a JSON body.
+  A POST with a JSON payload returns "invalid coordinates" as a 400, which is
+  easy to misread as the click having missed its target.

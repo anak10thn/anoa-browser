@@ -1,5 +1,7 @@
 #include "http/http_server.h"
 
+#include <QWebEnginePage>
+
 #include "browser/anoa_browser.h"
 
 #include <QBuffer>

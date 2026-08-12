@@ -262,7 +262,9 @@ int main(int argc, char *argv[])
     browser.loadExtensions(config.extensionPaths);
 
     // Declared after `browser` so it is destroyed first: its destructor
-    // releases the view it borrowed. Headless mode gets no window at all —
+    // releases the tab container it borrowed, and every view inside goes with
+    // it. The container itself is a stack object here and must survive that
+    // release. Headless mode gets no window at all —
     // there is nothing to show chrome on, and wrapping the view would change
     // the geometry that /render/* reports as the viewport.
     std::unique_ptr<BrowserWindow> window;
