@@ -71,19 +71,19 @@
       "title": "Resolve and cache the tab-id to Chromium-target-id mapping per tab",
       "description": "Every tab needs the Chromium DevTools target id of its page, because that is what a CDP client dials and what /json/list and Target.* must report. Qt exposes no such API on QWebEnginePage, so it is discovered from Chromium's own discovery endpoint and cached.\n\nsrc/browser/anoa_browser.h + .cpp:\n- AnoaBrowser learns the internal Chromium debugging port (config.port + 1; take it from the Config it already holds rather than adding a parameter to any caller).\n- After a tab's view is created, GET http://127.0.0.1:<debugPort>/json/list with QNetworkAccessManager and pick the type==\"page\" entry whose id is not already claimed by another tab in the registry, disambiguating on url/title when more than one is unclaimed. Cache it in Tab::chromiumTargetId.\n- A page target appears a beat after the view, so retry with a short bounded backoff (e.g. 100ms, 200ms, 400ms, 800ms, up to about 5s) and then give up leaving the id empty.\n- This MUST be asynchronous: QNetworkAccessManager + signals, resolved on a later turn of the event loop. No nested QEventLoop - a seam is crossed by signals/slots and never by a blocking call (AGENTS.md Code Patterns).\n- API: QString chromiumTargetId(const QString &tabId) const; QString tabIdForTargetId(const QString &targetId) const; signal tabTargetResolved(QString tabId, QString targetId).\n- Invalidate and re-resolve when a page is recreated: connect QWebEnginePage::renderProcessTerminated and clear that tab's cached id, then re-run resolution. A stale target id is worse than a missing one - a client would dial a dead route.\n- closeTab clears the mapping for that tab.\n\nAcceptance: with the single tab created by init(), chromiumTargetId(\"t1\") is non-empty within a couple of seconds of startup and matches the id Chromium reports on port+1 for that page; `make build` stays warning-clean. The mapping becomes observable through /json/list in task-005.",
       "priority": 2,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-003"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/browser/anoa_browser.h",
         "src/browser/anoa_browser.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-12T15:01:34.073Z",
+      "completed_at": "2026-08-12T15:01:34.110Z",
       "error_log": []
     },
     {

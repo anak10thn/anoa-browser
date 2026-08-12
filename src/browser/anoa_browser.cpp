@@ -7,6 +7,9 @@
 #include <QFile>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QStackedLayout>
 #include <QWheelEvent>
 #include <QJsonArray>
@@ -57,6 +60,7 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     , m_config(config)
     , m_profile(nullptr)
     , m_stack(nullptr)
+    , m_nam(new QNetworkAccessManager(this))
 {
     // QTWEBENGINE_CHROMIUM_FLAGS must be set before WebEngine initializes its
     // profile/page. Setting it here, before creating QWebEngineProfile and any
@@ -131,6 +135,21 @@ QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)
             emit activeLoadFinished(ok);
     });
 
+    // A recreated page gets a new DevTools target, so the cached id becomes a
+    // dead route. A client dialling a stale id fails in a way that looks like
+    // the browser is broken; having no id at all is merely "not yet", which
+    // /json/list already knows how to express.
+    connect(view->page(), &QWebEnginePage::renderProcessTerminated, this,
+            [this, view](QWebEnginePage::RenderProcessTerminationStatus, int) {
+                for (Tab &tab : m_tabs) {
+                    if (tab.view != view)
+                        continue;
+                    tab.chromiumTargetId.clear();
+                    resolveTargetId(tab.id, 0);
+                    break;
+                }
+            });
+
     return view;
 }
 
@@ -165,6 +184,10 @@ QString AnoaBrowser::newTab(const QUrl &url)
     // start and register as a DevTools target, which is what makes the tab
     // reachable over CDP at all.
     tab.view->load(url.isEmpty() ? QUrl(QStringLiteral("about:blank")) : url);
+
+    // The DevTools target does not exist yet, so this answers on a later turn
+    // of the event loop and retries until it does.
+    resolveTargetId(tab.id, 0);
 
     emit tabCreated(tab.id);
     if (m_activeTabId == tab.id)
@@ -259,17 +282,96 @@ QWebEngineView *AnoaBrowser::activeView() const
     return viewFor(m_activeTabId);
 }
 
-QString AnoaBrowser::chromiumTargetIdFor(const QString &id) const
+QString AnoaBrowser::chromiumTargetId(const QString &tabId) const
 {
-    const int idx = indexOf(id);
+    const int idx = indexOf(tabId);
     return idx < 0 ? QString() : m_tabs.at(idx).chromiumTargetId;
 }
 
-void AnoaBrowser::setChromiumTargetIdFor(const QString &id, const QString &targetId)
+QString AnoaBrowser::tabIdForTargetId(const QString &targetId) const
 {
-    const int idx = indexOf(id);
-    if (idx >= 0)
-        m_tabs[idx].chromiumTargetId = targetId;
+    if (targetId.isEmpty())
+        return QString();
+    for (const Tab &tab : m_tabs) {
+        if (tab.chromiumTargetId == targetId)
+            return tab.id;
+    }
+    return QString();
+}
+
+void AnoaBrowser::resolveTargetId(const QString &tabId, int attempt)
+{
+    // The embedded viewer opens no debugging port at all, so there is nothing
+    // to ask and nothing that could ever answer.
+    if (m_config.termEmbedded)
+        return;
+    const int idx = indexOf(tabId);
+    if (idx < 0)
+        return; // the tab was closed while we were waiting
+
+    // 100, 200, 400, 800, 1600ms — about 3s in total, then give up and leave
+    // the id empty. Advertising a target that cannot be dialled is worse than
+    // advertising it a moment later, and /json/list omits unresolved tabs.
+    constexpr int kMaxAttempts = 6;
+    if (attempt >= kMaxAttempts)
+        return;
+
+    const QUrl endpoint(QStringLiteral("http://127.0.0.1:%1/json/list")
+                            .arg(m_config.port + 1));
+    QNetworkReply *reply = m_nam->get(QNetworkRequest(endpoint));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, tabId, attempt]() {
+        reply->deleteLater();
+
+        QString found;
+        if (reply->error() == QNetworkReply::NoError) {
+            const QJsonArray targets =
+                QJsonDocument::fromJson(reply->readAll()).array();
+            const int idx = indexOf(tabId);
+            if (idx < 0)
+                return; // closed while the request was in flight
+
+            const QWebEngineView *view = m_tabs.at(idx).view;
+            const QString wantUrl = view ? view->url().toString() : QString();
+
+            // Only entries no other tab has already claimed can be ours. With
+            // one unclaimed entry that settles it; with several — tabs opened
+            // close together, all still on about:blank — prefer the one whose
+            // url matches this view's.
+            QString firstUnclaimed;
+            for (const QJsonValue &value : targets) {
+                const QJsonObject target = value.toObject();
+                if (target.value(QStringLiteral("type")).toString()
+                    != QLatin1String("page"))
+                    continue;
+                const QString id = target.value(QStringLiteral("id")).toString();
+                if (id.isEmpty() || !tabIdForTargetId(id).isEmpty())
+                    continue;
+                if (firstUnclaimed.isEmpty())
+                    firstUnclaimed = id;
+                if (!wantUrl.isEmpty()
+                    && target.value(QStringLiteral("url")).toString() == wantUrl) {
+                    found = id;
+                    break;
+                }
+            }
+            if (found.isEmpty())
+                found = firstUnclaimed;
+        }
+
+        if (found.isEmpty()) {
+            const int delayMs = 100 << attempt;
+            QTimer::singleShot(delayMs, this, [this, tabId, attempt]() {
+                resolveTargetId(tabId, attempt + 1);
+            });
+            return;
+        }
+
+        const int idx = indexOf(tabId);
+        if (idx < 0)
+            return;
+        m_tabs[idx].chromiumTargetId = found;
+        emit tabTargetResolved(tabId, found);
+    });
 }
 
 QWebEnginePage *AnoaBrowser::page() const

@@ -11,6 +11,7 @@
 #include "../config/config.h"
 #include "tab_ids.h"
 
+class QNetworkAccessManager;
 class QStackedLayout;
 class QWebEnginePage;
 class QWebEngineProfile;
@@ -49,10 +50,12 @@ public:
     QWebEnginePage *pageFor(const QString &id) const;
     QWebEngineView *activeView() const;
 
-    // The engine's id for a tab, resolved separately because a page exists
-    // before its DevTools target does.
-    QString chromiumTargetIdFor(const QString &id) const;
-    void setChromiumTargetIdFor(const QString &id, const QString &targetId);
+    // The engine's id for a tab: what a CDP client dials, and what /json/list
+    // and Target.* have to report. Qt exposes no such API on QWebEnginePage, so
+    // it is discovered from Chromium's own discovery endpoint and cached. Empty
+    // until resolution succeeds — a page exists a beat before its target does.
+    QString chromiumTargetId(const QString &tabId) const;
+    QString tabIdForTargetId(const QString &targetId) const;
 
     // ── the active tab, under the names call sites already use ──────────────
     // These keep working exactly as they did when this class was the view, so
@@ -74,6 +77,7 @@ signals:
     void tabCreated(const QString &id);
     void tabClosed(const QString &id);
     void tabActivated(const QString &id);
+    void tabTargetResolved(const QString &tabId, const QString &targetId);
 
     // BrowserWindow can no longer connect to one fixed view, so these carry
     // whichever tab is active and are re-emitted when the active tab changes.
@@ -86,6 +90,9 @@ private:
     // viewport size, same headless handling.
     QWebEngineView *createView(QWebEngineProfile *profile);
     int indexOf(const QString &id) const;
+    // Asynchronous by construction: a seam is crossed by signals, never by a
+    // blocking call, and the answer does not exist yet when the tab is created.
+    void resolveTargetId(const QString &tabId, int attempt);
 
     struct Tab {
         QString id;
@@ -97,6 +104,7 @@ private:
     Config m_config;
     QWebEngineProfile *m_profile;
     QStackedLayout *m_stack;
+    QNetworkAccessManager *m_nam;
     QList<Tab> m_tabs; // creation order
     QString m_activeTabId;
     TabIdMinter m_minter;
