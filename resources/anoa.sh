@@ -26,25 +26,61 @@ DIR="$(cd "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 # that resolve outside the RPATH chain.
 export LD_LIBRARY_PATH="${DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
-# OpenGL comes from the host when the host has it.
+# Some libraries have to come from the host whenever the host has them.
 #
-# lib/gl holds our copies of the GLVND dispatch libraries — libGL, libGLX,
-# libGLdispatch, libEGL, libOpenGL. Those exist to find the graphics driver
-# installed on the machine they run on, so shipping them in front of the
-# system's makes them hunt for the build box's driver instead. On a desktop that
-# fails as "qglx_findConfig: Failed to finding matching FBConfig" and Qt aborts.
+# lib/hostfirst holds our copies of the GLVND dispatch libraries — libGL,
+# libGLX, libGLdispatch, libEGL, libOpenGL — together with libX11 and
+# libstdc++. The dispatch layers exist to find the graphics driver installed on
+# the machine they run on, so shipping them in front of the system's makes them
+# hunt for the build box's driver instead. libX11 and libstdc++ are there
+# because the host's Mesa gets dlopen()ed into this process and is built
+# against the host's copies of both.
 #
-# They cannot simply be left out either: the binary links libOpenGL.so.0, and a
-# bare container has no GL packages, where --headless needs none of this to
-# begin with. So the fallback is appended only when the host is missing the one
-# library the binary cannot start without.
-if [ -d "${DIR}/lib/gl" ]; then
-  have_host_gl=""
-  for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib/x86_64-linux-gnu; do
-    [ -e "$d/libOpenGL.so.0" ] && { have_host_gl=1; break; }
+# Either way the symptom is the same, and it is what a desktop user sees:
+#
+#   qt.glx: qglx_findConfig: Failed to finding matching FBConfig ...
+#   Could not initialize GLX
+#   Aborted (core dumped)
+#
+# They cannot simply be left out either: the binary links libOpenGL.so.0 and
+# libEGL.so.1, and a bare container has no GL packages at all, where --headless
+# needs none of this to begin with.
+#
+# So the choice is per library, not per directory. GL alone spans separately
+# installable packages — libgl1, libglx0, libopengl0, libegl1, libglvnd0 — and
+# any subset can be present. Deciding the whole directory's fate from one
+# sentinel file is wrong in both directions, and both were seen on one Ubuntu
+# 24.04 box: with only libGL.so.1 installed ours shadowed the host's and GLX
+# died; with only libOpenGL.so.0 installed the host's was kept and the binary
+# would not start for want of libEGL.so.1.
+#
+# ldconfig's cache is the authority on what the system has, rather than a list
+# of directories guessed here.
+if [ -d "${DIR}/lib/hostfirst" ]; then
+  ldc="$(command -v ldconfig || echo /sbin/ldconfig)"
+  cache="$("$ldc" -p 2>/dev/null || true)"
+  missing=""
+  for so in "${DIR}"/lib/hostfirst/*.so.*; do
+    [ -e "$so" ] || continue
+    base="${so##*/}"
+    case "$cache" in
+      *"	${base} "*) ;;             # the host has it — leave it alone
+      *) missing="${missing} ${base}" ;;
+    esac
   done
-  if [ -z "$have_host_gl" ]; then
-    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${DIR}/lib/gl"
+  if [ -n "$missing" ]; then
+    # Only the gaps go on the path, through a directory of symlinks rebuilt
+    # every launch so it cannot go stale when GL packages are installed later.
+    shim="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/anoa/hostfirst"
+    if mkdir -p "$shim" 2>/dev/null && rm -f "$shim"/*.so.* 2>/dev/null; then
+      for base in $missing; do
+        ln -sf "${DIR}/lib/hostfirst/${base}" "${shim}/${base}" 2>/dev/null || true
+      done
+      export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${shim}"
+    else
+      # Nowhere writable: the whole directory is still better than not starting.
+      export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${DIR}/lib/hostfirst"
+    fi
   fi
 fi
 
