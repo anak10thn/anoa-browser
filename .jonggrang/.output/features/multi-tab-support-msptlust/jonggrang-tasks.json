@@ -224,20 +224,20 @@
       "title": "--tab <id> resolved at the CDP target-selection seam, defaulting to the active tab",
       "description": "The agent CLI is a CDP client that already picks one page target out of /json/list. --tab narrows that one pick, so no command has to thread a tab through its own arguments.\n\nsrc/cdp/cdp_client.h + .cpp:\n- PageTarget gains anoaTabId and anoaActive, read from the /json/list entries task-005 emits.\n- Add void setTabFilter(const QString &tabId), consulted in onDiscoveryFinished: with a filter, pick the entry whose anoaTabId equals it; if none matches, failDiscovery with \"no tab <id> at host:port (saw: t1, t2)\" listing the ids that do exist.\n- With no filter, prefer the entry with anoaActive true, falling back to the first page entry. A non-anoa endpoint has no such field and therefore behaves exactly as today, including the existing \"N page targets ... attaching to [0]\" warning.\n- That warning lists anoa tab ids when present and suggests `--tab <id>` alongside the existing `--cdp <webSocketDebuggerUrl>` advice.\n\nsrc/agent/agent_cli.cpp:\n- runAgentCommand reads --tab with takeOption alongside --host/--port/--token, BEFORE Session::attach, and validates it with isValidTabId() from task-001 - a malformed value is a Usage error (exit 2) with one line on stderr. Never let QCommandLineParser see it: the verb already took the rest of the line.\n- Session::attach takes the tab id and calls setTabFilter before connectToEndpoint.\n\nAcceptance: every existing invocation with no --tab still reaches the active tab and its exit codes are unchanged; `anoa --tab t2 get text` reads tab 2's page; `anoa --tab t9 get text` on a two-tab browser exits non-zero naming t1 and t2; `anoa --tab bogus get text` exits 2.",
       "priority": 5,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-005"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/cdp/cdp_client.h",
         "src/cdp/cdp_client.cpp",
         "src/agent/agent_cli.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-13T22:33:00.468Z",
+      "completed_at": "2026-08-13T22:37:05.462Z",
       "error_log": []
     },
     {

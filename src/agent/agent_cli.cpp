@@ -15,6 +15,7 @@
 #include "agent/agent_help.h"
 #include "agent/agent_script.h"
 #include "agent/agent_skill.h"
+#include "browser/tab_ids.h"
 #include "cdp/cdp_client.h"
 #include "config/config.h"
 
@@ -52,12 +53,17 @@ int fail(const QString &message, int code = Failed)
 class Session
 {
 public:
-    bool attach(const QString &host, int port, const QString &token, int timeoutMs)
+    bool attach(const QString &host, int port, const QString &token, int timeoutMs,
+                const QString &tabId = QString())
     {
         // Constructed here, not as a plain member: the bearer token is a
         // constructor argument and is not known until the config is parsed.
         m_client = std::make_unique<CdpClient>(token);
         m_client->setRequestTimeout(timeoutMs);
+        // One pick, narrowed. Every command reaches its tab through the target
+        // the client chooses at discovery, so nothing downstream has to know a
+        // tab exists.
+        m_client->setTabFilter(tabId);
         m_client->setExitOnDiscoveryFailure(false);
 
         QEventLoop loop;
@@ -1081,8 +1087,16 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
     if (!portOk || port < 1 || port > 65535)
         return fail(QStringLiteral("--port must be 1-65535"), Usage);
 
+    // Which tab. Validated here rather than at discovery so a typo is a usage
+    // error the moment it is typed, instead of a network round trip that ends
+    // in "no tab tw0".
+    const QString tabId = takeOption(args, QStringLiteral("--tab"));
+    if (!tabId.isEmpty() && !isValidTabId(tabId))
+        return fail(QStringLiteral("--tab takes an id like t1, not '") + tabId + QLatin1Char('\''),
+                    Usage);
+
     Session session;
-    if (!session.attach(host, port, token, 10000)) {
+    if (!session.attach(host, port, token, 10000, tabId)) {
         err() << "anoa: no browser on " << host << ":" << port;
         if (!session.why().isEmpty())
             err() << " (" << session.why() << ")";

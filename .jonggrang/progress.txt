@@ -412,3 +412,14 @@
   from an earlier probe silently changes which page they drive, and a case can
   drop out of the run entirely. Start a fresh browser per suite now that tabs
   exist.
+
+- Google Chrome squats 127.0.0.1:9222 when its remote-debugging port is on (the
+  claude-in-chrome extension does this). anoa binds *:9222 on IPv6, so a request
+  to 127.0.0.1:9222 reaches CHROME instead, and every probe describes the wrong
+  browser: four targets including browser_ui, no anoaTabId, and /json/list
+  looking as if the tab registry had broken. Check `lsof -nP -iTCP:9222` before
+  believing a discovery result, or verify on a port nothing else holds.
+
+- `pkill -f anoa` matches the path of anything with "anoa" in its command line,
+  including editors and this repo's own tooling. `pkill -x anoa` matches the
+  process name only.

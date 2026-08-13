@@ -52,6 +52,10 @@ struct PageTarget {
     QString title;
     QString url;
     QString socketUrl;
+    // anoa's own fields, absent from any other CDP endpoint — which is what
+    // keeps the picker's behaviour unchanged against Chrome itself.
+    QString anoaTabId;
+    bool anoaActive = false;
 };
 
 // Target titles are page <title> text: arbitrary length, and arbitrary bytes
@@ -342,6 +346,8 @@ void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
         page.title = target.value(QStringLiteral("title")).toString();
         page.url = target.value(QStringLiteral("url")).toString();
         page.socketUrl = socketUrl;
+        page.anoaTabId = target.value(QStringLiteral("anoaTabId")).toString();
+        page.anoaActive = target.value(QStringLiteral("anoaActive")).toBool();
         pages.append(page);
     }
 
@@ -358,21 +364,67 @@ void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
         return;
     }
 
-    if (pages.size() > 1) {
+    // --tab names one of them outright, so there is nothing to guess and
+    // nothing to warn about.
+    int chosen = -1;
+    if (!m_tabFilter.isEmpty()) {
+        for (int i = 0; i < pages.size(); ++i) {
+            if (pages.at(i).anoaTabId == m_tabFilter) {
+                chosen = i;
+                break;
+            }
+        }
+        if (chosen < 0) {
+            QStringList known;
+            for (const PageTarget &page : pages) {
+                if (!page.anoaTabId.isEmpty())
+                    known.append(page.anoaTabId);
+            }
+            failDiscovery(QStringLiteral("no tab %1 at %2 (saw: %3)")
+                              .arg(m_tabFilter, hostPort(m_requestedUrl),
+                                   known.isEmpty() ? QStringLiteral("none")
+                                                   : known.join(QStringLiteral(", "))));
+            return;
+        }
+    } else {
+        // The active tab is the one a user means by "the browser". An endpoint
+        // that is not anoa marks none of them, and falls through to [0] exactly
+        // as before.
+        for (int i = 0; i < pages.size(); ++i) {
+            if (pages.at(i).anoaActive) {
+                chosen = i;
+                break;
+            }
+        }
+    }
+
+    const bool guessed = (chosen < 0);
+    if (guessed)
+        chosen = 0;
+
+    if (pages.size() > 1 && guessed) {
         // Ambiguous, so say what was picked and what the alternatives were.
         // Printed before the dial, on stderr, so it survives the alt screen.
         QTextStream err(stderr);
         err << kErrPrefix << pages.size() << " page targets at " << hostPort(m_requestedUrl)
             << "; attaching to [0]" << Qt::endl;
+        bool haveTabIds = false;
         for (int i = 0; i < pages.size(); ++i) {
-            err << "  [" << i << "] " << shortTitle(pages.at(i).title) << " - "
-                << pages.at(i).url << Qt::endl;
+            err << "  [" << i << "] ";
+            if (!pages.at(i).anoaTabId.isEmpty()) {
+                err << pages.at(i).anoaTabId << "  ";
+                haveTabIds = true;
+            }
+            err << shortTitle(pages.at(i).title) << " - " << pages.at(i).url << Qt::endl;
         }
-        err << "  re-run with --cdp <webSocketDebuggerUrl> to attach to another one"
-            << Qt::endl;
+        if (haveTabIds)
+            err << "  re-run with --tab <id> to attach to another one" << Qt::endl;
+        else
+            err << "  re-run with --cdp <webSocketDebuggerUrl> to attach to another one"
+                << Qt::endl;
     }
 
-    const QUrl socketUrl(pages.first().socketUrl);
+    const QUrl socketUrl(pages.at(chosen).socketUrl);
     if (socketUrl.scheme().toLower() != QLatin1String("ws")) {
         failDiscovery(QStringLiteral("%1 offered a %2:// debugger URL; only ws:// is supported")
                           .arg(where, socketUrl.scheme()));
@@ -381,6 +433,11 @@ void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
 
     m_endpoint = socketUrl;
     openSocket();
+}
+
+void CdpClient::setTabFilter(const QString &tabId)
+{
+    m_tabFilter = tabId;
 }
 
 void CdpClient::failDiscovery(const QString &message)
