@@ -122,9 +122,35 @@ Every command attaches to a browser that is already running. Start one with
 `anoa --headless --port 9222 &`. Exit codes: `0` ok, `1` the command failed,
 `2` bad usage, `3` nothing is listening. Add `--json` to any command for
 structured output, and `--port` / `--host` / `--token` to reach a browser
-somewhere else.
+somewhere else. `--tab <id>` picks which tab to act on; without it every command
+acts on the active tab.
 
 `<target>` below is either a ref from a snapshot (`@e2`) or any CSS selector.
+
+## Tabs
+
+One browser holds many pages, each with a stable id (`t1`, `t2`, …) that
+survives between commands and between processes.
+
+| Command | Does |
+|---|---|
+| `anoa tab new [url]` | open a tab and print its id |
+| `anoa tab new --profile <name>` | open it with its own persistent cookies |
+| `anoa tab new --isolated` | open it with a throwaway jar, gone with the tab |
+| `anoa tab list` | every tab; `*` marks the active one |
+| `anoa tab select <id>` | make a tab the active one |
+| `anoa tab close <id>` | close a tab; the last one cannot be closed |
+
+`tab new` prints the id alone, so it composes:
+
+```bash
+TAB=$(anoa tab new example.com)
+anoa --tab "$TAB" get text
+```
+
+Tabs share one cookie jar by default, so a login in one is a login in all.
+`--profile` and `--isolated` are how two tabs hold two different logins to the
+same site at once — which is the reason to reach for them.
 
 ## Navigate
 

@@ -267,19 +267,19 @@
       "title": "Document the tab verb and --tab in anoa help and skills get commands",
       "description": "Two e2e tests assert these documents match the real command set, so they fail the moment the verb lands undocumented. This task is part of the CLI phase, not the docs sweep.\n\nsrc/agent/agent_help.cpp:\n- Add a TABS group to kGroups: the four `anoa tab ...` subcommands with their flags, plus one sentence that every other command takes --tab <id> and defaults to the active tab. Every group name printed by printAgentHelp() must resolve through printAgentHelpGroup() - the AGENT-12 case walks them all.\n- Add a `--tab <id>` line to the BROWSER group's \"Reaching a browser from an agent command\" block, next to --port/--host/--token.\n\nsrc/agent/agent_skill.cpp:\n- The `skills get commands` document gains the tab commands in the same table/format it already uses, and the --tab option. AGENT-18 matches on `anoa <verb>` appearing for the real command set.\n\nAcceptance: `anoa help` exits 0 and lists tabs; `anoa help tabs` exits 0 with content; `anoa --help` and `anoa -h` still print byte-identical output to `anoa help` (AGENT-12b); `cd tests/e2e && node --test agent_cli.test.js` passes AGENT-12, AGENT-12b and AGENT-18. Remember QT_QPA_PLATFORM=offscreen when running --help by hand.",
       "priority": 5,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-012"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/agent/agent_help.cpp",
         "src/agent/agent_skill.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-13T23:00:34.391Z",
+      "completed_at": "2026-08-13T23:01:44.465Z",
       "error_log": []
     },
     {
