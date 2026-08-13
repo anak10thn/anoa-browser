@@ -245,7 +245,7 @@
       "title": "anoa tab new | list | close | select",
       "description": "src/agent/agent_cli.cpp:\n- Teach isAgentCommand() the verb \"tab\" (add it to the static verbs list) so main.cpp's pre-scan hands it the rest of the line and a bare `anoa tab` is not mistaken for a browser start.\n- Add cmdTab(session, args, json) dispatched from runAgentCommand. These commands act on the BROWSER, not on one page, so they attach with no tab filter and use the browser-level Target.* methods the proxy answers from the registry (task-008) regardless of which page the client attached to.\n- `anoa tab new [url] [--profile <name>] [--isolated]` -> Target.createTarget with url (scheme optional, reuse the same url normalisation `anoa open` uses) plus anoaProfile/anoaIsolated params; prints the new id alone on stdout (\"t3\"), or {\"tab\":\"t3\",\"targetId\":\"...\"} with --json. --profile and --isolated together is a Usage error.\n- `anoa tab list` -> Target.getTargets mapped back to tab ids: one line per tab, `t1 * https://example.com - Title` with the asterisk on the active tab; --json prints an array of {tab,active,url,title,profile}.\n- `anoa tab close <id>` -> Target.closeTarget. Refusing to close the last tab prints one plain line (\"anoa: t1 is the only tab; stop the browser instead\") and exits non-zero rather than reporting a CDP error the user cannot act on - the same courtesy `anoa close` already extends for Browser.close.\n- `anoa tab select <id>` -> Target.activateTarget, silent on success.\n- A missing or unknown subcommand, or a missing/malformed id, is a Usage error (exit 2) with one line on stderr. A bare `anoa tab` prints the usage line and exits 2.\n- Ids are validated with isValidTabId() before any call goes out.\n\nAcceptance: the four subcommands work against a running browser; ids printed by `tab new` are accepted by `--tab` and by `tab close`; exit codes follow the suite's existing Ok/Usage/NoBrowser convention.",
       "priority": 5,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
@@ -253,13 +253,13 @@
         "task-009",
         "task-011"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/agent/agent_cli.cpp",
         "src/agent/agent_cli.h"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-13T22:37:16.418Z",
+      "completed_at": "2026-08-13T22:40:08.978Z",
       "error_log": []
     },
     {

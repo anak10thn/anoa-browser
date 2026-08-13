@@ -140,6 +140,10 @@ QJsonObject targetInfoFor(TabHost *tabs, const QString &tabId)
     info[QStringLiteral("attached")] = (tabId == tabs->activeTabId());
     info[QStringLiteral("canAccessOpener")] = false;
     info[QStringLiteral("browserContextId")] = tabs->browserContextIdFor(tabId);
+    // anoa's own id, alongside the engine's. A client that does not know the
+    // field ignores it; `anoa tab` is the reason it is here, because the id a
+    // user types is not the id Chromium mints.
+    info[QStringLiteral("anoaTabId")] = tabId;
     return info;
 }
 
