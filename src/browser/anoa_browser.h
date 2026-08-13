@@ -14,6 +14,7 @@
 #include "tab_ids.h"
 
 class QNetworkAccessManager;
+class QResizeEvent;
 class QStackedLayout;
 class QWebEnginePage;
 class QWebEngineProfile;
@@ -63,6 +64,8 @@ public:
     QWebEngineView *viewFor(const QString &id) const;
     QWebEnginePage *pageFor(const QString &id) const;
     QWebEngineView *activeView() const;
+    // The view a request means: the named tab, or the active one when unnamed.
+    QWebEngineView *viewForOrActive(const QString &tabId) const;
 
     // The engine's id for a tab: what a CDP client dials, and what /json/list
     // and Target.* have to report. Qt exposes no such API on QWebEnginePage, so
@@ -85,10 +88,12 @@ public:
     QUrl url() const;
     QString title() const;
 
-    void sendClick(const QPoint &pos, Qt::MouseButton button);
-    void sendScroll(const QPoint &pos, int angleDeltaY);
-    void sendText(const QString &text);
-    bool sendKey(const QString &keyName);
+    // An empty tabId means the active tab, which is what every caller that
+    // has never heard of tabs passes.
+    void sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId = QString());
+    void sendScroll(const QPoint &pos, int angleDeltaY, const QString &tabId = QString());
+    void sendText(const QString &text, const QString &tabId = QString());
+    bool sendKey(const QString &keyName, const QString &tabId = QString());
 
 signals:
     void tabCreated(const QString &id);
@@ -101,6 +106,10 @@ signals:
     void activeUrlChanged(const QUrl &url);
     void activeTitleChanged(const QString &title);
     void activeLoadFinished(bool ok);
+
+protected:
+    // Every tab is sized like the container, not just the visible one.
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     struct Tab {

@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QResizeEvent>
 #include <QStackedLayout>
 #include <QWheelEvent>
 #include <QJsonArray>
@@ -187,6 +188,9 @@ QString AnoaBrowser::finishNewTab(Tab &tab, const QUrl &url)
 
     m_tabs.append(tab);
     m_stack->addWidget(tab.view);
+    // Born the size of the container, for the same reason resizeEvent exists:
+    // a tab opened while the window is already up never sees a resize.
+    tab.view->resize(size());
 
     // The first tab is the active one by definition; later tabs open in the
     // background, so an agent driving the active tab is not interrupted by
@@ -358,6 +362,26 @@ bool AnoaBrowser::tabsShareProfile(const QString &a, const QString &b) const
     if (ia < 0 || ib < 0)
         return false;
     return m_tabs.at(ia).profile == m_tabs.at(ib).profile;
+}
+
+void AnoaBrowser::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    // QStackedLayout only lays out the widget it is showing, so a background
+    // tab keeps whatever size it was born with — 100x30 by default. That is not
+    // cosmetic: /render/screenshot.png reports a view's geometry as the
+    // coordinate space clicks are measured in, so an unsized background tab
+    // would answer with a viewport a hundred pixels wide and every click
+    // against it would land somewhere else entirely.
+    for (const Tab &tab : m_tabs) {
+        if (tab.view)
+            tab.view->resize(size());
+    }
+}
+
+QWebEngineView *AnoaBrowser::viewForOrActive(const QString &tabId) const
+{
+    return tabId.isEmpty() ? activeView() : viewFor(tabId);
 }
 
 QString AnoaBrowser::chromiumTargetId(const QString &tabId) const
@@ -708,9 +732,9 @@ static QWidget *inputTarget(QWebEngineView *view)
     return proxy ? proxy : static_cast<QWidget *>(view);
 }
 
-void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button)
+void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId)
 {
-    QWidget *target = inputTarget(activeView());
+    QWidget *target = inputTarget(viewForOrActive(tabId));
     if (!target)
         return;
     const QPointF posF(pos);
@@ -734,9 +758,9 @@ void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button)
     QCoreApplication::postEvent(target, release);
 }
 
-void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
+void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY, const QString &tabId)
 {
-    QWidget *target = inputTarget(activeView());
+    QWidget *target = inputTarget(viewForOrActive(tabId));
     if (!target)
         return;
     const QPointF posF(pos);
@@ -749,9 +773,9 @@ void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
     QCoreApplication::postEvent(target, wheel);
 }
 
-void AnoaBrowser::sendText(const QString &text)
+void AnoaBrowser::sendText(const QString &text, const QString &tabId)
 {
-    QWidget *target = inputTarget(activeView());
+    QWidget *target = inputTarget(viewForOrActive(tabId));
     if (!target)
         return;
     for (const QChar &ch : text) {
@@ -764,7 +788,7 @@ void AnoaBrowser::sendText(const QString &text)
     }
 }
 
-bool AnoaBrowser::sendKey(const QString &keyName)
+bool AnoaBrowser::sendKey(const QString &keyName, const QString &tabId)
 {
     struct NamedKey {
         const char *name;
@@ -791,7 +815,7 @@ bool AnoaBrowser::sendKey(const QString &keyName)
     const QString wanted = keyName.toLower();
     for (const NamedKey &k : keys) {
         if (wanted == QLatin1String(k.name)) {
-            QWidget *target = inputTarget(activeView());
+            QWidget *target = inputTarget(viewForOrActive(tabId));
             if (!target)
                 return false;
             QCoreApplication::postEvent(target,

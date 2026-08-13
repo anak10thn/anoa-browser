@@ -287,19 +287,19 @@
       "title": "?tab=<id> on the /render/* endpoints",
       "description": "src/http/http_server.cpp:\n- Every /render/* endpoint accepts an optional `tab` query parameter: screenshot.png, screenshot.ppm, html, navigate, back, forward, reload, and the input endpoints (click, scroll, type, key) plus any cookie/storage endpoints served under /render. Absent means the active tab, byte-identical to today.\n- Resolve the value with isValidTabId() and the registry. A malformed or unknown id answers 404 with {\"error\":\"no tab <id>\"} and never falls back to the active tab silently - a caller that names the wrong tab must find out.\n- The geometry headers X-Anoa-Viewport-Width/Height report the TARGETED tab's view geometry, and screenshots capture that tab's view. Note that a non-active tab's view is not the one on screen; capture it with the same grab() path on that view.\n- The existing /render/ -> /render redirect must preserve the query string (it already does - keep it that way).\n\nAcceptance: with one tab every /render/* request is byte-identical to before; ?tab=t2 acts on tab 2; ?tab=t9 and ?tab=junk both return 404 with the error body; `cd tests/integration && npx vitest run render_endpoints.test.js` passes. The assertions for the new behaviour land in task-021.",
       "priority": 6,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-003"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/http/http_server.cpp",
         "src/http/http_server.h"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-13T23:01:54.265Z",
+      "completed_at": "2026-08-13T23:07:15.742Z",
       "error_log": []
     },
     {

@@ -423,3 +423,13 @@
 - `pkill -f anoa` matches the path of anything with "anoa" in its command line,
   including editors and this repo's own tooling. `pkill -x anoa` matches the
   process name only.
+
+- QStackedLayout lays out only the widget it is showing. A background tab keeps
+  the size it was born with (100x30), so /render/screenshot.png?tab=t2 reported
+  a viewport a hundred pixels wide and every coordinate measured against it was
+  wrong. AnoaBrowser resizes every view on resizeEvent and at creation.
+
+- A hidden QWebEngineView processes no input at all — not Qt synthetic events,
+  and not CDP Input.dispatchMouseEvent either. Both paths still answer
+  "clicked". Reads work fine on a hidden view, which is what makes this easy to
+  miss. See bugs.md for the multi-tab feature.
