@@ -395,20 +395,20 @@
       "title": "E2E: multi-tab agent CLI behaviour",
       "description": "Extend tests/e2e/agent_cli.test.js using its existing run()/anoa() helpers and the attach-to-an-already-running-browser contract (this suite does NOT start the binary). Add fixtures under tests/fixtures if two distinct local pages are needed.\n\nCases:\n- Two tabs hold independent pages: `tab new <urlB>` then assert `--tab t1 get text` and `--tab t2 get text` return the two different documents.\n- `tab list` shows both ids with exactly one active marker, and --json parses to two entries.\n- Refs are per tab: snapshot t1, take a ref, and assert using it with --tab t2 fails with a non-zero exit and a message that names the unresolvable ref rather than silently acting on the wrong element.\n- Closing a non-active tab: it disappears from `tab list` and the active tab is untouched.\n- Closing the ACTIVE tab: another tab becomes active and a following command with NO --tab hits that new active tab.\n- Closing the last remaining tab is refused with a non-zero exit and a plain message.\n- Every command with no --tab hits the active tab: after `tab select t2`, a bare `get text`, `snapshot`, `screenshot` and `eval` all act on t2.\n- Unknown tab: `--tab t9` exits non-zero and names the ids that exist; `--tab junk` exits 2.\n\nRestore the tab set at the end of each case (or use a fresh tab per case) so the suite's later cases still see a single-tab browser where they expect one.\n\nAcceptance: `cd tests/e2e && node --test agent_cli.test.js` passes with the new cases and no previously passing case regresses.",
       "priority": 8,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": "core/testing",
       "blocked_by": [
         "task-012",
         "task-013"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "tests/e2e/agent_cli.test.js",
         "tests/fixtures"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:35:58.468Z",
+      "completed_at": "2026-08-14T00:37:21.018Z",
       "error_log": []
     },
     {
