@@ -437,7 +437,7 @@
       "title": "Integration: ?tab= routing, per-tab profile isolation, per-connection CDP page and Target.*",
       "description": "Add cases to the vitest integration suite. Each file starts and kills its own anoa on the ANOA_BINARY/ANOA_PORT contract, and fileParallelism stays false - do not add a file that assumes otherwise.\n\ntests/integration/render_endpoints.test.js:\n- ?tab=<id> selects that tab for screenshot/html/navigate/input; absent means the active tab; ?tab=t9 and ?tab=junk both return 404 with the error body; X-Anoa-Viewport-* describe the targeted tab.\n\ntests/integration/profiles.test.js:\n- A tab opened with --isolated has a cookie jar the shared tab cannot see, in both directions.\n- Two tabs on the same named profile share cookies.\n- Closing one of two tabs sharing a profile leaves the other working (the profile outlives its pages).\n\ntests/integration/cdp_proxy.test.js:\n- A client attached to tab 2's webSocketDebuggerUrl gets tab 2 for locally-handled commands: Page.printToPDF renders tab 2's document, not tab 1's.\n\ntests/integration/cdp_extensions.test.js:\n- Target.getTargets lists every tab with its targetId and browserContextId (one shared id for shared-profile tabs, a distinct one for an isolated tab); Target.activateTarget moves anoaActive; Target.closeTarget returns success true and then false for the last tab; Target.createTarget returns a targetId that /json/list then reports.\n\nAcceptance: `cd tests/integration && npx vitest run` passes in full, and `bash tests/regression/smoke.sh` still passes.",
       "priority": 8,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": "core/testing",
       "blocked_by": [
@@ -446,7 +446,7 @@
         "task-009",
         "task-014"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "tests/integration/render_endpoints.test.js",
         "tests/integration/profiles.test.js",
@@ -454,8 +454,8 @@
         "tests/integration/cdp_extensions.test.js",
         "tests/integration/helpers.js"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:38:57.854Z",
+      "completed_at": "2026-08-14T00:43:34.440Z",
       "error_log": []
     }
   ]

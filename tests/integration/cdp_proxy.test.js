@@ -3,8 +3,7 @@ import WebSocket from 'ws';
 import fetch from 'node-fetch';
 import {
   startBrowser, stopBrowser, openDevtoolsWs, sendCdp,
-  BASE_URL, WS_BASE, WS_PORT,
-} from './helpers.js';
+  BASE_URL, WS_BASE, WS_PORT, listTabs, newTab } from './helpers.js';
 
 const AUTH_TOKEN = 'inttest-ws-abc';
 
@@ -180,4 +179,50 @@ describe('WebSocket CDP Proxy (with auth token)', () => {
     const wsUrl = await getProtectedWsUrl();
     await expectRejected(wsUrl);
   });
+});
+
+describe('The proxy resolves a page per connection', () => {
+  let proc;
+
+  beforeAll(async () => {
+    proc = await startBrowser();
+    await newTab('https://example.com');
+    await new Promise((r) => setTimeout(r, 4000));
+  }, 40000);
+
+  afterAll(() => stopBrowser(proc));
+
+  // PRX-T01: Page.printToPDF is answered locally, by Qt, against a page this
+  // process holds. Before the resolver it was always the FIRST tab's page, no
+  // matter which tab the client had dialled — so a client asking tab 2 for a
+  // PDF got tab 1's document and no error to say so.
+  it('printToPDF renders the tab the client attached to', async () => {
+    const WebSocket = (await import('ws')).default;
+    const tabs = await listTabs();
+    expect(tabs.length).toBeGreaterThanOrEqual(2);
+
+    const pdfFor = async (tab) => {
+      const sock = new WebSocket(tab.webSocketDebuggerUrl);
+      await new Promise((res, rej) => { sock.once('open', res); sock.once('error', rej); });
+      try {
+        // Give each tab a body only it has, so the rendered bytes differ.
+        await sendCdp(sock, 'Runtime.evaluate', {
+          expression: `document.body.innerHTML = '<h1>${tab.anoaTabId}-marker</h1>'`,
+        }, 1);
+        const r = await sendCdp(sock, 'Page.printToPDF', {}, 2);
+        return r.result?.data ?? '';
+      } finally {
+        sock.close();
+      }
+    };
+
+    const a = await pdfFor(tabs[0]);
+    const b = await pdfFor(tabs[1]);
+
+    expect(a.length).toBeGreaterThan(0);
+    expect(b.length).toBeGreaterThan(0);
+    // Different documents, so different bytes. Identical output is exactly the
+    // bug: one page answering for both connections.
+    expect(a).not.toBe(b);
+  }, 40000);
 });

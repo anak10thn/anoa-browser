@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { startBrowser, stopBrowser, openDevtoolsWs, sendCdp } from './helpers.js';
+import { startBrowser, stopBrowser, openDevtoolsWs, sendCdp, listTabs } from './helpers.js';
 
 describe('Profile Isolation & Cookie Tests', () => {
   let profileBaseDir;
@@ -95,4 +95,93 @@ describe('Profile Isolation & Cookie Tests', () => {
     expect(existsSync(join(customBase, 'myprof'))).toBe(true);
     rmSync(customBase, { recursive: true, force: true });
   }, 25000);
+});
+
+describe('Per-tab profiles', () => {
+  let proc;
+  let ws;
+  let id = 7000;
+  const call = (method, params = {}) => sendCdp(ws, method, params, ++id);
+
+  // Runs a script in one tab, by attaching to that tab's own socket.
+  async function evalIn(tab, expression) {
+    const WebSocket = (await import('ws')).default;
+    const sock = new WebSocket(tab.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { sock.once('open', res); sock.once('error', rej); });
+    try {
+      const r = await sendCdp(sock, 'Runtime.evaluate',
+                              { expression, returnByValue: true }, 1);
+      return r.result?.result?.value;
+    } finally {
+      sock.close();
+    }
+  }
+
+  beforeAll(async () => {
+    proc = await startBrowser();
+    ({ ws } = await openDevtoolsWs());
+    // One tab on a named profile, one isolated, and the default tab already
+    // there. All on the same origin, or the cookie question is meaningless.
+    await call('Target.createTarget',
+               { url: 'https://example.com', anoaProfile: 'inttest-work' });
+    await call('Target.createTarget',
+               { url: 'https://example.com', anoaProfile: 'inttest-work' });
+    await call('Target.createTarget',
+               { url: 'https://example.com', anoaIsolated: true });
+    await new Promise((r) => setTimeout(r, 4000));
+  }, 40000);
+
+  afterAll(() => { if (ws) ws.close(); stopBrowser(proc); });
+
+  // PRF-T01: two tabs naming one profile share a jar; an isolated tab does not.
+  // Both directions, because a one-way check passes on a browser where nothing
+  // is shared at all.
+  it('a named profile is shared between its tabs and hidden from an isolated one',
+     async () => {
+    const tabs = await listTabs();
+    const infos = (await call('Target.getTargets')).result.targetInfos;
+    const byTab = Object.fromEntries(infos.map((i) => [i.anoaTabId, i]));
+
+    // The two tabs sharing a context, and the one that has its own.
+    const counts = {};
+    for (const info of infos) counts[info.browserContextId] =
+      (counts[info.browserContextId] ?? 0) + 1;
+    const sharedCtx = Object.keys(counts).find((c) => counts[c] === 2);
+    expect(sharedCtx).toBeTruthy();
+
+    const sharedTabs = tabs.filter((t) => byTab[t.anoaTabId].browserContextId === sharedCtx);
+    const otherTabs = tabs.filter((t) => byTab[t.anoaTabId].browserContextId !== sharedCtx);
+    expect(sharedTabs.length).toBe(2);
+    expect(otherTabs.length).toBeGreaterThanOrEqual(1);
+
+    await evalIn(sharedTabs[0], "document.cookie = 'probe=shared;path=/'");
+    await new Promise((r) => setTimeout(r, 800));
+
+    expect(await evalIn(sharedTabs[1], 'document.cookie')).toContain('probe=shared');
+    for (const other of otherTabs)
+      expect(await evalIn(other, 'document.cookie') ?? '').not.toContain('probe=shared');
+  }, 40000);
+
+  // PRF-T02: a profile has to outlive every page using it. Freeing it while a
+  // sibling still holds it is a use-after-free inside Chromium, not a leak
+  // noticed later.
+  it('closing one of two tabs sharing a profile leaves the other working',
+     async () => {
+    const infos = (await call('Target.getTargets')).result.targetInfos;
+    const counts = {};
+    for (const info of infos) counts[info.browserContextId] =
+      (counts[info.browserContextId] ?? 0) + 1;
+    const sharedCtx = Object.keys(counts).find((c) => counts[c] === 2);
+    const pair = infos.filter((i) => i.browserContextId === sharedCtx);
+    expect(pair.length).toBe(2);
+
+    const closed = await call('Target.closeTarget', { targetId: pair[0].targetId });
+    expect(closed.result.success).toBe(true);
+    await new Promise((r) => setTimeout(r, 800));
+
+    const survivor = (await listTabs()).find((t) => t.anoaTabId === pair[1].anoaTabId);
+    expect(survivor).toBeTruthy();
+    // Still reads its own cookie, and still runs script at all.
+    expect(await evalIn(survivor, '1 + 1')).toBe(2);
+  }, 40000);
 });
