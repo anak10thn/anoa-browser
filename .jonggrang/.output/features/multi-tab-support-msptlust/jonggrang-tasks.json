@@ -375,19 +375,19 @@
       "title": "Teach the embedded core skill and .claude/skills/anoa/SKILL.md about tabs",
       "description": "src/agent/agent_skill.cpp:\n- The embedded core skill document (the narrative one an agent reads before driving the browser, not the command table task-013 updated) explains: how to open a tab and keep its id, that no --tab means the active tab, that refs are per-tab because they live in the DOM as data-anoa-ref and therefore never resolve across tabs, and that parallel agent work wants `anoa tab new --isolated` while a shared login wants the default profile.\n- Keep the existing tone and the ASCII-only rule for the embedded strings.\n\n.claude/skills/anoa/SKILL.md:\n- The same guidance in brief, in the format that file already uses.\n\nAcceptance: `anoa skills list` and `anoa skills get <each name>` exit 0; the e2e AGENT-18 case still passes; nothing in either document tells an agent that tabs do not exist.",
       "priority": 7,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": "anoa",
       "blocked_by": [
         "task-013"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/agent/agent_skill.cpp",
         ".claude/skills/anoa/SKILL.md"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:34:25.755Z",
+      "completed_at": "2026-08-14T00:35:44.883Z",
       "error_log": []
     },
     {

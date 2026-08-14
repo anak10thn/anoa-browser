@@ -109,11 +109,40 @@ as you do.
 Add `--json` to any command for structured output. Exit codes: `0` success,
 `1` the command failed, `2` bad usage, `3` no browser is listening.
 
+## More than one page at a time
+
+One browser holds many tabs. Open one and keep the id it prints:
+
+```bash
+TAB=$(anoa tab new example.com)
+anoa --tab "$TAB" get text
+```
+
+Without `--tab`, every command acts on the active tab, so nothing you already
+do changes. `anoa tab list` shows them all with `*` on the active one.
+
+**Refs do not cross tabs.** They live in the page as `data-anoa-ref`
+attributes, so `@e2` in one tab names nothing in another. Snapshot the tab you
+are about to act on, with the same `--tab` you will use for the click.
+
+**Cookies are shared unless you ask otherwise.** A login in one tab is a login
+in all of them. For two accounts on one site at once:
+
+```bash
+anoa tab new example.com --isolated       # its own cookies, gone with the tab
+anoa tab new example.com --profile work   # its own cookies, kept on disk
+```
+
+**Input only reaches the active tab.** Clicks, typing and key presses apply to
+whichever tab is active — reads work on any tab. Run `anoa tab select <id>`
+before acting on a tab that is not the active one. Both report success either
+way, so this is worth remembering rather than discovering.
+
 ## Watching it happen
 
 `anoa terminal` renders the live page in the terminal and forwards clicks and
 typing. It attaches to the same running browser, so it can be left open in one
-pane while commands run in another.
+pane while commands run in another. `Ctrl-N` cycles tabs.
 )";
 
 const char kCommands[] = R"(# `anoa` command reference
@@ -268,8 +297,7 @@ subscribed to the events in time. Consequences worth knowing:
 Worth knowing so you do not reach for them: there is no React introspection, no
 Web Vitals, no accessibility audit, no credential vault, no MCP server, no
 plugin system, and no request interception — `anoa network` observes, it cannot
-block or rewrite. Tabs cannot be created over CDP either; the embedded engine
-does not implement `Target.createTarget`.
+block or rewrite.
 )";
 
 const char kIndex[] = R"(core       the workflow: start a browser, snapshot, act by ref
