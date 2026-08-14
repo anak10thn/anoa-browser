@@ -327,13 +327,13 @@
       "title": "Terminal viewer: tab switching and a tab field in the status bar",
       "description": "src/terminal/render_http_client.h + .cpp:\n- Carry an optional tab id and append ?tab=<id> to every /render request, which is what gives the HTTP backend tab switching now that task-014 has landed. Setting it changes which tab subsequent frames and input go to.\n\nsrc/terminal/frame_backend.h:\n- If the seam needs a tab notion at all, keep it minimal (e.g. a virtual setTab(const QString &) defaulting to a no-op) so the CDP and in-process backends are unaffected. The in-process embedded viewer stays on the active tab - multi-tab there is out of scope.\n\nsrc/terminal/terminal_ui.h + .cpp:\n- A tab-switch key alongside the existing Ctrl-L / Ctrl-R / Ctrl-B bindings. Pick one free binding (Ctrl-N for next tab is the obvious one), document it wherever the others are documented, and reject nothing silently.\n- A status-bar field showing the current tab (\"t2/3\"), fitted into the existing field-yielding budget with a DEFINED priority relative to the link field - the row is already over budget at 100 columns and the link yields by design, so state where the tab field sits in that order.\n\ntests/unit/test_terminal_ui.cpp:\n- Cases for the new key handling and the status-bar field, driven through the public feedInput() with a stub FrameBackend and WITHOUT calling begin(), so geometry stays the 80x24 constant. Redirect stdout as the existing cases do. New cases go ABOVE testQuitSignalStopsTheFrameLoop, which must remain last because the quit flag has no reset.\n\nAcceptance: `make test` passes; a pty session against a two-tab browser switches tabs with the binding and the status bar shows which tab is displayed; single-tab viewer output is unchanged.",
       "priority": 6,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-014"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/terminal/render_http_client.h",
         "src/terminal/render_http_client.cpp",
@@ -342,8 +342,8 @@
         "src/terminal/terminal_ui.cpp",
         "tests/unit/test_terminal_ui.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:26:45.045Z",
+      "completed_at": "2026-08-14T00:32:29.473Z",
       "error_log": []
     },
     {

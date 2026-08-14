@@ -10,6 +10,7 @@
 #include <QMetaType>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 // One captured frame. Which pixel format `bytes` carries depends on which
 // request produced it: requestRgbFrame() answers with packed RGB already
@@ -68,6 +69,15 @@ public:
     virtual void navigate(const QString &url) = 0;
     virtual void goBack() = 0;
     virtual void goForward() = 0;
+
+    // Which tab subsequent frames and input address. A no-op by default: the
+    // CDP backend is already attached to one target, and the embedded viewer
+    // reaches its browser through a pointer and stays on the active tab.
+    virtual void setTab(const QString &tabId) { Q_UNUSED(tabId) }
+    // The tabs this backend can address, in the browser's own order. Empty
+    // means "this backend has no notion of tabs", which is the honest answer
+    // for the CDP and in-process paths.
+    virtual QStringList tabIds() { return QStringList(); }
     virtual void reloadPage() = 0;
 
     // Ask the page to adopt a viewport of this pixel size.
