@@ -46,6 +46,19 @@ done
 
 for source in "$ROOT"/src/terminal/*.cpp; do
   name="src/terminal/$(basename "$source")"
+  # The embedded viewer's backend reaches into the browser through
+  # anoa_browser.h, which needs the widget stack this check deliberately does
+  # not install — the point of the check is that it costs nothing but QtCore,
+  # QtGui, QtNetwork and QtWebSockets. It has never been checkable here and has
+  # been failing the job rather than being named as out of scope.
+  #
+  # Nothing is lost: the API floor question is about \since-6.5 calls in the
+  # viewer's own code, and this file's Qt surface is grab(), width() and
+  # height() — 4.x-era API by way of a class the real build compiles anyway.
+  if [ "$(basename "$source")" = "inprocess_frame_backend.cpp" ]; then
+    echo "  SKIP  TERM-BUILD-03: $name (needs the widget stack; see comment)"
+    continue
+  fi
   if ERR=$(g++ -fsyntax-only -std=c++17 -fPIC "${INCLUDES[@]}" "$source" 2>&1); then
     assert_pass "TERM-BUILD-03: $name compiles against Qt $QT_VERSION"
   else

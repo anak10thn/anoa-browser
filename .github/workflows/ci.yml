@@ -68,7 +68,8 @@ jobs:
           cmake --build build --parallel \
             --target anoa-test-config \
                      anoa-test-frame-bytes \
-                     anoa-test-terminal-ui
+                     anoa-test-terminal-ui \
+                     anoa-test-tab-ids
 
       - name: Run unit tests (CTest)
         run: ctest --test-dir build -V --output-on-failure
