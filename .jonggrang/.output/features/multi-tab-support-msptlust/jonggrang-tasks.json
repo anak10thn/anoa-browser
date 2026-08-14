@@ -351,7 +351,7 @@
       "title": "Docs sweep: README, docs/, AGENTS.md",
       "description": "README.md:\n- Delete the \"Not implemented\" claim about tabs and fix the CDP support table row \"Target.createTarget - the embedded engine cannot create tabs over CDP\", which is now false: it is answered from the registry.\n- Document `anoa tab new|list|close|select`, `--tab <id>` on every agent command, `?tab=<id>` on /render/*, per-tab profiles (--profile <name> for a persistent named session, --isolated for an ephemeral one) and the one-entry-per-tab shape of /json/list including anoaTabId/anoaActive.\n- Keep the three-port layout description as is - it did not change.\n- Say plainly what is still out of scope so the next reader does not re-derive it: no Target.createBrowserContext with real profiles, no tab groups/pinning/reordering/session restore, one window per process, no multi-tab in the embedded terminal browser, no per-tab viewport emulation, extensions stay process-wide.\n\ndocs/BUILDING.md:\n- Mention the fourth Qt6::Core-only unit target anoa-tab-ids-lib from task-001 wherever the existing three are listed, and that `make coverage` now includes it.\n\nAGENTS.md:\n- Under Architecture Decisions, add: ids are anoa's not Chromium's and why; --tab resolves at the CDP target-selection seam rather than per command; the tab strip lives outside the view (with the screenshot/coordinate-space reason); CdpExtensions answers asynchronously rather than blocking on page creation; two tabs naming one profile share one QWebEngineProfile because two Qt profiles over one on-disk path corrupt it.\n- Under Jonggrang Notes -> Patterns Discovered, add the fourth unit lib note, keeping the existing rule that a WebEngine source is never folded into a Core-only target.\n\nAcceptance: no document still claims tabs are unimplemented; every command and flag shipped in phases 5 and 6 appears in the README.",
       "priority": 7,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
@@ -360,14 +360,14 @@
         "task-015",
         "task-016"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "README.md",
         "docs/BUILDING.md",
         "AGENTS.md"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:32:40.501Z",
+      "completed_at": "2026-08-14T00:34:12.851Z",
       "error_log": []
     },
     {

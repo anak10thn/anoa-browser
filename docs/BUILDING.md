@@ -231,3 +231,19 @@ browser-launching case fails identically and the errors look like GPU problems.
 fails several cases on bash 3.2 (macOS's `/bin/bash`) because an empty array
 expansion under `nounset` is an error there. Neither is a behaviour difference —
 check both on Linux or in CI before believing a regression.
+
+
+Four static libraries carry the logic the unit suite can reach, and every one of
+them is Qt6::Core only because the unit CI job builds no WebEngine at all:
+
+| Target | Source |
+|---|---|
+| `anoa-config-lib` | `src/config/config.cpp` |
+| `anoa-terminal-bytes-lib` | `src/terminal/frame_bytes.cpp` |
+| `anoa-terminal-ui-lib` | `src/terminal/terminal_ui.cpp` |
+| `anoa-tab-ids-lib` | `src/browser/tab_ids.cpp` |
+
+A source never joins an existing one of these to save a target: they are separate
+so that adding a WebEngine dependency to any of them fails loudly rather than
+quietly pulling WebEngine into the unit job. `make coverage` measures all four,
+and the `COVERAGE_MIN` gate applies to each.
