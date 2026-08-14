@@ -35,7 +35,12 @@ async function getPageWsUrl() {
   const resp = await fetch(`${BASE_URL}/json/list`, { headers });
   const list = await resp.json();
   if (!list.length) throw new Error('/json/list is empty');
-  let wsUrl = list[0].webSocketDebuggerUrl;
+  // The active tab when the browser marks one, which it does now that a
+  // browser can hold several. list[0] is creation order, not what a user
+  // means by "the page".
+  const pages = list.filter(t => t.type === 'page');
+  const target = pages.find(t => t.anoaActive) ?? pages[0] ?? list[0];
+  let wsUrl = target.webSocketDebuggerUrl;
   if (AUTH_TOKEN) wsUrl += `?token=${AUTH_TOKEN}`;
   return wsUrl;
 }
@@ -106,5 +111,23 @@ describe('Puppeteer Compatibility (Suite 7)', () => {
   // PP-09: covered by after() above
   it('disconnect completes cleanly (covered by after())', () => {
     assert.ok(true); // pass — actual disconnect is in after()
+  });
+
+  // PP-09: the discovery document a client dials, rebuilt from the tab
+  // registry rather than byte-patched out of Chromium's answer.
+  it('/json/list carries a tab id per page and aims at the proxy port', async () => {
+    const headers = AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {};
+    const list = await (await fetch(`${BASE_URL}/json/list`, { headers })).json();
+    const pages = list.filter(t => t.type === 'page');
+    assert.ok(pages.length >= 1, 'no page targets');
+
+    for (const target of pages) {
+      assert.match(target.anoaTabId, /^t[1-9][0-9]*$/);
+      // The proxy (port + 2), never Chromium's own debugging port (port + 1).
+      assert.ok(target.webSocketDebuggerUrl.includes(`:${HTTP_PORT + 2}/devtools/page/`),
+                `wrong port in ${target.webSocketDebuggerUrl}`);
+    }
+    assert.equal(pages.filter(t => t.anoaActive).length, 1,
+                 'exactly one tab should be marked active');
   });
 });

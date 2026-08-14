@@ -416,20 +416,20 @@
       "title": "E2E: /json/list reports one entry per tab and Target.createTarget works for CDP clients",
       "description": "tests/e2e/playwright.test.ts:\n- A case asserting GET /json/list returns one entry per tab, each carrying anoaTabId and anoaActive, and each webSocketDebuggerUrl pointing at the proxy port (config.port+2) with the requested Host - not the internal debug port.\n- connectOverCDP still attaches and still sees the pages it sees today (regression guard on the parse-and-rebuild).\n- context.newPage() / Target.createTarget now succeeds: assert the page count grows and that /json/list agrees with it, including a fresh anoaTabId for the new page. This is the row the README used to list as unsupported.\n\ntests/e2e/puppeteer.test.js:\n- Update any assertion that depends on the old target-count or the byte-replaced body shape.\n\nFollow the suite conventions: both files attach to an already-running anoa and never start one; keep them runnable with `npx playwright test` and `node --test puppeteer.test.js`.\n\nAcceptance: both e2e suites pass against a binary built from this branch.",
       "priority": 8,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": "core/testing",
       "blocked_by": [
         "task-005",
         "task-008"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "tests/e2e/playwright.test.ts",
         "tests/e2e/puppeteer.test.js"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:37:32.011Z",
+      "completed_at": "2026-08-14T00:38:46.896Z",
       "error_log": []
     },
     {
