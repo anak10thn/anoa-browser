@@ -307,19 +307,19 @@
       "title": "Tab strip in BrowserWindow, outside the view",
       "description": "src/browser/browser_window.h + .cpp:\n- Add a tab strip: one button per tab labelled with a short title, the active one visually distinct, an x per tab to close it and a + to open one. It calls AnoaBrowser's selectTab/closeTab/newTab.\n- It lives OUTSIDE AnoaBrowser, as a sibling of the view in this window, for the same load-bearing reason the toolbar does: anything inside the container appears in every screenshot and shifts the coordinate space every /render/click is measured in. Do not add it to the container's layout under any circumstances.\n- Consistent with the auto-hiding nav bar: when auto-hide is on the strip overlays with the toolbar and appears on the same pointer-at-the-top-edge trigger; when it is off, layoutToolbar() reserves the strip's height too so neither overlaps the view. resizeEvent keeps both positioned.\n- Shown only when tabCount() > 1, so today's single-tab window looks exactly as it does now.\n- Rebuild on tabCreated / tabClosed / tabActivated; keep the rebuild cheap enough to be safe on every signal.\n- Headless mode still builds no window at all - none of this is reachable there.\n\nAcceptance: a headed run with two tabs shows the strip and switching tabs works; with one tab the window is visually unchanged; /render/screenshot.png dimensions and X-Anoa-Viewport-Width/Height are identical whether the strip is visible or not - that invariant is the whole reason for the placement, so verify it rather than assuming it.",
       "priority": 6,
-      "status": "pending",
+      "status": "completed",
       "feature_id": "multi-tab-support-msptlust",
       "skill": null,
       "blocked_by": [
         "task-003"
       ],
-      "passes": false,
+      "passes": true,
       "files": [
         "src/browser/browser_window.h",
         "src/browser/browser_window.cpp"
       ],
-      "started_at": null,
-      "completed_at": null,
+      "started_at": "2026-08-14T00:23:32.882Z",
+      "completed_at": "2026-08-14T00:26:33.491Z",
       "error_log": []
     },
     {
