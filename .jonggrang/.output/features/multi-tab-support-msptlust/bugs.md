@@ -32,3 +32,21 @@ Until then `--tab` is read-only for input, and the workaround is
 Filed by hand: `jonggrang bug` rejects `--feature <id>` and `--feature=<id>`
 alike with "Multiple features found. Use --feature <featureId>.", so the flag it
 asks for is not honoured.
+
+### FIXED
+
+`AnoaBrowser` no longer uses `QStackedLayout`. Views are children at the
+container's geometry with the active one raised, so a background tab is
+*covered* rather than hidden — and a covered `QWebEngineView` takes input.
+
+Both paths now land:
+
+    anoa click "#bg" --tab t2               -> window.__bgHit == 1
+    POST /render/click?x=..&y=..&tab=t2     -> window.__bgHit == 1
+
+A view must also be `show()`n when it is created: one that was never shown takes
+no input even after it is raised.
+
+Screenshot isolation was the risk in removing the layout, and it holds — with
+t1 red and t2 blue, `?tab=t1` samples #ff0000, `?tab=t2` samples #0000ff, and no
+`?tab=` samples the active one. Locked in by AGENT-28 in the agent CLI e2e suite.

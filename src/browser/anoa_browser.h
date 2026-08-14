@@ -15,18 +15,22 @@
 
 class QNetworkAccessManager;
 class QResizeEvent;
-class QStackedLayout;
 class QWebEnginePage;
 class QWebEngineProfile;
 class QWebEngineView;
 
 // The browser: a container that owns one view per tab, not a view itself.
 //
-// The layout is a QStackedLayout with no margins and no spacing, so the active
-// view fills the container exactly. That is load-bearing rather than cosmetic:
-// HttpServer reports this widget's width()/height() as the coordinate space
-// /render/click is measured in, and grab() must capture the page and nothing
-// else. A margin here would silently shift every synthetic click.
+// Every view is a child at the container's exact geometry, and the active one
+// is raised. No QStackedLayout, deliberately: that hides the widgets it is not
+// showing, and a hidden QWebEngineView processes no input at all — neither Qt
+// synthetic events nor CDP Input.dispatchMouseEvent — while both paths still
+// report success. Background tabs stay visible and merely covered.
+//
+// The geometry is load-bearing rather than cosmetic: HttpServer reports this
+// widget's width()/height() as the coordinate space /render/click is measured
+// in, and grab() must capture the page and nothing else. Any inset here would
+// silently shift every synthetic click.
 class AnoaBrowser : public QWidget, public TabHost
 {
     Q_OBJECT
@@ -138,7 +142,6 @@ private:
 
     Config m_config;
     QWebEngineProfile *m_profile;
-    QStackedLayout *m_stack;
     QNetworkAccessManager *m_nam;
     QList<Tab> m_tabs; // creation order
     // Named profiles, and how many tabs still hold each one. A profile has to

@@ -379,10 +379,6 @@ are looking at.
 
 ### What tabs do not do
 
-- **Input only reaches the active tab.** Clicks, typing, key presses and
-  scrolling apply to whichever tab is active; reads (`get text`, `eval`,
-  screenshots, `/render/html`) work on any tab. Run `anoa tab select <id>`
-  first. Both input paths currently report success either way.
 - No tab groups, pinning, reordering, or session restore across restarts.
 - One window per process. Opening a tab never opens a window.
 - `anoa terminal` with no target hosts its own single-tab browser; multi-tab

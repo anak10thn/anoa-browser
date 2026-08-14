@@ -505,4 +505,33 @@ describe('Agent CLI (Suite 8)', () => {
       closeExtraTabs();
     }
   });
+
+  // AGENT-28: input reaches a tab that is not the active one.
+  //
+  // It did not, and both paths still answered "clicked": AnoaBrowser held tabs
+  // in a QStackedLayout, which HIDES every view but the current one, and a
+  // hidden QWebEngineView processes no input at all — not Qt synthetic events
+  // and not CDP Input.dispatchMouseEvent. Views are covered rather than hidden
+  // now, and this is the case that says so.
+  it('a click reaches a background tab', () => {
+    const t2 = anoa('tab', 'new').out.trim();
+    try {
+      anoa('eval',
+           "document.body.innerHTML = '<button id=bg>bg</button>';" +
+           " window.__bgHit = 0;" +
+           " document.getElementById('bg').onclick = () => window.__bgHit = 1; 'ok'",
+           '--tab', t2);
+
+      // t1 is still the active tab: t2 was opened in the background.
+      const rows = JSON.parse(anoa('tab', 'list', '--json').out);
+      assert.equal(rows.find(r => r.active).tab, 't1');
+
+      const clicked = anoa('click', '#bg', '--tab', t2);
+      assert.equal(clicked.code, 0, clicked.err);
+      assert.equal(anoa('eval', 'window.__bgHit', '--tab', t2).out, '1',
+                   'the click reported success but never reached the page');
+    } finally {
+      closeExtraTabs();
+    }
+  });
 });

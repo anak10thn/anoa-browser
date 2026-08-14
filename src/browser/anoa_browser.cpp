@@ -11,7 +11,6 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QResizeEvent>
-#include <QStackedLayout>
 #include <QWheelEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -60,7 +59,6 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     : QWidget(parent)
     , m_config(config)
     , m_profile(nullptr)
-    , m_stack(nullptr)
     , m_nam(new QNetworkAccessManager(this))
 {
     // QTWEBENGINE_CHROMIUM_FLAGS must be set before WebEngine initializes its
@@ -109,9 +107,9 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
 
     m_profile = QWebEngineProfile::defaultProfile();
 
-    m_stack = new QStackedLayout(this);
-    m_stack->setContentsMargins(0, 0, 0, 0);
-    m_stack->setSpacing(0);
+    // No layout at all. Views are children at identical geometry and the
+    // active one is raised — see the header for why hiding them is not an
+    // option.
 }
 
 QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)
@@ -187,17 +185,18 @@ QString AnoaBrowser::finishNewTab(Tab &tab, const QUrl &url)
     }
 
     m_tabs.append(tab);
-    m_stack->addWidget(tab.view);
-    // Born the size of the container, for the same reason resizeEvent exists:
-    // a tab opened while the window is already up never sees a resize.
-    tab.view->resize(size());
+    // Visible from birth, sized like the container. A tab opened while the
+    // window is already up never sees a resize, and a view that was never
+    // shown takes no input even once it is raised.
+    tab.view->setGeometry(rect());
+    tab.view->show();
 
     // The first tab is the active one by definition; later tabs open in the
     // background, so an agent driving the active tab is not interrupted by
     // another one opening.
     if (m_activeTabId.isEmpty()) {
         m_activeTabId = tab.id;
-        m_stack->setCurrentWidget(tab.view);
+        tab.view->raise();
     }
 
     // about:blank rather than nothing: a page has to exist for the renderer to
@@ -229,7 +228,6 @@ bool AnoaBrowser::closeTab(const QString &id)
     QWebEngineView *view = m_tabs.at(idx).view;
     QWebEngineProfile *profile = m_tabs.at(idx).profile;
     m_tabs.removeAt(idx);
-    m_stack->removeWidget(view);
     // The view goes first and the profile reference after it. A profile
     // destroyed while a page still holds it is a use-after-free inside
     // Chromium, not a leak we would notice later.
@@ -241,7 +239,7 @@ bool AnoaBrowser::closeTab(const QString &id)
         // was last — the same choice a tabbed browser makes.
         const int next = (idx < m_tabs.size()) ? idx : m_tabs.size() - 1;
         m_activeTabId = m_tabs.at(next).id;
-        m_stack->setCurrentWidget(m_tabs.at(next).view);
+        m_tabs.at(next).view->raise();
         emit tabActivated(m_activeTabId);
         emit activeUrlChanged(m_tabs.at(next).view->url());
         emit activeTitleChanged(m_tabs.at(next).view->title());
@@ -260,7 +258,8 @@ bool AnoaBrowser::selectTab(const QString &id)
         return true;
 
     m_activeTabId = id;
-    m_stack->setCurrentWidget(m_tabs.at(idx).view);
+    m_tabs.at(idx).view->raise();
+    m_tabs.at(idx).view->setFocus();
 
     emit tabActivated(id);
     // The window has no other way to learn what it is now showing: the filtered
@@ -367,15 +366,14 @@ bool AnoaBrowser::tabsShareProfile(const QString &a, const QString &b) const
 void AnoaBrowser::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    // QStackedLayout only lays out the widget it is showing, so a background
-    // tab keeps whatever size it was born with — 100x30 by default. That is not
-    // cosmetic: /render/screenshot.png reports a view's geometry as the
-    // coordinate space clicks are measured in, so an unsized background tab
-    // would answer with a viewport a hundred pixels wide and every click
-    // against it would land somewhere else entirely.
+    // Nothing lays these out but this: every tab is sized like the container,
+    // not just the one on top. /render/screenshot.png reports a view's geometry
+    // as the coordinate space clicks are measured in, so a background tab left
+    // at its birth size would answer with a viewport a hundred pixels wide and
+    // every click against it would land somewhere else entirely.
     for (const Tab &tab : m_tabs) {
         if (tab.view)
-            tab.view->resize(size());
+            tab.view->setGeometry(rect());
     }
 }
 

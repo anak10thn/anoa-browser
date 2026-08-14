@@ -226,10 +226,14 @@ tests/
   optimisation. Profiles are reference counted, and `closeTab` destroys the view
   before dropping the reference — a profile freed while a page still holds it is
   a use-after-free inside Chromium.
-- **A hidden `QWebEngineView` processes no input.** Background tabs are hidden by
-  `QStackedLayout`, and neither Qt synthetic events nor CDP
-  `Input.dispatchMouseEvent` reach them, while both still report success. Reads
-  are unaffected. See the feature's `bugs.md`.
+- **Background views are covered, never hidden.** `AnoaBrowser` uses no layout:
+  every view is a child at the container's geometry and the active one is
+  raised. `QStackedLayout` was the obvious choice and was wrong — it HIDES the
+  views it is not showing, and a hidden `QWebEngineView` processes no input at
+  all, neither Qt synthetic events nor CDP `Input.dispatchMouseEvent`, while
+  both paths still answer "clicked". Reads worked throughout, which is what made
+  it easy to miss. A view must also be `show()`n at creation: one that was never
+  shown takes no input even once it is raised.
 
 ### Other decisions
 

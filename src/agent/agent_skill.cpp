@@ -133,11 +133,6 @@ anoa tab new example.com --isolated       # its own cookies, gone with the tab
 anoa tab new example.com --profile work   # its own cookies, kept on disk
 ```
 
-**Input only reaches the active tab.** Clicks, typing and key presses apply to
-whichever tab is active — reads work on any tab. Run `anoa tab select <id>`
-before acting on a tab that is not the active one. Both report success either
-way, so this is worth remembering rather than discovering.
-
 ## Watching it happen
 
 `anoa terminal` renders the live page in the terminal and forwards clicks and

@@ -433,3 +433,11 @@
   and not CDP Input.dispatchMouseEvent either. Both paths still answer
   "clicked". Reads work fine on a hidden view, which is what makes this easy to
   miss. See bugs.md for the multi-tab feature.
+
+- Do not host tabs in a QStackedLayout. It hides every view but the current one,
+  and a hidden QWebEngineView processes no input at all — not Qt synthetic
+  events, not CDP Input.dispatchMouseEvent — while both paths still answer
+  "clicked". Reads keep working, so the gap is invisible until something clicks
+  a background tab and nothing happens. Views are children at the container's
+  geometry with the active one raised, each show()n at creation: a view that was
+  never shown takes no input even once it is raised.

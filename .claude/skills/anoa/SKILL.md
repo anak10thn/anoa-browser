@@ -27,5 +27,4 @@ Three things worth knowing before you even do that:
   as `--tab <id>`; without it, commands act on the active tab. Refs never cross
   tabs — they live in the page — so snapshot the tab you are about to act on.
   Cookies are shared unless you open the tab with `--isolated` or
-  `--profile <name>`, and input reaches only the active tab, so
-  `anoa tab select <id>` first when clicking somewhere else.
+  `--profile <name>`.
