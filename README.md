@@ -380,6 +380,12 @@ prints one group. For agents, **`anoa skills get commands`** is the full
 reference and `anoa skills get core` is the workflow — both printed straight
 from the binary, so instructions can never drift from the CLI you have.
 
+**Uploads, downloads, dialogs and popups** are handled rather than ignored.
+`alert`/`confirm`/`prompt` are answered without blocking, `window.open` opens a
+background tab, downloads are saved (`--download-dir`), and a file input is
+filled with `anoa upload <target> <file>` — clicking one only asks for a dialog
+nobody can answer.
+
 Not implemented, so you know not to reach for them: React introspection, Web
 Vitals, accessibility audits, a credential vault, an MCP server, plugins, and
 request interception — `anoa network` observes, it cannot block or rewrite.

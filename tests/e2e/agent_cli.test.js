@@ -11,7 +11,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -614,6 +614,62 @@ describe('Agent CLI (Suite 8)', () => {
       assert.equal(anoa('tab', 'new', '--name', 'has space').code, 2);
     } finally {
       closeExtraTabs();
+    }
+  });
+
+  // AGENT-32: the hooks a page needs to not fail silently.
+  //
+  // None of these existed. A single alert() wedged the whole browser — not the
+  // tab, the process: every later command timed out, including Target.* at the
+  // browser level, and only SIGKILL got it back. Downloads and window.open were
+  // dropped without a word.
+  it('a dialog does not wedge the browser, and answers sensibly', () => {
+    assert.equal(anoa('eval', "alert('hi'); 'past the alert'").out, 'past the alert');
+    // The tell-tale of the old bug: everything after an alert timed out.
+    assert.equal(anoa('eval', '1 + 1').out, '2');
+    assert.equal(anoa('eval', "String(confirm('ok?'))").out, 'true');
+    assert.equal(anoa('eval', "prompt('name?', 'fallback')").out, 'fallback');
+    assert.equal(anoa('status').code, 0);
+  });
+
+  // AGENT-33
+  it('window.open becomes a real background tab', () => {
+    try {
+      const before = JSON.parse(anoa('tab', 'list', '--json').out).length;
+      anoa('eval', "window.open('https://example.net')");
+      // The tab exists, and the caller's tab is still the active one.
+      const rows = JSON.parse(anoa('tab', 'list', '--json').out);
+      assert.equal(rows.length, before + 1);
+      assert.equal(rows.find(r => r.active).tab, 't1');
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-34: clicking a file input asks for a dialog nobody can answer, so
+  // the files are handed to the element directly — and the page's change
+  // handler has to see them, or a form that validates on change never knows.
+  it('upload puts files into an input and fires change', () => {
+    const tmp = resolve(root, 'build', 'agent-upload.txt');
+    writeFileSync(tmp, 'payload');
+    try {
+      anoa('eval', "document.body.innerHTML = '<input id=up type=file>';" +
+                   " window.__seen = '';" +
+                   " document.getElementById('up').onchange = e => window.__seen = e.target.files[0].name; 'ready'");
+      assert.equal(anoa('upload', '#up', tmp).code, 0);
+      assert.equal(anoa('eval', "document.getElementById('up').files.length").out, '1');
+      assert.equal(anoa('eval', 'window.__seen').out, 'agent-upload.txt');
+
+      // A target that is not a file input says so rather than half-working.
+      const wrong = anoa('upload', 'body', tmp);
+      assert.notEqual(wrong.code, 0);
+      assert.match(wrong.err, /file input/i);
+
+      const missing = anoa('upload', '#up', '/no/such/file');
+      assert.notEqual(missing.code, 0);
+      assert.match(missing.err, /no such file/i);
+    } finally {
+      rmSync(tmp, { force: true });
     }
   });
 });
