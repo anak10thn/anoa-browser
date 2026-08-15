@@ -18,7 +18,21 @@
 set -eu
 
 REPO="porcupine-md/anoa-browser"
-ASSET="anoa-linux-x86_64.tar.gz"
+
+# Which build this machine needs. Named rather than guessed: downloading the
+# wrong one produces "cannot execute binary file" several steps later, with
+# nothing pointing back at the download.
+case "$(uname -m)" in
+    x86_64|amd64)   ARCH="x86_64"  ;;
+    aarch64|arm64)  ARCH="aarch64" ;;
+    *)
+        echo "install-linux.sh: no prebuilt bundle for $(uname -m)" >&2
+        echo "  x86_64 and aarch64 are published; build from source:" >&2
+        echo "  https://github.com/porcupine-md/anoa-browser#building-from-source" >&2
+        exit 1
+        ;;
+esac
+ASSET="anoa-linux-${ARCH}.tar.gz"
 PREFIX="${HOME}/.local"
 VERSION=""
 UNINSTALL=0
@@ -73,12 +87,6 @@ fi
 # ── Preconditions ───────────────────────────────────────────────────────────
 
 [ "$(uname -s)" = "Linux" ] || die "this installer is for Linux; on macOS use: brew install --cask anoa"
-
-arch="$(uname -m)"
-case "$arch" in
-    x86_64|amd64) ;;
-    *) die "no prebuilt bundle for ${arch}; only x86_64 is published. Build from source: https://github.com/${REPO}#building-from-source" ;;
-esac
 
 if command -v curl >/dev/null 2>&1; then
     fetch() { curl -fsSL "$1" -o "$2"; }

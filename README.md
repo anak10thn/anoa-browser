@@ -70,10 +70,14 @@ One file. Download, make it executable, run it — no unpacking, no install, no
 root:
 
 ```bash
-chmod +x anoa-x86_64.AppImage
+chmod +x anoa-x86_64.AppImage          # or anoa-aarch64.AppImage
 ./anoa-x86_64.AppImage --headless --port 9222
 ./anoa-x86_64.AppImage open example.com
 ```
+
+Built for **x86_64** and **aarch64**, both on Ubuntu 22.04 against the same Qt,
+so both run on anything with **glibc 2.35 or newer** — Ubuntu 22.04, Debian 12
+and later, which is what an ARM board usually runs.
 
 Verified on a stock Ubuntu 24.04: headless, a real window with GLX, the terminal
 viewer, and the agent commands.

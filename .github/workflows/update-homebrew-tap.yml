@@ -57,7 +57,8 @@ jobs:
           TAG="${{ steps.tag.outputs.tag }}"
           VERSION="${TAG#v}"
           MACOS_SHA256=$(sha256sum anoa-macos-universal.tar.gz | awk '{print $1}')
-          LINUX_SHA256=$(sha256sum anoa-linux-x86_64.tar.gz | awk '{print $1}')
+          LINUX_X86_64_SHA256=$(sha256sum anoa-linux-x86_64.tar.gz | awk '{print $1}')
+          LINUX_AARCH64_SHA256=$(sha256sum anoa-linux-aarch64.tar.gz | awk '{print $1}')
           git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
           git config user.name "github-actions"
@@ -71,7 +72,8 @@ jobs:
 
           # Linux Formula
           sed -e "s/{{VERSION}}/${VERSION}/" \
-              -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
+              -e "s/{{LINUX_X86_64_SHA256}}/${LINUX_X86_64_SHA256}/" \
+              -e "s/{{LINUX_AARCH64_SHA256}}/${LINUX_AARCH64_SHA256}/" \
               "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
 
           # Retire the old names properly rather than leaving two of everything.

@@ -18,26 +18,94 @@ permissions:
 
 jobs:
   build-linux:
-    name: Linux x86_64
-    runs-on: ubuntu-22.04
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    strategy:
+      # Both architectures run the SAME steps. Copying the job and editing the
+      # names is how the two drift, and the packaging steps below are where
+      # every hard-won detail lives — the host-first split, the plugin
+      # dependency guard, the AppImage runtime.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+            qt_host: linux
+            qt_arch: linux_gcc_64
+            qt_version: '6.7.3'
+            # The oldest base this bundle claims to run on, used by the bare
+            # smoke test below. Built on 22.04, so bookworm's glibc 2.36 is
+            # comfortably enough.
+            bare_image: 'debian:12-slim'
+          - arch: aarch64
+            # 22.04 with a newer compiler, rather than 24.04.
+            #
+            # glibc comes from the base image and decides how far the bundle
+            # reaches; GCC only has to be new enough for Qt's moc. Building on
+            # 24.04 satisfied moc but raised the floor to glibc 2.39, which
+            # excludes Debian 12 and Ubuntu 22.04 — the two most common systems
+            # on an ARM board. Verified on a real RK3588 running bookworm
+            # (glibc 2.36): every bundled library demanded GLIBC_2.38 and
+            # nothing ran.
+            #
+            # So: jammy's glibc 2.35, and gcc-12 installed on top for moc.
+            runner: ubuntu-22.04-arm
+            qt_host: linux_arm64
+            qt_arch: linux_gcc_arm64
+            # The same Qt as x86_64. Qt 6.8+ is not an option here at all:
+            # its arm64 *moc* binary requires GLIBC_2.38, so it cannot run on
+            # jammy, and building on 24.04 to satisfy it raises the bundle's
+            # floor to glibc 2.39 — which excludes Debian 12 and Ubuntu 22.04,
+            # the two most common systems on an ARM board. Verified on an
+            # RK3588 running bookworm: every bundled library demanded
+            # GLIBC_2.38 and nothing ran.
+            qt_version: '6.7.3'
+            # Bookworm, the same base x86_64 is tested against: built on
+            # jammy's glibc 2.35, this bundle is expected to run there. That is
+            # the whole point of building on 22.04 rather than 24.04.
+            bare_image: 'debian:12-slim'
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
-          host: linux
+          version: ${{ matrix.qt_version }}
+          host: ${{ matrix.qt_host }}
           target: desktop
-          arch: linux_gcc_64
+          arch: ${{ matrix.qt_arch }}
           modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-linux-gcc64
+          cache-key-prefix: qt-${{ matrix.qt_version }}-${{ matrix.qt_arch }}
 
       - name: Install system dependencies
-        run: sudo apt-get install -y libcups2-dev file patchelf
+        run: |
+          # libevent and libminizip are needed for aarch64 and harmless on
+          # x86_64. Qt's official arm64 WebEngineCore links them from the
+          # SYSTEM, while the x86_64 build carries its own — so the arm64 link
+          # failed with undefined references to event_base_new and
+          # zipOpenNewFileInZip4_64 while x86_64 built cleanly from the same
+          # source. Installed for both rather than branching the matrix: two
+          # small packages cost less than a conditional that can rot.
+          sudo apt-get install -y libcups2-dev file patchelf \
+                                  libevent-dev libminizip-dev
+          # Qt's arm64 WebEngineCore links libwebp.so.6, which no supported
+          # Ubuntu ships — jammy has libwebp7 and the soname is not compatible.
+          # Focal's is the last one, and it is the SECURITY-UPDATED build:
+          # Ubuntu's tracker records CVE-2023-4863 as fixed in
+          # 0.6.1-2ubuntu0.20.04.3, which is this package. Ubuntu backports
+          # fixes without moving the upstream version, so 0.6.1 alone says
+          # nothing about whether it is patched.
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            webp_deb=libwebp6_0.6.1-2ubuntu0.20.04.3_arm64.deb
+            curl -fsSL -O "http://ports.ubuntu.com/ubuntu-ports/pool/main/libw/libwebp/${webp_deb}"
+            dpkg-deb -x "${webp_deb}" /tmp/webp6
+            sudo cp -a /tmp/webp6/usr/lib/aarch64-linux-gnu/libwebp.so.6* /usr/lib/aarch64-linux-gnu/
+            sudo ldconfig
+            rm -f "${webp_deb}"
+          fi
 
       - name: Configure & Build
         run: |
@@ -215,13 +283,13 @@ jobs:
           Translations = translations
           QTCONF
 
-          tar czf anoa-linux-x86_64.tar.gz -C dist anoa
+          tar czf anoa-linux-${{ matrix.arch }}.tar.gz -C dist anoa
 
       - name: Smoke test the portable bundle
         run: |
           # Extract to a fresh dir and launch WITHOUT the build's Qt on the
           # library path — proves the bundle is self-contained.
-          mkdir -p /tmp/bundle-test && tar xzf anoa-linux-x86_64.tar.gz -C /tmp/bundle-test
+          mkdir -p /tmp/bundle-test && tar xzf anoa-linux-${{ matrix.arch }}.tar.gz -C /tmp/bundle-test
           cd /tmp/bundle-test/anoa
 
           # Every bundled plugin must resolve. This is the check that was
@@ -266,15 +334,38 @@ jobs:
       # come from the host.
       - name: Build the AppImage
         run: |
-          scripts/build-appimage.sh dist/anoa anoa-x86_64.AppImage
+          scripts/build-appimage.sh dist/anoa anoa-${{ matrix.arch }}.AppImage
+
+      # The AppImage on a host with nothing on it. The runner is a full Ubuntu,
+      # so it can only prove the payload is intact — this proves the thing
+      # users actually hit, and does it natively on both architectures.
+      - name: Smoke test the AppImage on a bare container
+        run: |
+          cat > /tmp/bare.sh <<'BARE'
+          A=/work/anoa-${{ matrix.arch }}.AppImage
+          cd /tmp
+          v="$(APPIMAGE_EXTRACT_AND_RUN=1 $A --version 2>/dev/null)"
+          echo "bare container reports: [$v]"
+          case "$v" in "anoa "*) ;; *) echo "::error::no version on a bare host"; exit 1 ;; esac
+          APPIMAGE_EXTRACT_AND_RUN=1 $A --headless --no-sandbox --port 9555 >/tmp/b.log 2>&1 &
+          for i in $(seq 1 90); do (echo > /dev/tcp/127.0.0.1/9555) 2>/dev/null && break; sleep 1; done
+          (echo > /dev/tcp/127.0.0.1/9555) 2>/dev/null || { echo "::error::browser did not start"; exit 1; }
+          # eval needs no page, no certificates and no NSS — the honest floor
+          # for "runs at all with nothing installed".
+          got="$(APPIMAGE_EXTRACT_AND_RUN=1 $A eval '6*7' --port 9555 2>/dev/null)"
+          echo "bare container eval 6*7: [$got]"
+          [ "$got" = "42" ] || { echo "::error::eval failed on a bare host"; exit 1; }
+          BARE
+          docker run --rm -v "$PWD:/work" -v /tmp/bare.sh:/tmp/bare.sh \
+            ${{ matrix.bare_image }} bash /tmp/bare.sh
 
       - name: Smoke test the AppImage
         run: |
           # Runs the real file, not an extracted copy: a GitHub runner has no
           # FUSE, so this also proves the embedded runtime falls back cleanly
           # rather than only proving the payload is intact.
-          chmod +x anoa-x86_64.AppImage
-          version="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage --version)"
+          chmod +x anoa-${{ matrix.arch }}.AppImage
+          version="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-${{ matrix.arch }}.AppImage --version)"
           echo "AppImage reports: $version"
           case "$version" in
             "anoa "*) ;;
@@ -283,7 +374,7 @@ jobs:
 
           # The one thing a packaging mistake breaks first, and the reason the
           # tarball smoke test exists in the same shape above.
-          APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage \
+          APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-${{ matrix.arch }}.AppImage \
             --headless --no-sandbox --port 9444 &
           for i in $(seq 1 45); do
             (echo > /dev/tcp/127.0.0.1/9444) 2>/dev/null && break
@@ -291,7 +382,7 @@ jobs:
           done
           (echo > /dev/tcp/127.0.0.1/9444) 2>/dev/null \
             || { echo "::error::AppImage browser never came up"; exit 1; }
-          title="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage \
+          title="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-${{ matrix.arch }}.AppImage \
                      open example.com --port 9444 | head -1)"
           echo "AppImage opened: [$title]"
           pkill -x anoa || true
@@ -308,13 +399,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-linux-x86_64
-          path: anoa-linux-x86_64.tar.gz
+          name: anoa-linux-${{ matrix.arch }}
+          path: anoa-linux-${{ matrix.arch }}.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anoa-x86_64-appimage
-          path: anoa-x86_64.AppImage
+          name: anoa-${{ matrix.arch }}-appimage
+          path: anoa-${{ matrix.arch }}.AppImage
 
   build-macos:
     name: macOS universal (x86_64 + arm64)
@@ -673,7 +764,8 @@ jobs:
           fi
           VERSION="${GITHUB_REF_NAME#v}"
           MACOS_SHA256=$(sha256sum anoa-macos-universal.tar.gz | awk '{print $1}')
-          LINUX_SHA256=$(sha256sum anoa-linux-x86_64.tar.gz | awk '{print $1}')
+          LINUX_X86_64_SHA256=$(sha256sum anoa-linux-x86_64.tar.gz | awk '{print $1}')
+          LINUX_AARCH64_SHA256=$(sha256sum anoa-linux-aarch64.tar.gz | awk '{print $1}')
           git clone --depth=1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/porcupine-md/homebrew-tap.git" /tmp/homebrew-tap
           cd /tmp/homebrew-tap
           git config user.name "github-actions"
@@ -687,7 +779,8 @@ jobs:
 
           # Linux Formula
           sed -e "s/{{VERSION}}/${VERSION}/" \
-              -e "s/{{LINUX_SHA256}}/${LINUX_SHA256}/" \
+              -e "s/{{LINUX_X86_64_SHA256}}/${LINUX_X86_64_SHA256}/" \
+              -e "s/{{LINUX_AARCH64_SHA256}}/${LINUX_AARCH64_SHA256}/" \
               "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
 
           # Retire the old names properly rather than leaving two of everything.

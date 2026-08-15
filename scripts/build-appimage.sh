@@ -24,7 +24,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUNDLE="${1:?usage: build-appimage.sh <bundle-dir> [output.AppImage]}"
-OUTPUT="${2:-anoa-x86_64.AppImage}"
+
+# The architecture is read from the machine unless the caller names it, so a
+# cross-built bundle cannot be packed under the wrong name — an AppImage whose
+# filename lies about its architecture fails at exec() with nothing but
+# "cannot execute binary file".
+APPIMAGE_ARCH="${APPIMAGE_ARCH:-$(uname -m)}"
+case "$APPIMAGE_ARCH" in
+    x86_64|amd64)   APPIMAGE_ARCH=x86_64  ;;
+    aarch64|arm64)  APPIMAGE_ARCH=aarch64 ;;
+    *) echo "unsupported architecture: $APPIMAGE_ARCH" >&2; exit 2 ;;
+esac
+OUTPUT="${2:-anoa-${APPIMAGE_ARCH}.AppImage}"
 
 if [ ! -x "$BUNDLE/anoa" ] || [ ! -f "$BUNDLE/anoa.sh" ]; then
     echo "not an anoa bundle: $BUNDLE" >&2
@@ -39,7 +50,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 APPDIR="$WORK/AppDir"
 
-echo "==> assembling AppDir (anoa $VERSION)"
+echo "==> assembling AppDir (anoa $VERSION, $APPIMAGE_ARCH)"
 mkdir -p "$APPDIR"
 cp -a "$BUNDLE"/. "$APPDIR"/
 
@@ -97,7 +108,11 @@ cp "$APPDIR/anoa.desktop" "$APPDIR/usr/share/applications/anoa.desktop"
 
 echo "==> fetching appimagetool"
 TOOL="$WORK/appimagetool"
-TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+# appimagetool is itself an AppImage, so it has to match the machine running the
+# build, not the machine the output will run on.
+TOOL_ARCH="$(uname -m)"
+case "$TOOL_ARCH" in aarch64|arm64) TOOL_ARCH=aarch64 ;; *) TOOL_ARCH=x86_64 ;; esac
+TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${TOOL_ARCH}.AppImage"
 if [ -n "${APPIMAGETOOL:-}" ] && [ -x "${APPIMAGETOOL}" ]; then
     TOOL="${APPIMAGETOOL}"
 else
@@ -120,8 +135,9 @@ fi
 #
 # The type2-runtime build links its FUSE statically, so it needs nothing from
 # the host but a kernel with /dev/fuse.
-RUNTIME="$WORK/runtime-x86_64"
-RUNTIME_URL="https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
+# The runtime, unlike the tool, must match the OUTPUT's architecture.
+RUNTIME="$WORK/runtime-${APPIMAGE_ARCH}"
+RUNTIME_URL="https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${APPIMAGE_ARCH}"
 if [ -n "${APPIMAGE_RUNTIME:-}" ] && [ -f "${APPIMAGE_RUNTIME}" ]; then
     RUNTIME="${APPIMAGE_RUNTIME}"
 else
@@ -139,7 +155,7 @@ chmod +x "$RUNTIME"
 # a build machine (a container, a CI runner) usually has no FUSE. Waiting to
 # find that out at release time is the kind of failure this flag exists for.
 echo "==> packing $OUTPUT"
-ARCH=x86_64 "$TOOL" --appimage-extract-and-run \
+ARCH="$APPIMAGE_ARCH" "$TOOL" --appimage-extract-and-run \
     --no-appstream \
     --runtime-file "$RUNTIME" \
     "$APPDIR" "$OUTPUT"
