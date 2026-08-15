@@ -44,7 +44,7 @@ jobs:
             # a heap overflow in the WebP decoder that was exploited in the
             # wild. Shipping that inside a browser to save a version bump is
             # not a trade worth making.
-            qt_version: '6.9.3'
+            qt_version: '6.8.3'
 
     steps:
       - uses: actions/checkout@v4
