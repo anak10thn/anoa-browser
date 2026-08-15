@@ -441,3 +441,28 @@
   a background tab and nothing happens. Views are children at the container's
   geometry with the active one raised, each show()n at creation: a view that was
   never shown takes no input even once it is raised.
+
+- NSS is a host-first library, for the same reason GL and libX11 are. libnss3.so
+  is a link-time dependency so a dependency walk bundles it, but NSS loads
+  libsoftokn3, libfreebl3 and libnssckbi at RUNTIME — ldd never names them, so
+  nothing packages them, and the bundled libnss3 then shadows the host's
+  coherent set and hunts for modules that are not there. Chromium reads
+  certificates through NSS, so the symptom is every HTTPS page failing while
+  local commands keep working.
+
+- The host-first shim's glob was lib/hostfirst/*.so.* — a dot after .so.
+  libGL.so.1 matched, libnss3.so did not. Any library without a version suffix
+  silently never reached the shim. Both spellings are matched now.
+
+- AppImage: the runtime appimagetool embeds dlopen()s libfuse.so.2, which Ubuntu
+  dropped in 22.04, so it fails on a current Ubuntu before the payload runs.
+  Build with --runtime-file from AppImage/type2-runtime, which links FUSE
+  statically. On a host with no FUSE at all, APPIMAGE_EXTRACT_AND_RUN=1 works but
+  unpacks the payload every invocation: ~6s per command against ~1s for the
+  tarball, so it is a fallback and not a mode to live in.
+
+- "Minimal Linux" for a browser means Chromium's runtime set, not one or two
+  packages. Chasing it one error at a time gives a misleading answer: the first
+  failure names ca-certificates, the next names libnss3, and neither is the
+  whole list. The Dockerfile's 24 packages are the real answer, and they apply
+  equally to the tarball and the AppImage.
