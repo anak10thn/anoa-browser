@@ -64,6 +64,52 @@ brew update
 brew upgrade --cask anoa
 ```
 
+### Linux (AppImage) — recommended
+
+One file. Download, make it executable, run it — no unpacking, no install, no
+root:
+
+```bash
+chmod +x anoa-x86_64.AppImage
+./anoa-x86_64.AppImage --headless --port 9222
+./anoa-x86_64.AppImage open example.com
+```
+
+Verified on a stock Ubuntu 24.04: headless, a real window with GLX, the terminal
+viewer, and the agent commands.
+
+It carries its own FUSE, so it does **not** need the `libfuse2` package that
+Ubuntu dropped in 22.04 — the runtime AppImage's own tooling embeds by default
+fails there with `dlopen(): error loading libfuse.so.2` before anything runs.
+
+**On a host with no FUSE at all** — most containers — run it without mounting:
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage --version
+```
+
+That unpacks the whole payload on every invocation: about 6 seconds per command
+against 1 for the tarball. Fine for a one-off, wrong for an agent loop — use the
+tarball or the container image there instead.
+
+**A stripped system needs Chromium's own runtime libraries.** Not an AppImage
+limitation — the same set the tarball and the container image need, because it
+is what running a Chromium engine costs. Any ordinary desktop already has all
+of it. On something genuinely bare:
+
+```bash
+sudo apt install ca-certificates libnss3 libnspr4 libxcomposite1 libxdamage1 \
+  libxrandr2 libxkbcommon0 libdrm2 libasound2 libcups2 libatk1.0-0 \
+  libatk-bridge2.0-0 libatspi2.0-0 libxshmfence1 libglib2.0-0 libgl1 \
+  libglx-mesa0 libegl1 libgbm1 libfontconfig1 libfreetype6 libdbus-1-3 \
+  fonts-liberation
+```
+
+Measured on a bare `debian:12-slim` with nothing installed at all: `--version`,
+the browser, `eval`, and the whole `anoa tab` registry work; only page rendering
+needs the list above. With it, everything does — `open`, `get text`,
+screenshots and a second tab included.
+
 ### Linux (Homebrew)
 
 ```bash
@@ -100,51 +146,6 @@ install-linux.sh --version v0.4.0     # pin a release instead of taking the late
 install-linux.sh --prefix /opt/anoa   # somewhere other than ~/.local
 install-linux.sh --uninstall          # remove it again
 ```
-
-### Linux (AppImage)
-
-One file. Download, make it executable, run it — no unpacking, no install, no
-root:
-
-```bash
-chmod +x anoa-x86_64.AppImage
-./anoa-x86_64.AppImage --headless --port 9222
-./anoa-x86_64.AppImage open example.com
-```
-
-Verified on a stock Ubuntu 24.04: headless, a real window with GLX, the terminal
-viewer, and the agent commands.
-
-It carries its own FUSE, so it does **not** need the `libfuse2` package that
-Ubuntu dropped in 22.04 — the runtime AppImage's own tooling embeds by default
-fails there with `dlopen(): error loading libfuse.so.2` before anything runs.
-
-**On a host with no FUSE at all** — most containers — run it without mounting:
-
-```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage --version
-```
-
-That unpacks the whole payload on every invocation: about 6 seconds per command
-against 1 for the tarball. Fine for a one-off, wrong for an agent loop — use the
-tarball or the container image there instead.
-
-**HTTPS needs NSS from the host** on a system that has none — a stripped
-container, not a distro:
-
-```bash
-sudo apt install libnss3 ca-certificates   # Debian/Ubuntu
-```
-
-Chromium reads certificates through NSS, and `libnss3` loads `libsoftokn3`,
-`libfreebl3` and `libnssckbi` at runtime instead of linking them — so `ldd`
-never names them and no bundle can package them by walking dependencies.
-Without them the browser still starts and local commands still work; only page
-loads fail, with `nss_util.cc ... Error initializing NSS`.
-
-Every ordinary distro already has NSS. Measured on a bare `debian:12-slim` with
-nothing installed: `--version`, the browser and `eval` all work; `open` does
-not until `libnss3` is there.
 
 ### Linux (portable tarball)
 
