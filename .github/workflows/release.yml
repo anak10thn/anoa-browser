@@ -240,10 +240,51 @@ jobs:
           grep -q -- '--gfx' /tmp/term-help.txt
           kill $BROWSER_PID
 
+      # The AppImage is the same bundle in a self-mounting file: one download,
+      # chmod +x, run. It is built from dist/anoa rather than from a fresh
+      # deploy so it inherits every decision above, including which libraries
+      # come from the host.
+      - name: Build the AppImage
+        run: |
+          scripts/build-appimage.sh dist/anoa anoa-x86_64.AppImage
+
+      - name: Smoke test the AppImage
+        run: |
+          # Runs the real file, not an extracted copy: a GitHub runner has no
+          # FUSE, so this also proves the embedded runtime falls back cleanly
+          # rather than only proving the payload is intact.
+          chmod +x anoa-x86_64.AppImage
+          version="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage --version)"
+          echo "AppImage reports: $version"
+          case "$version" in
+            "anoa "*) ;;
+            *) echo "::error::AppImage did not report a version"; exit 1 ;;
+          esac
+
+          # The one thing a packaging mistake breaks first, and the reason the
+          # tarball smoke test exists in the same shape above.
+          APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage \
+            --headless --no-sandbox --port 9444 &
+          for i in $(seq 1 45); do
+            (echo > /dev/tcp/127.0.0.1/9444) 2>/dev/null && break
+            sleep 1
+          done
+          (echo > /dev/tcp/127.0.0.1/9444) 2>/dev/null \
+            || { echo "::error::AppImage browser never came up"; exit 1; }
+          title="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage \
+                     open example.com --port 9444 | head -1)"
+          echo "AppImage opened: $title"
+          pkill -x anoa || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: anoa-linux-x86_64
           path: anoa-linux-x86_64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anoa-x86_64-appimage
+          path: anoa-x86_64.AppImage
 
   build-macos:
     name: macOS universal (x86_64 + arm64)
@@ -583,6 +624,7 @@ jobs:
           files: |
             *.tar.gz
             *.zip
+            *.AppImage
           generate_release_notes: true
 
       # Skips (does not fail the release) when HOMEBREW_TAP_TOKEN is not set —

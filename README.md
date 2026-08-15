@@ -100,6 +100,45 @@ install-linux.sh --prefix /opt/anoa   # somewhere other than ~/.local
 install-linux.sh --uninstall          # remove it again
 ```
 
+### Linux (AppImage)
+
+One file. Download, make it executable, run it — no unpacking, no install, no
+root:
+
+```bash
+chmod +x anoa-x86_64.AppImage
+./anoa-x86_64.AppImage --headless --port 9222
+./anoa-x86_64.AppImage open example.com
+```
+
+Verified on a stock Ubuntu 24.04: headless, a real window with GLX, the terminal
+viewer, and the agent commands.
+
+It carries its own FUSE, so it does **not** need the `libfuse2` package that
+Ubuntu dropped in 22.04 — the runtime AppImage's own tooling embeds by default
+fails there with `dlopen(): error loading libfuse.so.2` before anything runs.
+
+**On a host with no FUSE at all** — most containers — run it without mounting:
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage --version
+```
+
+That unpacks the whole payload on every invocation: about 6 seconds per command
+against 1 for the tarball. Fine for a one-off, wrong for an agent loop — use the
+tarball or the container image there instead.
+
+**HTTPS needs two packages from the host**, on a truly bare system:
+
+```bash
+sudo apt install ca-certificates libnss3   # Debian/Ubuntu
+```
+
+Chromium reads certificates through NSS, and NSS loads its modules at runtime
+rather than linking them, so no bundle ever names them. Any ordinary desktop
+already has both. Without them a page load fails with
+`nss_util.cc ... Error initializing NSS`.
+
 ### Linux (portable tarball)
 
 The release tarball is self-contained: one executable, every shared library it needs under `lib/`, its resources and translations, plus a launcher script that wires them together. Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
