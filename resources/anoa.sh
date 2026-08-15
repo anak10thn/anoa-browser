@@ -29,12 +29,22 @@ export LD_LIBRARY_PATH="${DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 # Some libraries have to come from the host whenever the host has them.
 #
 # lib/hostfirst holds our copies of the GLVND dispatch libraries — libGL,
-# libGLX, libGLdispatch, libEGL, libOpenGL — together with libX11 and
-# libstdc++. The dispatch layers exist to find the graphics driver installed on
+# libGLX, libGLdispatch, libEGL, libOpenGL — together with libX11, libstdc++
+# and NSS. The dispatch layers exist to find the graphics driver installed on
 # the machine they run on, so shipping them in front of the system's makes them
 # hunt for the build box's driver instead. libX11 and libstdc++ are there
 # because the host's Mesa gets dlopen()ed into this process and is built
 # against the host's copies of both.
+#
+# NSS is there because Chromium reads certificates through it, and libnss3
+# loads libsoftokn3, libfreebl3 and libnssckbi at RUNTIME — so ldd never names
+# them, no dependency walk packages them, and a bundled libnss3 that shadows
+# the host's then hunts for modules that are not there:
+#
+#   nss_util.cc(239) Error initializing NSS ...
+#     libsoftokn3.so: cannot open shared object file
+#
+# which shows up as every HTTPS page failing while everything local works.
 #
 # Either way the symptom is the same, and it is what a desktop user sees:
 #
@@ -60,7 +70,12 @@ if [ -d "${DIR}/lib/hostfirst" ]; then
   ldc="$(command -v ldconfig || echo /sbin/ldconfig)"
   cache="$("$ldc" -p 2>/dev/null || true)"
   missing=""
-  for so in "${DIR}"/lib/hostfirst/*.so.*; do
+  # Both spellings. The GL libraries carry a version suffix (libGL.so.1) but
+  # the NSS ones do not (libnss3.so, libsmime3.so), and a glob of *.so.* alone
+  # skipped every one of them: they sat in lib/hostfirst, never reached the
+  # shim, and the binary died with "libsmime3.so: cannot open shared object
+  # file" on any host without NSS.
+  for so in "${DIR}"/lib/hostfirst/*.so "${DIR}"/lib/hostfirst/*.so.*; do
     [ -e "$so" ] || continue
     base="${so##*/}"
     case "$cache" in
@@ -72,7 +87,8 @@ if [ -d "${DIR}/lib/hostfirst" ]; then
     # Only the gaps go on the path, through a directory of symlinks rebuilt
     # every launch so it cannot go stale when GL packages are installed later.
     shim="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/anoa/hostfirst"
-    if mkdir -p "$shim" 2>/dev/null && rm -f "$shim"/*.so.* 2>/dev/null; then
+    if mkdir -p "$shim" 2>/dev/null \
+       && rm -f "$shim"/*.so "$shim"/*.so.* 2>/dev/null; then
       for base in $missing; do
         ln -sf "${DIR}/lib/hostfirst/${base}" "${shim}/${base}" 2>/dev/null || true
       done
