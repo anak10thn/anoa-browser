@@ -161,6 +161,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     QCommandLineOption headlessOpt("headless", "Run in offscreen/headless mode");
     QCommandLineOption noSandboxOpt("no-sandbox", "Disable Chromium sandbox");
     QCommandLineOption profileDirOpt("profile-dir", "Base directory for browser profiles", "dir");
+    QCommandLineOption ephemeralOpt("ephemeral",
+        "Keep nothing: no cookies, no storage, gone when the process ends");
     QCommandLineOption profileNameOpt("profile", "Named profile to activate", "name");
     QCommandLineOption extensionOpt("extension", "Path to an unpacked extension directory (repeatable)", "path");
     QCommandLineOption authTokenOpt("auth-token", "Bearer token required for CDP WebSocket connections", "token");
@@ -182,6 +184,7 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     parser.addOption(headlessOpt);
     parser.addOption(noSandboxOpt);
     parser.addOption(profileDirOpt);
+    parser.addOption(ephemeralOpt);
     parser.addOption(profileNameOpt);
     parser.addOption(extensionOpt);
     parser.addOption(authTokenOpt);
@@ -211,6 +214,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
         cfg.noSandbox = true;
     if (parser.isSet(profileDirOpt))
         cfg.profileDir = parser.value(profileDirOpt);
+    if (parser.isSet(ephemeralOpt))
+        cfg.ephemeral = true;
     if (parser.isSet(profileNameOpt))
         cfg.profileName = parser.value(profileNameOpt);
     if (parser.isSet(authTokenOpt))
