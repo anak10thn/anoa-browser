@@ -26,6 +26,7 @@
 
 class AnoaBrowser;
 class QAction;
+class QHBoxLayout;
 class QLineEdit;
 class QMenu;
 class QResizeEvent;
@@ -74,9 +75,18 @@ private:
     // Places the toolbar across the top and, when it is not overlaying, leaves
     // the view a top margin the same height so the two do not overlap.
     void layoutToolbar();
+    // Rebuilt whole on every tab signal. One button per tab is cheap, and the
+    // alternative — patching buttons in place — is a second source of truth
+    // about which tabs exist.
+    void rebuildTabStrip();
 
     AnoaBrowser *m_view = nullptr;
     QWidget *m_toolbar = nullptr;
+    // A sibling of the view, never inside the container. Anything within it
+    // would appear in every screenshot and shift the coordinate space that
+    // /render/click is measured in.
+    QWidget *m_tabStrip = nullptr;
+    QHBoxLayout *m_tabStripLayout = nullptr;
     QVBoxLayout *m_root = nullptr;
     QLineEdit *m_urlEdit = nullptr;
     QToolButton *m_back = nullptr;

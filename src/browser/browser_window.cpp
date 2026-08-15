@@ -20,6 +20,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWebEngineHistory>
+#include <QWebEnginePage>
 
 #include "browser/anoa_browser.h"
 #include "common/url_input.h"
@@ -53,6 +54,27 @@ QLineEdit {
     selection-background-color: #B4D5FE;
 }
 QLineEdit:focus { border: 1px solid #4A90D9; }
+QWidget#anoaTabStrip {
+    background: #E2E2E2;
+    border-bottom: 1px solid #D0D0D0;
+}
+QToolButton#anoaTab {
+    background: #D8D8D8;
+    border-right: 1px solid #C8C8C8;
+    color: #4A4A4A;
+    padding: 3px 8px;
+}
+QToolButton#anoaTab[active="true"] {
+    background: #F6F6F6;
+    color: #101010;
+}
+QToolButton#anoaTabClose, QToolButton#anoaTabNew {
+    background: transparent;
+    border: none;
+    color: #7A7A7A;
+    padding: 0 6px;
+}
+QToolButton#anoaTabClose:hover, QToolButton#anoaTabNew:hover { color: #101010; }
 )";
 
 } // namespace
@@ -141,9 +163,31 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     bar->addWidget(m_menuButton);
     setStyleSheet(QString::fromLatin1(kToolbarStyle));
 
-    // The toolbar is deliberately NOT in the layout. Only the view is, and the
-    // toolbar is positioned by hand across the top with the layout's top margin
-    // reserving the space for it.
+    // The strip is a sibling of the container, exactly like the toolbar and for
+    // exactly the same reason: anything inside the container is in every
+    // screenshot and moves every click target with it.
+    m_tabStrip = new QWidget(this);
+    m_tabStrip->setObjectName(QStringLiteral("anoaTabStrip"));
+    m_tabStripLayout = new QHBoxLayout(m_tabStrip);
+    m_tabStripLayout->setContentsMargins(0, 0, 0, 0);
+    m_tabStripLayout->setSpacing(0);
+    m_tabStrip->hide(); // one tab looks exactly as it does today
+
+    connect(m_view, &AnoaBrowser::tabCreated, this,
+            [this](const QString &) { rebuildTabStrip(); });
+    connect(m_view, &AnoaBrowser::tabClosed, this,
+            [this](const QString &) { rebuildTabStrip(); });
+    connect(m_view, &AnoaBrowser::tabActivated, this,
+            [this](const QString &) { rebuildTabStrip(); });
+    connect(m_view, &AnoaBrowser::activeTitleChanged, this,
+            [this](const QString &) { rebuildTabStrip(); });
+
+    // The toolbar is deliberately NOT in the layout. Only the tab container is,
+    // and the toolbar is positioned by hand across the top with the layout's top
+    // margin reserving the space for it. It stays a sibling of the container for
+    // the same reason it is not inside the view: anything within the container
+    // appears in every screenshot and shifts the coordinate space clicks are
+    // measured in.
     //
     // That indirection is what makes auto-hide possible without touching the
     // view's geometry: revealing the bar over the page must not resize the
@@ -161,9 +205,15 @@ BrowserWindow::BrowserWindow(AnoaBrowser *view, const Config &config, QWidget *p
     connect(m_forward, &QToolButton::clicked, m_view, &AnoaBrowser::forward);
     connect(reload, &QToolButton::clicked, m_view, &AnoaBrowser::reload);
     connect(m_urlEdit, &QLineEdit::returnPressed, this, &BrowserWindow::onUrlEntered);
-    connect(m_view, &AnoaBrowser::urlChanged, this, &BrowserWindow::onUrlChanged);
-    connect(m_view, &AnoaBrowser::loadFinished, this,
+    // The container's active* signals, not one view's: which view is showing
+    // can change under us, and the address field has to follow whichever tab
+    // is active rather than the one that happened to exist at startup.
+    connect(m_view, &AnoaBrowser::activeUrlChanged, this, &BrowserWindow::onUrlChanged);
+    connect(m_view, &AnoaBrowser::activeLoadFinished, this,
             [this](bool) { refreshHistoryButtons(); });
+    // Switching tabs changes no page, so nothing above fires for it.
+    connect(m_view, &AnoaBrowser::tabActivated, this,
+            [this](const QString &) { refreshHistoryButtons(); });
 
     refreshHistoryButtons();
 
@@ -196,10 +246,83 @@ void BrowserWindow::layoutToolbar()
         return;
     const int barHeight = m_toolbar->sizeHint().height();
     m_toolbar->setGeometry(0, 0, width(), barHeight);
+
+    // The strip sits under the toolbar and shares its fate: both overlay the
+    // page when auto-hide is on, and both are reserved for when it is off.
+    const bool stripVisible = m_tabStrip && m_tabStrip->isVisible();
+    const int stripHeight = stripVisible ? m_tabStrip->sizeHint().height() : 0;
+    if (m_tabStrip)
+        m_tabStrip->setGeometry(0, barHeight, width(), stripHeight);
+
     // Overlaying costs the view nothing; docked, the margin is what keeps the
     // page out from under the bar.
-    m_root->setContentsMargins(0, m_autoHide ? 0 : barHeight, 0, 0);
+    m_root->setContentsMargins(0, m_autoHide ? 0 : barHeight + stripHeight, 0, 0);
     m_toolbar->raise();
+    if (m_tabStrip)
+        m_tabStrip->raise();
+}
+
+void BrowserWindow::rebuildTabStrip()
+{
+    if (!m_tabStrip || !m_view)
+        return;
+
+    // Torn down and rebuilt rather than patched: one button per tab is cheap,
+    // and keeping a second model of which tabs exist is how the two drift.
+    while (QLayoutItem *item = m_tabStripLayout->takeAt(0)) {
+        if (QWidget *w = item->widget())
+            w->deleteLater();
+        delete item;
+    }
+
+    const QStringList ids = m_view->tabIds();
+    const QString active = m_view->activeTabId();
+
+    for (const QString &id : ids) {
+        auto *button = new QToolButton(m_tabStrip);
+        button->setObjectName(QStringLiteral("anoaTab"));
+        QString label = m_view->titleFor(id);
+        if (label.isEmpty())
+            label = m_view->urlFor(id);
+        if (label.isEmpty())
+            label = id;
+        if (label.size() > 24)
+            label = label.left(23) + QStringLiteral("\xE2\x80\xA6"); // HORIZONTAL ELLIPSIS
+        button->setText(label);
+        button->setToolTip(id + QStringLiteral("  ") + m_view->urlFor(id));
+        button->setProperty("active", id == active);
+        button->setCursor(Qt::ArrowCursor);
+        connect(button, &QToolButton::clicked, this, [this, id]() { m_view->selectTab(id); });
+        m_tabStripLayout->addWidget(button);
+
+        // No close button on the last tab: the registry would refuse it, and
+        // offering a control that cannot work is worse than not offering it.
+        if (ids.size() > 1) {
+            auto *close = new QToolButton(m_tabStrip);
+            close->setObjectName(QStringLiteral("anoaTabClose"));
+            close->setText(QStringLiteral("\xC3\x97")); // MULTIPLICATION SIGN
+            close->setToolTip(QStringLiteral("Close ") + id);
+            close->setCursor(Qt::ArrowCursor);
+            connect(close, &QToolButton::clicked, this, [this, id]() { m_view->closeTab(id); });
+            m_tabStripLayout->addWidget(close);
+        }
+    }
+
+    auto *add = new QToolButton(m_tabStrip);
+    add->setObjectName(QStringLiteral("anoaTabNew"));
+    add->setText(QStringLiteral("+"));
+    add->setToolTip(QStringLiteral("New tab"));
+    add->setCursor(Qt::ArrowCursor);
+    connect(add, &QToolButton::clicked, this, [this]() { m_view->newTab(); });
+    m_tabStripLayout->addWidget(add);
+    m_tabStripLayout->addStretch(1);
+
+    // Hidden at one tab, so today's window is untouched. Auto-hide owns
+    // visibility when it is on: the strip appears with the toolbar, not apart
+    // from it.
+    const bool want = ids.size() > 1;
+    m_tabStrip->setVisible(want && (!m_autoHide || m_toolbar->isVisible()));
+    layoutToolbar();
 }
 
 void BrowserWindow::setAutoHide(bool on)
@@ -207,10 +330,14 @@ void BrowserWindow::setAutoHide(bool on)
     m_autoHide = on;
     if (on) {
         m_toolbar->hide();
+        if (m_tabStrip)
+            m_tabStrip->hide();
         m_pointerTimer->start();
     } else {
         m_pointerTimer->stop();
         m_toolbar->show();
+        if (m_tabStrip && m_view && m_view->tabCount() > 1)
+            m_tabStrip->show();
     }
     layoutToolbar();
 }
@@ -233,6 +360,14 @@ void BrowserWindow::pollPointer()
         if (insideHorizontally && local.y() >= 0 && local.y() <= kRevealZone) {
             m_toolbar->show();
             m_toolbar->raise();
+            // The strip comes and goes with the toolbar rather than on its own
+            // trigger: two things appearing at the top edge on two different
+            // rules would be one surprise too many.
+            if (m_tabStrip && m_view && m_view->tabCount() > 1) {
+                m_tabStrip->show();
+                m_tabStrip->raise();
+            }
+            layoutToolbar();
         }
         return;
     }
@@ -241,9 +376,13 @@ void BrowserWindow::pollPointer()
     // or the address field has focus and is being typed into.
     if (m_urlEdit->hasFocus() || (m_menu && m_menu->isVisible()))
         return;
-    if (insideHorizontally && local.y() >= 0 && local.y() < barHeight)
+    const int stripHeight =
+        (m_tabStrip && m_tabStrip->isVisible()) ? m_tabStrip->sizeHint().height() : 0;
+    if (insideHorizontally && local.y() >= 0 && local.y() < barHeight + stripHeight)
         return;
     m_toolbar->hide();
+    if (m_tabStrip)
+        m_tabStrip->hide();
 }
 
 // Session-only, and deliberately so: there is no bookmark store anywhere in
@@ -297,8 +436,13 @@ void BrowserWindow::rebuildMenu()
 
 BrowserWindow::~BrowserWindow()
 {
+    // The container is borrowed, not owned: it lives on main()'s stack and is
+    // declared before this window so it outlives it. Releasing it here keeps
+    // Qt's parent-child teardown from deleting a stack object. What is released
+    // is the whole tab container, so every view inside it goes with it and none
+    // is left parented to a window that no longer exists.
     if (m_view) {
-        m_view->hide(); // so releasing it does not flash a bare top-level view
+        m_view->hide(); // so releasing it does not flash a bare top-level widget
         m_view->setParent(nullptr);
     }
 }
@@ -323,6 +467,11 @@ void BrowserWindow::onUrlChanged(const QUrl &url)
 
 void BrowserWindow::refreshHistoryButtons()
 {
-    m_back->setEnabled(m_view->history()->canGoBack());
-    m_forward->setEnabled(m_view->history()->canGoForward());
+    // The active tab's history. Each tab keeps its own, so these buttons mean
+    // "back in what you are looking at", not "back in the first tab opened".
+    QWebEnginePage *page = m_view->page();
+    const bool canBack = page && page->history()->canGoBack();
+    const bool canForward = page && page->history()->canGoForward();
+    m_back->setEnabled(canBack);
+    m_forward->setEnabled(canForward);
 }

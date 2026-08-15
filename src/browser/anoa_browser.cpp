@@ -7,6 +7,10 @@
 #include <QFile>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QResizeEvent>
 #include <QWheelEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -17,6 +21,7 @@
 #include <QWebEngineProfile>
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
+#include <QWebEngineView>
 
 namespace {
 
@@ -51,13 +56,14 @@ private:
 } // namespace
 
 AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
-    : QWebEngineView(parent)
+    : QWidget(parent)
     , m_config(config)
     , m_profile(nullptr)
+    , m_nam(new QNetworkAccessManager(this))
 {
     // QTWEBENGINE_CHROMIUM_FLAGS must be set before WebEngine initializes its
-    // profile/page. Setting it here, before creating QWebEngineProfile and
-    // calling setPage(), ensures Chromium picks up the remote-debugging port.
+    // profile/page. Setting it here, before creating QWebEngineProfile and any
+    // view, ensures Chromium picks up the remote-debugging port.
     // Chromium DevTools runs on port+1; our HTTP/WS proxy layer listens on port.
     QByteArray flags;
     if (m_config.termEmbedded) {
@@ -100,7 +106,494 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
     m_profile = QWebEngineProfile::defaultProfile();
-    setPage(new AnoaPage(m_config.terminalMode, m_profile, this));
+
+    // No layout at all. Views are children at identical geometry and the
+    // active one is raised — see the header for why hiding them is not an
+    // option.
+}
+
+QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)
+{
+    auto *view = new QWebEngineView(this);
+    view->setPage(new AnoaPage(m_config.terminalMode, profile, view));
+
+    // Every view reports through the same three signals, filtered to whichever
+    // tab is active. A filter rather than connect/disconnect on every switch:
+    // there is one connection per view for its whole life, so no window exists
+    // in which a page is loading with nothing listening.
+    connect(view, &QWebEngineView::urlChanged, this, [this, view](const QUrl &url) {
+        if (view == activeView())
+            emit activeUrlChanged(url);
+    });
+    connect(view, &QWebEngineView::titleChanged, this, [this, view](const QString &title) {
+        if (view == activeView())
+            emit activeTitleChanged(title);
+    });
+    connect(view, &QWebEngineView::loadFinished, this, [this, view](bool ok) {
+        if (view == activeView())
+            emit activeLoadFinished(ok);
+    });
+
+    // A recreated page gets a new DevTools target, so the cached id becomes a
+    // dead route. A client dialling a stale id fails in a way that looks like
+    // the browser is broken; having no id at all is merely "not yet", which
+    // /json/list already knows how to express.
+    connect(view->page(), &QWebEnginePage::renderProcessTerminated, this,
+            [this, view](QWebEnginePage::RenderProcessTerminationStatus, int) {
+                for (Tab &tab : m_tabs) {
+                    if (tab.view != view)
+                        continue;
+                    tab.chromiumTargetId.clear();
+                    resolveTargetId(tab.id, 0);
+                    break;
+                }
+            });
+
+    return view;
+}
+
+int AnoaBrowser::indexOf(const QString &id) const
+{
+    for (int i = 0; i < m_tabs.size(); ++i) {
+        if (m_tabs.at(i).id == id)
+            return i;
+    }
+    return -1;
+}
+
+QString AnoaBrowser::newTab(const QUrl &url, const QString &profileName, bool isolated)
+{
+    Tab tab;
+    tab.id = m_minter.next();
+    tab.profileName = profileName;
+    tab.profile = profileFor(profileName, isolated);
+    tab.view = createView(tab.profile);
+    m_profileUsers[tab.profile] += 1;
+
+    return finishNewTab(tab, url);
+}
+
+QString AnoaBrowser::finishNewTab(Tab &tab, const QUrl &url)
+{
+    // Every profile a client can name needs a stable id, minted once per
+    // profile object so two tabs sharing one report the same context.
+    if (!m_contextIds.contains(tab.profile)) {
+        m_contextIds.insert(tab.profile,
+                            tab.profile == m_profile
+                                ? QStringLiteral("__anoa_default__")
+                                : QStringLiteral("anoa-ctx-%1").arg(++m_nextContextId));
+    }
+
+    m_tabs.append(tab);
+    // Visible from birth, sized like the container. A tab opened while the
+    // window is already up never sees a resize, and a view that was never
+    // shown takes no input even once it is raised.
+    tab.view->setGeometry(rect());
+    tab.view->show();
+
+    // The first tab is the active one by definition; later tabs open in the
+    // background, so an agent driving the active tab is not interrupted by
+    // another one opening.
+    if (m_activeTabId.isEmpty()) {
+        m_activeTabId = tab.id;
+        tab.view->raise();
+    }
+
+    // about:blank rather than nothing: a page has to exist for the renderer to
+    // start and register as a DevTools target, which is what makes the tab
+    // reachable over CDP at all.
+    tab.view->load(url.isEmpty() ? QUrl(QStringLiteral("about:blank")) : url);
+
+    // The DevTools target does not exist yet, so this answers on a later turn
+    // of the event loop and retries until it does.
+    resolveTargetId(tab.id, 0);
+
+    emit tabCreated(tab.id);
+    if (m_activeTabId == tab.id)
+        emit tabActivated(tab.id);
+    return tab.id;
+}
+
+bool AnoaBrowser::closeTab(const QString &id)
+{
+    const int idx = indexOf(id);
+    if (idx < 0)
+        return false;
+    // One process still means at least one page: HttpServer, the viewer and
+    // every /render/* endpoint describe "the page", and there has to be one.
+    if (m_tabs.size() <= 1)
+        return false;
+
+    const bool wasActive = (m_activeTabId == id);
+    QWebEngineView *view = m_tabs.at(idx).view;
+    QWebEngineProfile *profile = m_tabs.at(idx).profile;
+    m_tabs.removeAt(idx);
+    // The view goes first and the profile reference after it. A profile
+    // destroyed while a page still holds it is a use-after-free inside
+    // Chromium, not a leak we would notice later.
+    delete view;
+    releaseProfile(profile);
+
+    if (wasActive) {
+        // The next tab in creation order, or the previous one if the closed tab
+        // was last — the same choice a tabbed browser makes.
+        const int next = (idx < m_tabs.size()) ? idx : m_tabs.size() - 1;
+        m_activeTabId = m_tabs.at(next).id;
+        m_tabs.at(next).view->raise();
+        emit tabActivated(m_activeTabId);
+        emit activeUrlChanged(m_tabs.at(next).view->url());
+        emit activeTitleChanged(m_tabs.at(next).view->title());
+    }
+
+    emit tabClosed(id);
+    return true;
+}
+
+bool AnoaBrowser::selectTab(const QString &id)
+{
+    const int idx = indexOf(id);
+    if (idx < 0)
+        return false;
+    if (m_activeTabId == id)
+        return true;
+
+    m_activeTabId = id;
+    m_tabs.at(idx).view->raise();
+    m_tabs.at(idx).view->setFocus();
+
+    emit tabActivated(id);
+    // The window has no other way to learn what it is now showing: the filtered
+    // signals above only fire when a page changes, and switching tabs changes
+    // no page.
+    emit activeUrlChanged(m_tabs.at(idx).view->url());
+    emit activeTitleChanged(m_tabs.at(idx).view->title());
+    return true;
+}
+
+QStringList AnoaBrowser::tabIds() const
+{
+    QStringList ids;
+    ids.reserve(m_tabs.size());
+    for (const Tab &tab : m_tabs)
+        ids << tab.id;
+    return ids;
+}
+
+QString AnoaBrowser::activeTabId() const
+{
+    return m_activeTabId;
+}
+
+int AnoaBrowser::tabCount() const
+{
+    return static_cast<int>(m_tabs.size());
+}
+
+QWebEngineView *AnoaBrowser::viewFor(const QString &id) const
+{
+    const int idx = indexOf(id);
+    return idx < 0 ? nullptr : m_tabs.at(idx).view;
+}
+
+QWebEnginePage *AnoaBrowser::pageFor(const QString &id) const
+{
+    QWebEngineView *view = viewFor(id);
+    return view ? view->page() : nullptr;
+}
+
+QWebEngineView *AnoaBrowser::activeView() const
+{
+    return viewFor(m_activeTabId);
+}
+
+QWebEngineProfile *AnoaBrowser::profileFor(const QString &name, bool isolated)
+{
+    // Off-the-record and unnamed: a fresh jar per tab, gone when the tab goes.
+    // Asked for explicitly, because it is the opposite of what a browser
+    // normally does with a login.
+    if (isolated)
+        return new QWebEngineProfile(this);
+
+    if (name.isEmpty())
+        return m_profile; // the shared default
+
+    // Created once per name. Two QWebEngineProfile objects over one on-disk
+    // path corrupt each other's storage; this is not an optimisation.
+    if (QWebEngineProfile *existing = m_profilesByName.value(name))
+        return existing;
+
+    auto *profile = new QWebEngineProfile(name, this);
+    profile->setPersistentStoragePath(QDir(m_config.profileDir).filePath(name));
+    profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    m_profilesByName.insert(name, profile);
+    return profile;
+}
+
+void AnoaBrowser::releaseProfile(QWebEngineProfile *profile)
+{
+    if (!profile)
+        return;
+    const int left = m_profileUsers.value(profile) - 1;
+    if (left > 0) {
+        m_profileUsers[profile] = left;
+        return;
+    }
+    m_profileUsers.remove(profile);
+    // The default outlives every tab: the process still holds it, and
+    // setupNamedProfile may have made it the --profile one.
+    if (profile == m_profile)
+        return;
+    m_profilesByName.remove(m_profilesByName.key(profile));
+    m_contextIds.remove(profile);
+    profile->deleteLater();
+}
+
+QString AnoaBrowser::profileNameFor(const QString &tabId) const
+{
+    const int idx = indexOf(tabId);
+    return idx < 0 ? QString() : m_tabs.at(idx).profileName;
+}
+
+bool AnoaBrowser::tabsShareProfile(const QString &a, const QString &b) const
+{
+    const int ia = indexOf(a);
+    const int ib = indexOf(b);
+    if (ia < 0 || ib < 0)
+        return false;
+    return m_tabs.at(ia).profile == m_tabs.at(ib).profile;
+}
+
+void AnoaBrowser::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    // Nothing lays these out but this: every tab is sized like the container,
+    // not just the one on top. /render/screenshot.png reports a view's geometry
+    // as the coordinate space clicks are measured in, so a background tab left
+    // at its birth size would answer with a viewport a hundred pixels wide and
+    // every click against it would land somewhere else entirely.
+    for (const Tab &tab : m_tabs) {
+        if (tab.view)
+            tab.view->setGeometry(rect());
+    }
+}
+
+QWebEngineView *AnoaBrowser::viewForOrActive(const QString &tabId) const
+{
+    return tabId.isEmpty() ? activeView() : viewFor(tabId);
+}
+
+QString AnoaBrowser::chromiumTargetId(const QString &tabId) const
+{
+    const int idx = indexOf(tabId);
+    return idx < 0 ? QString() : m_tabs.at(idx).chromiumTargetId;
+}
+
+QString AnoaBrowser::targetIdFor(const QString &tabId) const
+{
+    return chromiumTargetId(tabId);
+}
+
+QString AnoaBrowser::titleFor(const QString &tabId) const
+{
+    QWebEngineView *view = viewFor(tabId);
+    return view ? view->title() : QString();
+}
+
+QString AnoaBrowser::urlFor(const QString &tabId) const
+{
+    QWebEngineView *view = viewFor(tabId);
+    return view ? view->url().toString() : QString();
+}
+
+QString AnoaBrowser::browserContextIdFor(const QString &tabId) const
+{
+    const int idx = indexOf(tabId);
+    if (idx < 0)
+        return QStringLiteral("__anoa_default__");
+    return m_contextIds.value(m_tabs.at(idx).profile,
+                              QStringLiteral("__anoa_default__"));
+}
+
+bool AnoaBrowser::knowsBrowserContext(const QString &contextId) const
+{
+    if (contextId == QLatin1String("__anoa_default__"))
+        return true;
+    for (auto it = m_contextIds.constBegin(); it != m_contextIds.constEnd(); ++it) {
+        if (it.value() == contextId)
+            return true;
+    }
+    return false;
+}
+
+QString AnoaBrowser::newTabInBrowserContext(const QUrl &url, const QString &contextId)
+{
+    if (contextId.isEmpty() || contextId == QLatin1String("__anoa_default__"))
+        return newTab(url);
+
+    // The context names a profile we already hold, so the new tab joins it
+    // rather than creating a second object over the same storage.
+    for (auto it = m_contextIds.constBegin(); it != m_contextIds.constEnd(); ++it) {
+        if (it.value() != contextId)
+            continue;
+        QWebEngineProfile *profile = it.key();
+        Tab tab;
+        tab.id = m_minter.next();
+        tab.profile = profile;
+        tab.profileName = m_profilesByName.key(profile);
+        tab.view = createView(profile);
+        m_profileUsers[profile] += 1;
+        return finishNewTab(tab, url);
+    }
+    return QString(); // not ours
+}
+
+void AnoaBrowser::whenTargetResolved(const QString &tabId,
+                                     std::function<void(const QString &)> cb)
+{
+    const QString already = chromiumTargetId(tabId);
+    if (!already.isEmpty()) {
+        cb(already);
+        return;
+    }
+    // One shot: disconnected as soon as this tab's id lands, so a later tab
+    // resolving does not fire someone else's callback.
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(this, &AnoaBrowser::tabTargetResolved, this,
+                    [tabId, cb, conn](const QString &resolvedTab,
+                                      const QString &targetId) {
+                        if (resolvedTab != tabId)
+                            return;
+                        QObject::disconnect(*conn);
+                        cb(targetId);
+                    });
+}
+
+QString AnoaBrowser::tabIdForTargetId(const QString &targetId) const
+{
+    if (targetId.isEmpty())
+        return QString();
+    for (const Tab &tab : m_tabs) {
+        if (tab.chromiumTargetId == targetId)
+            return tab.id;
+    }
+    return QString();
+}
+
+void AnoaBrowser::resolveTargetId(const QString &tabId, int attempt)
+{
+    // The embedded viewer opens no debugging port at all, so there is nothing
+    // to ask and nothing that could ever answer.
+    if (m_config.termEmbedded)
+        return;
+    const int idx = indexOf(tabId);
+    if (idx < 0)
+        return; // the tab was closed while we were waiting
+
+    // 100, 200, 400, 800, 1600ms — about 3s in total, then give up and leave
+    // the id empty. Advertising a target that cannot be dialled is worse than
+    // advertising it a moment later, and /json/list omits unresolved tabs.
+    constexpr int kMaxAttempts = 6;
+    if (attempt >= kMaxAttempts)
+        return;
+
+    const QUrl endpoint(QStringLiteral("http://127.0.0.1:%1/json/list")
+                            .arg(m_config.port + 1));
+    QNetworkReply *reply = m_nam->get(QNetworkRequest(endpoint));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, tabId, attempt]() {
+        reply->deleteLater();
+
+        QString found;
+        if (reply->error() == QNetworkReply::NoError) {
+            const QJsonArray targets =
+                QJsonDocument::fromJson(reply->readAll()).array();
+            const int idx = indexOf(tabId);
+            if (idx < 0)
+                return; // closed while the request was in flight
+
+            const QWebEngineView *view = m_tabs.at(idx).view;
+            const QString wantUrl = view ? view->url().toString() : QString();
+
+            // Only entries no other tab has already claimed can be ours. With
+            // one unclaimed entry that settles it; with several — tabs opened
+            // close together, all still on about:blank — prefer the one whose
+            // url matches this view's.
+            QString firstUnclaimed;
+            for (const QJsonValue &value : targets) {
+                const QJsonObject target = value.toObject();
+                if (target.value(QStringLiteral("type")).toString()
+                    != QLatin1String("page"))
+                    continue;
+                const QString id = target.value(QStringLiteral("id")).toString();
+                if (id.isEmpty() || !tabIdForTargetId(id).isEmpty())
+                    continue;
+                if (firstUnclaimed.isEmpty())
+                    firstUnclaimed = id;
+                if (!wantUrl.isEmpty()
+                    && target.value(QStringLiteral("url")).toString() == wantUrl) {
+                    found = id;
+                    break;
+                }
+            }
+            if (found.isEmpty())
+                found = firstUnclaimed;
+        }
+
+        if (found.isEmpty()) {
+            const int delayMs = 100 << attempt;
+            QTimer::singleShot(delayMs, this, [this, tabId, attempt]() {
+                resolveTargetId(tabId, attempt + 1);
+            });
+            return;
+        }
+
+        const int idx = indexOf(tabId);
+        if (idx < 0)
+            return;
+        m_tabs[idx].chromiumTargetId = found;
+        emit tabTargetResolved(tabId, found);
+    });
+}
+
+QWebEnginePage *AnoaBrowser::page() const
+{
+    QWebEngineView *view = activeView();
+    return view ? view->page() : nullptr;
+}
+
+void AnoaBrowser::load(const QUrl &url)
+{
+    if (QWebEngineView *view = activeView())
+        view->load(url);
+}
+
+void AnoaBrowser::back()
+{
+    if (QWebEngineView *view = activeView())
+        view->back();
+}
+
+void AnoaBrowser::forward()
+{
+    if (QWebEngineView *view = activeView())
+        view->forward();
+}
+
+void AnoaBrowser::reload()
+{
+    if (QWebEngineView *view = activeView())
+        view->reload();
+}
+
+QUrl AnoaBrowser::url() const
+{
+    QWebEngineView *view = activeView();
+    return view ? view->url() : QUrl();
+}
+
+QString AnoaBrowser::title() const
+{
+    QWebEngineView *view = activeView();
+    return view ? view->title() : QString();
 }
 
 void AnoaBrowser::init()
@@ -110,13 +603,17 @@ void AnoaBrowser::init()
     // the widget has no backing surface and QWebEngineView reports a 0×0 viewport.
     // With QPA_PLATFORM=offscreen the call creates an invisible surface, not a window.
     show();
-    // Navigating to about:blank ensures the renderer process is started and the
-    // page registers as a DevTools target in /json/list so CDP clients can attach.
-    load(QUrl(QStringLiteral("about:blank")));
+    // Exactly one tab, so nothing observable changes for a caller that has
+    // never heard of tabs.
+    newTab();
 }
 
 void AnoaBrowser::loadExtensions(const QStringList &paths)
 {
+    // Process-wide, against the default profile only. Extensions per tab are
+    // out of scope, so a tab on a named or isolated profile gets none of these
+    // scripts — which is why this reads m_profile rather than walking the
+    // profile registry.
     for (const QString &path : paths) {
         if (!QDir(path).exists()) {
             qWarning("Extension path does not exist, skipping: %s", qPrintable(path));
@@ -178,9 +675,15 @@ void AnoaBrowser::setupNamedProfile(const QString &name, const QString &baseDir)
     m_profile->setPersistentStoragePath(QDir(baseDir).filePath(name));
     m_profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
 
-    auto *oldPage = page();
-    setPage(new QWebEnginePage(m_profile, this));
-    oldPage->deleteLater();
+    // Called before init() in practice, so there is usually nothing to move.
+    // Any tab that does exist gets a page on the new profile, which is what
+    // this call meant when there was only ever one.
+    for (Tab &tab : m_tabs) {
+        auto *oldPage = tab.view->page();
+        tab.profile = m_profile;
+        tab.view->setPage(new AnoaPage(m_config.terminalMode, m_profile, tab.view));
+        oldPage->deleteLater();
+    }
 }
 
 QList<QNetworkCookie> AnoaBrowser::getCookies(const QUrl &origin)
@@ -211,7 +714,8 @@ void AnoaBrowser::clearStorage(const QUrl &origin)
     Q_UNUSED(origin)
     m_profile->cookieStore()->deleteAllCookies();
     m_profile->clearAllVisitedLinks();
-    page()->triggerAction(QWebEnginePage::Stop);
+    if (QWebEnginePage *p = page())
+        p->triggerAction(QWebEnginePage::Stop);
 }
 
 // Synthetic input must go to the render widget (focusProxy), not the
@@ -220,13 +724,17 @@ void AnoaBrowser::clearStorage(const QUrl &origin)
 // handler code without re-entering the widget stack synchronously.
 static QWidget *inputTarget(QWebEngineView *view)
 {
+    if (!view)
+        return nullptr;
     QWidget *proxy = view->focusProxy();
-    return proxy ? proxy : view;
+    return proxy ? proxy : static_cast<QWidget *>(view);
 }
 
-void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button)
+void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId)
 {
-    QWidget *target = inputTarget(this);
+    QWidget *target = inputTarget(viewForOrActive(tabId));
+    if (!target)
+        return;
     const QPointF posF(pos);
     const QPointF globalF(target->mapToGlobal(pos));
     // Chromium's click-count logic compares event timestamps; leaving them at 0
@@ -248,9 +756,11 @@ void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button)
     QCoreApplication::postEvent(target, release);
 }
 
-void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
+void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY, const QString &tabId)
 {
-    QWidget *target = inputTarget(this);
+    QWidget *target = inputTarget(viewForOrActive(tabId));
+    if (!target)
+        return;
     const QPointF posF(pos);
     const QPointF globalF(target->mapToGlobal(pos));
     // Null pixelDelta = classic notched wheel; angleDelta is in 1/8 degree,
@@ -261,9 +771,11 @@ void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY)
     QCoreApplication::postEvent(target, wheel);
 }
 
-void AnoaBrowser::sendText(const QString &text)
+void AnoaBrowser::sendText(const QString &text, const QString &tabId)
 {
-    QWidget *target = inputTarget(this);
+    QWidget *target = inputTarget(viewForOrActive(tabId));
+    if (!target)
+        return;
     for (const QChar &ch : text) {
         // key = 0 (unknown) + non-empty text: Chromium takes the character from
         // the text payload, which handles any unicode without a key-code table.
@@ -274,7 +786,7 @@ void AnoaBrowser::sendText(const QString &text)
     }
 }
 
-bool AnoaBrowser::sendKey(const QString &keyName)
+bool AnoaBrowser::sendKey(const QString &keyName, const QString &tabId)
 {
     struct NamedKey {
         const char *name;
@@ -301,7 +813,9 @@ bool AnoaBrowser::sendKey(const QString &keyName)
     const QString wanted = keyName.toLower();
     for (const NamedKey &k : keys) {
         if (wanted == QLatin1String(k.name)) {
-            QWidget *target = inputTarget(this);
+            QWidget *target = inputTarget(viewForOrActive(tabId));
+            if (!target)
+                return false;
             QCoreApplication::postEvent(target,
                 new QKeyEvent(QEvent::KeyPress, k.key, Qt::NoModifier,
                               QString::fromLatin1(k.text)));

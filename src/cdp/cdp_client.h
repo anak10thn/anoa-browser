@@ -135,6 +135,11 @@ signals:
     // is scheduled and every pending request has already been failed.
     void discoveryFailed(const QString &message);
 
+public:
+    // Narrows discovery to one anoa tab. Empty means "the active one", which is
+    // what every invocation without --tab asks for.
+    void setTabFilter(const QString &tabId);
+
 private slots:
     void onSocketConnected();
     void onSocketDisconnected();
@@ -162,6 +167,7 @@ private:
     void onDiscoveryFinished(QNetworkReply *reply);
     // One line on stderr, discoveryFailed(), and (by default) exec() -> 1.
     void failDiscovery(const QString &message);
+    QString m_tabFilter;
     void openSocket();
     void setState(State state, const QString &text);
     void scheduleReconnect(const QString &reason);

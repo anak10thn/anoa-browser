@@ -354,4 +354,184 @@ describe('Agent CLI (Suite 8)', () => {
     assert.equal(run(['--version']).code, 0);
     assert.equal(run(['help']).code, 0);
   });
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  //
+  // Every case here leaves the browser on one tab again, because the cases
+  // above and below it assume the single-tab browser they were written against.
+  function closeExtraTabs() {
+    const rows = anoa('tab', 'list').out.split('\n').filter(Boolean);
+    const ids = rows.map(line => line.trim().split(/\s+/)[0]);
+    // Never the first: the registry refuses the last tab, and the point is to
+    // get back to exactly one.
+    for (const id of ids.slice(1)) anoa('tab', 'close', id);
+    if (ids.length) anoa('tab', 'select', ids[0]);
+  }
+
+  // Two documents without a server: about:blank in each tab, then a distinct
+  // body written into it. Fixtures would need something to serve them.
+  function makeTab(marker) {
+    const id = anoa('tab', 'new').out.trim();
+    anoa('eval', `document.body.innerHTML = '<h1>${marker}</h1>'`, '--tab', id);
+    return id;
+  }
+
+  // AGENT-20: two tabs are two pages, and --tab picks between them.
+  it('two tabs hold independent documents', () => {
+    anoa('eval', "document.body.innerHTML = '<h1>ALPHA</h1>'");
+    const t2 = makeTab('BRAVO');
+    try {
+      assert.match(anoa('get', 'text', '--tab', 't1').out, /ALPHA/);
+      assert.match(anoa('get', 'text', '--tab', t2).out, /BRAVO/);
+      // And they did not bleed into each other.
+      assert.doesNotMatch(anoa('get', 'text', '--tab', 't1').out, /BRAVO/);
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-21
+  it('tab list marks exactly one tab active, and --json parses', () => {
+    const t2 = makeTab('BRAVO');
+    try {
+      const plain = anoa('tab', 'list').out.split('\n').filter(Boolean);
+      assert.equal(plain.length, 2);
+      assert.equal(plain.filter(line => line.includes('*')).length, 1);
+
+      const rows = JSON.parse(anoa('tab', 'list', '--json').out);
+      assert.equal(rows.length, 2);
+      assert.equal(rows.filter(r => r.active).length, 1);
+      assert.deepEqual(rows.map(r => r.tab), ['t1', t2]);
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-22: refs live in the page as data-anoa-ref attributes, so one tab's
+  // ref names nothing in another. Silently acting on some other element would
+  // be far worse than failing.
+  it('a ref from one tab does not resolve in another', () => {
+    anoa('eval', "document.body.innerHTML = '<button id=a>click me</button>'");
+    const t2 = makeTab('BRAVO');
+    try {
+      const snap = anoa('snapshot', '-i', '--tab', 't1');
+      const ref = (snap.out.match(/@e\d+/) || [])[0];
+      assert.ok(ref, `no ref in snapshot output: ${snap.out}`);
+
+      const r = anoa('click', ref, '--tab', t2);
+      assert.notEqual(r.code, 0);
+      assert.match(r.err + r.out, new RegExp(ref.replace('@', '@?')));
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-23
+  it('closing a non-active tab leaves the active one alone', () => {
+    anoa('eval', "document.body.innerHTML = '<h1>ALPHA</h1>'");
+    const t2 = makeTab('BRAVO');
+    try {
+      assert.equal(anoa('tab', 'close', t2).code, 0);
+      const ids = anoa('tab', 'list').out.split('\n').filter(Boolean)
+                    .map(l => l.trim().split(/\s+/)[0]);
+      assert.deepEqual(ids, ['t1']);
+      assert.match(anoa('get', 'text').out, /ALPHA/);
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-24: closing the active tab has to hand the role to another one, or
+  // the next command with no --tab has nothing to act on.
+  it('closing the active tab promotes another, and a bare command follows it', () => {
+    anoa('eval', "document.body.innerHTML = '<h1>ALPHA</h1>'");
+    const t2 = makeTab('BRAVO');
+    try {
+      assert.equal(anoa('tab', 'select', t2).code, 0);
+      assert.equal(anoa('tab', 'close', t2).code, 0);
+
+      const rows = JSON.parse(anoa('tab', 'list', '--json').out);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].active, true);
+      // No --tab: it must reach whatever is active now.
+      assert.match(anoa('get', 'text').out, /ALPHA/);
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-25
+  it('closing the last tab is refused in words, not a protocol error', () => {
+    const r = anoa('tab', 'close', 't1');
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /only tab/i);
+    assert.equal(JSON.parse(anoa('tab', 'list', '--json').out).length, 1);
+  });
+
+  // AGENT-26: the default that keeps every existing invocation working.
+  it('commands with no --tab act on the active tab', () => {
+    anoa('eval', "document.body.innerHTML = '<h1>ALPHA</h1>'");
+    const t2 = makeTab('BRAVO');
+    try {
+      assert.equal(anoa('tab', 'select', t2).code, 0);
+
+      assert.match(anoa('get', 'text').out, /BRAVO/);
+      assert.match(anoa('eval', 'document.body.textContent').out, /BRAVO/);
+      assert.match(anoa('snapshot').out, /BRAVO/);
+
+      const shot = resolve(root, 'build/tab-active.png');
+      assert.equal(anoa('screenshot', shot).code, 0);
+      assert.ok(existsSync(shot));
+      rmSync(shot, { force: true });
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-27: a wrong tab id fails differently depending on whether it could
+  // ever have been a tab.
+  it('an unknown tab names the ones that exist, a malformed one is usage', () => {
+    const t2 = makeTab('BRAVO');
+    try {
+      const unknown = anoa('get', 'text', '--tab', 't99');
+      assert.notEqual(unknown.code, 0);
+      assert.match(unknown.err, /t1/);
+      assert.match(unknown.err, new RegExp(t2));
+
+      const malformed = anoa('get', 'text', '--tab', 'junk');
+      assert.equal(malformed.code, 2);
+      assert.match(malformed.err, /--tab/);
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-28: input reaches a tab that is not the active one.
+  //
+  // It did not, and both paths still answered "clicked": AnoaBrowser held tabs
+  // in a QStackedLayout, which HIDES every view but the current one, and a
+  // hidden QWebEngineView processes no input at all — not Qt synthetic events
+  // and not CDP Input.dispatchMouseEvent. Views are covered rather than hidden
+  // now, and this is the case that says so.
+  it('a click reaches a background tab', () => {
+    const t2 = anoa('tab', 'new').out.trim();
+    try {
+      anoa('eval',
+           "document.body.innerHTML = '<button id=bg>bg</button>';" +
+           " window.__bgHit = 0;" +
+           " document.getElementById('bg').onclick = () => window.__bgHit = 1; 'ok'",
+           '--tab', t2);
+
+      // t1 is still the active tab: t2 was opened in the background.
+      const rows = JSON.parse(anoa('tab', 'list', '--json').out);
+      assert.equal(rows.find(r => r.active).tab, 't1');
+
+      const clicked = anoa('click', '#bg', '--tab', t2);
+      assert.equal(clicked.code, 0, clicked.err);
+      assert.equal(anoa('eval', 'window.__bgHit', '--tab', t2).out, '1',
+                   'the click reported success but never reached the page');
+    } finally {
+      closeExtraTabs();
+    }
+  });
 });

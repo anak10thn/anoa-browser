@@ -262,7 +262,9 @@ int main(int argc, char *argv[])
     browser.loadExtensions(config.extensionPaths);
 
     // Declared after `browser` so it is destroyed first: its destructor
-    // releases the view it borrowed. Headless mode gets no window at all —
+    // releases the tab container it borrowed, and every view inside goes with
+    // it. The container itself is a stack object here and must survive that
+    // release. Headless mode gets no window at all —
     // there is nothing to show chrome on, and wrapping the view would change
     // the geometry that /render/* reports as the viewport.
     std::unique_ptr<BrowserWindow> window;
@@ -292,7 +294,19 @@ int main(int argc, char *argv[])
 
     CdpProxy cdpProxy(wsPort, debugPort, config.authToken, &app);
     // Provide the initial page for commands handled locally (e.g. Page.printToPDF).
-    cdpProxy.setPage(browser.page());
+    // The proxy answers some commands itself and needs the page the client is
+    // actually attached to, not the first tab. It is handed a lookup rather
+    // than a pointer so src/cdp keeps knowing nothing about src/browser.
+    cdpProxy.setTabHost(&browser);
+    cdpProxy.setPageResolver([&browser](const QString &targetId) -> QWebEnginePage * {
+        if (targetId.isEmpty())
+            return browser.page(); // browser-level endpoint: the active tab
+        const QString tabId = browser.tabIdForTargetId(targetId);
+        // An id we do not recognise is not necessarily wrong — resolution may
+        // still be in flight — so fall back to the active tab rather than
+        // failing the command outright.
+        return tabId.isEmpty() ? browser.page() : browser.pageFor(tabId);
+    });
     if (!cdpProxy.start()) {
         qCritical("Failed to bind CDP proxy to port %u (already in use?)", wsPort);
         return 1;

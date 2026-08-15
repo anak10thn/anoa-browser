@@ -1,5 +1,10 @@
 #include "terminal/render_http_client.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -198,9 +203,37 @@ bool RenderHttpClient::httpRequest(const char *method, const std::string &pathWi
 
 std::string RenderHttpClient::withToken(std::string path) const
 {
+    // Every request funnels through here, which is why the tab rides along with
+    // the token: one place decides what each /render call is addressed to.
+    if (!m_tab.empty())
+        path += (path.find('?') == std::string::npos ? "?" : "&") + std::string("tab=") + m_tab;
     if (!m_token.empty())
         path += (path.find('?') == std::string::npos ? "?" : "&") + std::string("token=") + m_token;
     return path;
+}
+
+void RenderHttpClient::setTab(const QString &tabId)
+{
+    m_tab = tabId.toStdString();
+}
+
+QStringList RenderHttpClient::tabIds()
+{
+    // /json/list is the browser's own answer about which tabs exist, so the
+    // viewer never keeps a second list that could disagree with it.
+    Response resp;
+    if (!httpRequest("GET", withToken("/json/list"), resp))
+        return QStringList();
+
+    QStringList ids;
+    const QJsonArray targets =
+        QJsonDocument::fromJson(QByteArray::fromStdString(resp.body)).array();
+    for (const QJsonValue &value : targets) {
+        const QString id = value.toObject().value(QStringLiteral("anoaTabId")).toString();
+        if (!id.isEmpty())
+            ids.append(id);
+    }
+    return ids;
 }
 
 void RenderHttpClient::post(const std::string &path) const

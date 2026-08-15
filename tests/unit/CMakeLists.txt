@@ -75,6 +75,33 @@ anoa_test_target_coverage(anoa-test-config)
 
 add_test(NAME ConfigTests COMMAND anoa-test-config)
 
+# ── tab ids ────────────────────────────────────────────────────────────────
+# Its own target, never folded into anoa-config-lib: that one is config.cpp
+# against Qt6::Core and nothing else (see AGENTS.md). tab_ids.cpp earns the
+# same treatment for the same reason — it is the part of the tab feature that
+# needs no WebEngine, so the unit job can reach it at all.
+add_library(anoa-tab-ids-lib STATIC
+    ${CMAKE_SOURCE_DIR}/src/browser/tab_ids.cpp
+)
+target_include_directories(anoa-tab-ids-lib PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(anoa-tab-ids-lib PUBLIC Qt6::Core)
+anoa_test_target_flags(anoa-tab-ids-lib)
+anoa_test_target_coverage(anoa-tab-ids-lib)
+
+add_executable(anoa-test-tab-ids test_tab_ids.cpp)
+target_link_libraries(anoa-test-tab-ids PRIVATE
+    Qt6::Test
+    Qt6::Core
+    anoa-tab-ids-lib
+)
+set_target_properties(anoa-test-tab-ids PROPERTIES AUTOMOC ON)
+anoa_test_target_flags(anoa-test-tab-ids)
+anoa_test_target_coverage(anoa-test-tab-ids)
+
+add_test(NAME TabIdsTests COMMAND anoa-test-tab-ids)
+
 # ── terminal ───────────────────────────────────────────────────────────────
 # Both libraries below are separate targets on purpose: anoa-config-lib is
 # config.cpp alone against Qt6::Core, and terminal sources must never join it

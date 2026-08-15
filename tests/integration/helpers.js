@@ -324,3 +324,34 @@ export async function getWsDebuggerUrl(token = null) {
   const json = await resp.json();
   return json.webSocketDebuggerUrl;
 }
+
+/**
+ * Open a tab through the CDP proxy and return its anoa id.
+ *
+ * Goes through Target.createTarget rather than the CLI so an integration test
+ * needs nothing but the browser it already started.
+ */
+export async function newTab(url = 'about:blank', params = {}) {
+  const wsUrl = await getWsDebuggerUrl();
+  const ws = new WebSocket(wsUrl);
+  await new Promise((res, rej) => { ws.once('open', res); ws.once('error', rej); });
+  try {
+    const created = await sendCdp(ws, 'Target.createTarget', { url, ...params }, 8001);
+    const targetId = created.result?.targetId;
+    // createTarget answers with the engine's id; the anoa id is what a test
+    // types next, so it is looked up rather than assumed.
+    const listed = await sendCdp(ws, 'Target.getTargets', {}, 8002);
+    const info = (listed.result?.targetInfos ?? [])
+      .find((t) => t.targetId === targetId);
+    return { tabId: info?.anoaTabId, targetId };
+  } finally {
+    ws.close();
+  }
+}
+
+/** Every page entry /json/list reports, in the browser's own order. */
+export async function listTabs() {
+  const resp = await fetch(`${BASE_URL}/json/list`);
+  const targets = await resp.json();
+  return targets.filter((t) => t.type === 'page');
+}

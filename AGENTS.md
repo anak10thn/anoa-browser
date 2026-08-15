@@ -201,6 +201,40 @@ tests/
   `--cdp`) keep plain names. Both modes share one `QCommandLineParser`, so every flag
   is listed in both `--help` outputs — that is the price of never overloading one.
 
+### Tabs: one browser, many pages
+
+- **Ids are anoa's, not Chromium's.** `t1`, `t2`, minted by the registry and
+  never recycled. A Chromium target GUID changes when a page is recreated, so an
+  agent holding one would find itself driving a different page than the one it
+  named. Both ids travel together in `/json/list` and `Target.getTargets`.
+- **`--tab` resolves at the CDP target-selection seam**, not per command. The
+  agent CLI already picks one page target out of `/json/list`; `--tab` narrows
+  that single pick, so no command threads a tab through its own arguments and
+  nothing downstream learns tabs exist.
+- **The tab strip lives outside the view**, as a sibling in `BrowserWindow`, for
+  the same load-bearing reason the toolbar does: anything inside the container
+  appears in every screenshot and shifts the coordinate space `/render/click`
+  is measured in. Verified rather than assumed — the viewport headers and the
+  screenshot are identical with the strip shown and hidden.
+- **`CdpExtensions` answers asynchronously rather than blocking.**
+  `Target.createTarget` cannot reply in the same turn, because a page exists
+  before its DevTools target does. `processCommand` therefore has three
+  outcomes, not two, and the third defers. Waiting for the id would mean a
+  nested event loop, against the rule that a seam is crossed by signals.
+- **Two tabs naming one profile share one `QWebEngineProfile`.** Two Qt profile
+  objects over one on-disk path corrupt each other's storage; this is not an
+  optimisation. Profiles are reference counted, and `closeTab` destroys the view
+  before dropping the reference — a profile freed while a page still holds it is
+  a use-after-free inside Chromium.
+- **Background views are covered, never hidden.** `AnoaBrowser` uses no layout:
+  every view is a child at the container's geometry and the active one is
+  raised. `QStackedLayout` was the obvious choice and was wrong — it HIDES the
+  views it is not showing, and a hidden `QWebEngineView` processes no input at
+  all, neither Qt synthetic events nor CDP `Input.dispatchMouseEvent`, while
+  both paths still answer "clicked". Reads worked throughout, which is what made
+  it easy to miss. A view must also be `show()`n at creation: one that was never
+  shown takes no input even once it is raised.
+
 ### Other decisions
 
 - **Transports sit behind the `FrameBackend` seam**, so `--cdp` selects an external
@@ -430,6 +464,15 @@ This section is updated by Jonggrang during work sessions.
 Human should review and curate periodically.
 
 ### Patterns Discovered
+
+- A fourth Qt6::Core-only unit target, `anoa-tab-ids-lib`, holds `tab_ids.cpp`.
+  The rule that a WebEngine source is never folded into a Core-only target still
+  stands: each of the four is its own library so that adding a WebEngine
+  dependency fails loudly instead of quietly pulling WebEngine into the unit job.
+  New targets must be added in THREE places — `tests/unit/CMakeLists.txt`, the
+  `TARGETS` list in `tests/coverage.sh`, and that script's
+  `cmake --build --target` line. Missing the last one passes `make test` and
+  fails `make coverage` with "Not Run".
 <!-- Agent appends here, human curates -->
 
 - **Three unit targets now, not one** (phase 14). `anoa-config-lib` is unchanged;

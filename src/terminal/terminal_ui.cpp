@@ -433,6 +433,30 @@ void TerminalUi::renderUrlPrompt()
     fflush(stdout);
 }
 
+void TerminalUi::switchToNextTab()
+{
+    const QStringList ids = m_backend->tabIds();
+    if (ids.size() < 2) {
+        // Said rather than swallowed: a binding that appears to do nothing is
+        // indistinguishable from one that is broken.
+        m_lastInput = ids.isEmpty() ? "no tabs here" : "only one tab";
+        return;
+    }
+
+    int index = ids.indexOf(m_currentTab);
+    if (index < 0)
+        index = 0; // nothing selected yet: Ctrl-N moves off the first
+    const int next = (index + 1) % ids.size();
+
+    m_currentTab = ids.at(next);
+    m_backend->setTab(m_currentTab);
+    m_tabLabel = m_currentTab.toStdString() + "/" + std::to_string(ids.size());
+    m_lastInput = "tab " + m_currentTab.toStdString();
+    // The page under the viewer changed entirely, so the identical-frame skip
+    // would otherwise hold the old tab on screen.
+    m_lastPng.clear();
+}
+
 void TerminalUi::renderStatusBar()
 {
     // The prompt outranks the setting: it is a reply the user is waiting to
@@ -453,6 +477,11 @@ void TerminalUi::renderStatusBar()
                  : m_gfx == GfxMode::Kitty  ? "kitty"
                                             : "halfblock")
               + "]";
+    // Part of the header, not an optional field: with several tabs open, which
+    // one is on screen is not something a user can infer from the picture. It
+    // therefore sits ahead of the link, which yields below.
+    if (!m_tabLabel.empty())
+        status += " " + m_tabLabel;
     // Once the user has interacted, the last forwarded event replaces the
     // long usage hint so it survives narrow terminals. Built before the middle
     // field because it is what the middle field has to make room for.
@@ -463,7 +492,7 @@ void TerminalUi::renderStatusBar()
     // header, and README carries the full table either way.
     const std::string tail =
         m_lastInput.empty()
-            ? " click/type drive the page | ctrl-l=url ctrl-r=reload alt-arrows=history ctrl-c=quit"
+            ? " click/type drive the page | ctrl-l=url ctrl-r=reload ctrl-n=tab alt-arrows=history ctrl-c=quit"
             : " ctrl-c=quit | " + m_lastInput;
 
     // One slot, three sources, worst news first: a backend complaint (which on
@@ -667,6 +696,14 @@ bool TerminalUi::processInput(std::string &buf)
             flushPending();
             m_backend->reloadPage();
             m_lastInput = "reload";
+            renderStatusBar();
+            ++i;
+            continue;
+        }
+
+        if (c == 14) { // Ctrl-N — next tab
+            flushPending();
+            switchToNextTab();
             renderStatusBar();
             ++i;
             continue;

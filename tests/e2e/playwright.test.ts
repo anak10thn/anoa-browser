@@ -5,8 +5,9 @@
  *   1. anoa is running:  ./build/anoa --headless --no-sandbox --port 9222
  *   2. npm install in this directory
  *
- * Key constraint: browser.newPage() is NOT supported by anoa (QtWebEngine
- * limitation). Always use browser.contexts()[0].pages()[0] to get the existing page.
+ * browser.newPage() works: Target.* is answered from anoa's own tab registry,
+ * so a new page is a new tab. The existing page is still
+ * browser.contexts()[0].pages()[0].
  */
 import { chromium, type Browser, type Page, type BrowserContext } from '@playwright/test';
 import { test, expect } from '@playwright/test';
@@ -97,9 +98,15 @@ test('context.cookies() rejects (Storage.getCookies not supported)', async () =>
   await expect(context.cookies()).rejects.toThrow();
 });
 
-// PW-11: browser.newPage() is expected to fail — document the expected behavior
-test('browser.newPage() throws (Target.createTarget not supported)', async () => {
-  await expect(browser.newPage()).rejects.toThrow();
+// PW-11: browser.newPage() works — Target.createTarget is answered from the tab
+// registry. This assertion used to be the opposite, and documented the
+// limitation as permanent; it fails now because the limitation is gone.
+test('browser.newPage() opens a real second page', async () => {
+  const before = context.pages().length;
+  const opened = await browser.newPage();
+  expect(opened).toBeTruthy();
+  expect(context.pages().length).toBe(before + 1);
+  await opened.close();
 });
 
 // PW-12
@@ -114,4 +121,45 @@ test('5 concurrent page.evaluate() calls all return correct results', async () =
 // Explicit test that browser is alive before close:
 test('Browser is connected before close', () => {
   expect(browser.isConnected()).toBe(true);
+});
+
+// PW-14: /json/list is rebuilt from the tab registry rather than byte-patched,
+// so this is the shape every CDP client actually dials.
+test('/json/list reports one entry per tab, aimed at the proxy port', async () => {
+  const res = await fetch(`${CDP_URL}/json/list`);
+  const targets = await res.json();
+  const pages = targets.filter((t: any) => t.type === 'page');
+  expect(pages.length).toBeGreaterThan(0);
+
+  for (const target of pages) {
+    expect(target.anoaTabId).toMatch(/^t[1-9][0-9]*$/);
+    expect(typeof target.anoaActive).toBe('boolean');
+    // The proxy, not Chromium's own debugging port: a client handed the latter
+    // would bypass every command anoa answers itself.
+    expect(target.webSocketDebuggerUrl).toContain(`:${HTTP_PORT + 2}/devtools/page/`);
+    expect(target.webSocketDebuggerUrl).not.toContain(`:${HTTP_PORT + 1}/`);
+  }
+  expect(pages.filter((t: any) => t.anoaActive).length).toBe(1);
+});
+
+// PW-15: the row the README used to list as unsupported. A new page is a new
+// tab, and the discovery document has to agree with the client about it.
+test('browser.newPage() adds a tab that /json/list reports', async () => {
+  const before = await (await fetch(`${CDP_URL}/json/list`)).json();
+  const beforeIds = before.filter((t: any) => t.type === 'page')
+                          .map((t: any) => t.anoaTabId);
+
+  const opened = await browser.newPage();
+  try {
+    const after = await (await fetch(`${CDP_URL}/json/list`)).json();
+    const afterPages = after.filter((t: any) => t.type === 'page');
+    expect(afterPages.length).toBe(beforeIds.length + 1);
+
+    const fresh = afterPages.map((t: any) => t.anoaTabId)
+                            .filter((id: string) => !beforeIds.includes(id));
+    expect(fresh.length).toBe(1);
+    expect(fresh[0]).toMatch(/^t[1-9][0-9]*$/);
+  } finally {
+    await opened.close();
+  }
 });

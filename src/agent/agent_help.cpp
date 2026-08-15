@@ -45,7 +45,20 @@ const Group kGroups[] = {
 
   Reaching a browser from an agent command:
     --port <n> / --host <h>         where it is listening (default 127.0.0.1:9222)
-    --token <secret>                its bearer token, if it demands one)"},
+    --token <secret>                its bearer token, if it demands one
+    --tab <id>                      which tab to act on (default: the active one))"},
+
+    {"tabs", "TABS  — one browser, many pages", R"(  anoa tab new [url]                open a tab, print its id
+      --profile <name>              give it its own persistent cookies
+      --isolated                    give it a throwaway jar, gone with the tab
+  anoa tab list                     every tab; * marks the active one
+  anoa tab select <id>              make a tab the active one
+  anoa tab close <id>               close a tab (the last one cannot be closed)
+
+  Every other command takes --tab <id> and acts on the active tab without it,
+  so `anoa --tab t2 get text` reads tab 2 while tab 1 keeps doing its own work.
+  Tabs share one cookie jar unless asked otherwise, which is what makes two
+  logins to one site possible at the same time.)"},
 
     {"navigate", "NAVIGATE", R"(  anoa open <url>                   go to a url (scheme optional)
   anoa back | forward | reload      move through history

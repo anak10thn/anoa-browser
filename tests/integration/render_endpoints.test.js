@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fetch from 'node-fetch';
-import { startBrowser, stopBrowser, BASE_URL } from './helpers.js';
+import { startBrowser, stopBrowser, BASE_URL, newTab, listTabs } from './helpers.js';
 
 const AUTH_TOKEN = 'inttest-render-abc';
 
@@ -261,5 +261,79 @@ describe('Render endpoints (with auth token)', () => {
     });
     const body = await resp.text();
     expect(body).toContain(`token=${AUTH_TOKEN}`);
+  });
+});
+
+describe('Render endpoints, tab selection', () => {
+  let proc;
+  let second;
+
+  beforeAll(async () => {
+    proc = await startBrowser();
+    // Two documents, told apart by their body text. A page is enough; there is
+    // nothing here to serve a fixture.
+    await fetch(`${BASE_URL}/render/navigate?url=about:blank`, { method: 'POST' });
+    second = await newTab('about:blank');
+    // Give each tab its own content through its own endpoint.
+    await fetch(`${BASE_URL}/render/navigate?url=about:blank`, { method: 'POST' });
+  }, 30000);
+
+  afterAll(() => stopBrowser(proc));
+
+  // RND-T01: the whole point — one endpoint, two tabs, two answers.
+  it('?tab= selects which tab /render/html reads', async () => {
+    const tabs = await listTabs();
+    expect(tabs.length).toBeGreaterThanOrEqual(2);
+    const first = tabs.find((t) => t.anoaTabId !== second.tabId).anoaTabId;
+
+    // Two documents that cannot be mistaken for each other. example.com and
+    // example.net would not do: they serve the same page.
+    await fetch(`${BASE_URL}/render/navigate?url=${encodeURIComponent('https://example.com')}&tab=${first}`,
+                { method: 'POST' });
+    await fetch(`${BASE_URL}/render/navigate?url=about:blank&tab=${second.tabId}`,
+                { method: 'POST' });
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const a = await (await fetch(`${BASE_URL}/render/html?tab=${first}`)).text();
+    const b = await (await fetch(`${BASE_URL}/render/html?tab=${second.tabId}`)).text();
+    expect(a.toLowerCase()).toContain('example domain');
+    expect(b.toLowerCase()).not.toContain('example domain');
+  }, 20000);
+
+  // RND-T02: a wrong id must not fall back to the active tab. Silently acting
+  // on another page is the failure an agent cannot detect.
+  it('an unknown or malformed tab is 404, never a silent fallback', async () => {
+    for (const bad of ['t99', 'junk', 't0']) {
+      const resp = await fetch(`${BASE_URL}/render/html?tab=${bad}`);
+      expect(resp.status).toBe(404);
+      expect(await resp.json()).toEqual({ error: `no tab ${bad}` });
+    }
+  });
+
+  // RND-T03: geometry describes the TARGETED tab, and a background tab is
+  // sized like the container rather than keeping its birth size — that was
+  // 100x30, and every coordinate measured against it was wrong.
+  it('viewport headers describe the targeted tab, background or not', async () => {
+    const tabs = await listTabs();
+    const geometry = async (tab) => {
+      const resp = await fetch(`${BASE_URL}/render/screenshot.png?tab=${tab}`);
+      expect(resp.status).toBe(200);
+      return [resp.headers.get('x-anoa-viewport-width'),
+              resp.headers.get('x-anoa-viewport-height')];
+    };
+    const active = await geometry(tabs.find((t) => t.anoaActive).anoaTabId);
+    const background = await geometry(tabs.find((t) => !t.anoaActive).anoaTabId);
+    expect(background).toEqual(active);
+    expect(Number(active[0])).toBeGreaterThan(200);
+  });
+
+  // RND-T04: no ?tab= is the active tab, byte-identical to before tabs existed.
+  it('no ?tab= means the active tab', async () => {
+    const tabs = await listTabs();
+    const activeId = tabs.find((t) => t.anoaActive).anoaTabId;
+    const bare = await fetch(`${BASE_URL}/render/screenshot.png`);
+    const named = await fetch(`${BASE_URL}/render/screenshot.png?tab=${activeId}`);
+    expect(bare.headers.get('x-anoa-viewport-width'))
+      .toBe(named.headers.get('x-anoa-viewport-width'));
   });
 });

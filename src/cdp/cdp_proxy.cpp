@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QHostAddress>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QUrlQuery>
@@ -32,9 +33,14 @@ bool CdpProxy::start()
     return true;
 }
 
-void CdpProxy::setPage(QWebEnginePage *page)
+void CdpProxy::setPageResolver(std::function<QWebEnginePage *(const QString &)> resolver)
 {
-    m_page = page;
+    m_pageResolver = std::move(resolver);
+}
+
+void CdpProxy::setTabHost(TabHost *tabs)
+{
+    m_tabs = tabs;
 }
 
 void CdpProxy::stop()
@@ -45,6 +51,33 @@ void CdpProxy::stop()
     }
     m_clientToUpstream.clear();
     m_upstreamToClient.clear();
+}
+
+std::function<void(const QString &)> CdpProxy::makeDeferredSender(QWebSocket *client) const
+{
+    // QPointer, not the raw socket: the answer arrives on a later turn of the
+    // event loop, by which time the client may have disconnected and been
+    // deleted. Dropping a reply on a dead socket is correct; writing to freed
+    // memory is not.
+    QPointer<QWebSocket> guard(client);
+    auto answered = std::make_shared<bool>(false);
+    return [guard, answered](const QString &reply) {
+        if (*answered)
+            return; // one command, one answer
+        *answered = true;
+        if (guard && guard->state() == QAbstractSocket::ConnectedState)
+            guard->sendTextMessage(reply);
+    };
+}
+
+QWebEnginePage *CdpProxy::pageForClient(QWebSocket *client) const
+{
+    if (!m_pageResolver)
+        return nullptr;
+    // Resolved per message, not cached at connect time: task-004's lookup backs
+    // off for a few seconds, so a client can arrive before its tab has a target
+    // id and would otherwise be stuck on whatever the answer was then.
+    return m_pageResolver(m_clientTargetId.value(client));
 }
 
 void CdpProxy::onNewConnection()
@@ -83,6 +116,15 @@ void CdpProxy::onNewConnection()
     QString path = client->requestUrl().path();
     QUrl upstreamUrl(QStringLiteral("ws://127.0.0.1:%1%2").arg(m_debugPort).arg(path));
 
+    // /devtools/page/<targetId> — anything else (the browser endpoint) leaves
+    // this empty and resolves to the active tab, which is what it did before
+    // tabs existed.
+    static const QLatin1String kPagePrefix("/devtools/page/");
+    QString targetId;
+    if (path.startsWith(kPagePrefix))
+        targetId = path.mid(kPagePrefix.size());
+    m_clientTargetId.insert(client, targetId);
+
     QWebSocket *upstream = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     m_clientToUpstream.insert(client, upstream);
     m_upstreamToClient.insert(upstream, client);
@@ -113,11 +155,18 @@ void CdpProxy::onClientMessage(const QString &message)
     }
 
     QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
-    const QString handled = CdpExtensions::processCommand(cmd, m_page);
+    bool deferred = false;
+    const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client), m_tabs,
+                                                          &deferred,
+                                                          makeDeferredSender(client));
     if (!handled.isEmpty()) {
         client->sendTextMessage(handled);
         return;
     }
+    // Ours, but not answerable yet. Nothing goes upstream: the reply will come
+    // through the callback above.
+    if (deferred)
+        return;
     // Optionally rewrite the command before forwarding (e.g. strip synthetic context IDs).
     const QJsonObject rewritten = CdpExtensions::rewritePassthrough(cmd);
     if (!rewritten.isEmpty()) {
@@ -136,10 +185,15 @@ void CdpProxy::onUpstreamConnected()
     // Flush any messages that arrived before the upstream handshake completed.
     const QStringList pending = m_pendingMessages.take(upstream);
     for (const QString &message : pending) {
-        QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
-        const QString handled = CdpExtensions::processCommand(cmd, m_page);
         QWebSocket *client = m_upstreamToClient.value(upstream);
         if (!client)
+            continue;
+        QJsonObject cmd = QJsonDocument::fromJson(message.toUtf8()).object();
+        bool deferred = false;
+        const QString handled = CdpExtensions::processCommand(cmd, pageForClient(client), m_tabs,
+                                                              &deferred,
+                                                              makeDeferredSender(client));
+        if (deferred)
             continue;
         if (!handled.isEmpty()) {
             client->sendTextMessage(handled);
@@ -160,6 +214,7 @@ void CdpProxy::onClientDisconnected()
     QWebSocket *client = qobject_cast<QWebSocket *>(sender());
     if (!client)
         return;
+    m_clientTargetId.remove(client);
     QWebSocket *upstream = m_clientToUpstream.take(client);
     if (upstream) {
         m_upstreamToClient.remove(upstream);

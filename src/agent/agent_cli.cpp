@@ -15,6 +15,7 @@
 #include "agent/agent_help.h"
 #include "agent/agent_script.h"
 #include "agent/agent_skill.h"
+#include "browser/tab_ids.h"
 #include "cdp/cdp_client.h"
 #include "config/config.h"
 
@@ -52,12 +53,17 @@ int fail(const QString &message, int code = Failed)
 class Session
 {
 public:
-    bool attach(const QString &host, int port, const QString &token, int timeoutMs)
+    bool attach(const QString &host, int port, const QString &token, int timeoutMs,
+                const QString &tabId = QString())
     {
         // Constructed here, not as a plain member: the bearer token is a
         // constructor argument and is not known until the config is parsed.
         m_client = std::make_unique<CdpClient>(token);
         m_client->setRequestTimeout(timeoutMs);
+        // One pick, narrowed. Every command reaches its tab through the target
+        // the client chooses at discovery, so nothing downstream has to know a
+        // tab exists.
+        m_client->setTabFilter(tabId);
         m_client->setExitOnDiscoveryFailure(false);
 
         QEventLoop loop;
@@ -239,6 +245,157 @@ void printSnapshot(const QJsonObject &snap)
 }
 
 // ── commands ────────────────────────────────────────────────────────────────
+
+// `anoa tab ...` acts on the BROWSER, not on a page: every subcommand is a
+// Target.* call the proxy answers from the tab registry, whichever page this
+// client happens to be attached to. That is why nothing here honours --tab.
+int cmdTab(Session &s, QStringList args, bool json)
+{
+    static const QString kUsage =
+        QStringLiteral("tab needs a subcommand: new, list, close or select");
+
+    if (args.isEmpty())
+        return fail(kUsage, Usage);
+    const QString sub = args.takeFirst();
+
+    if (sub == QLatin1String("new")) {
+        const bool isolated = takeFlag(args, QStringLiteral("--isolated"));
+        const QString profile = takeOption(args, QStringLiteral("--profile"));
+        // Two ways of saying "not the shared jar" that mean different things:
+        // a named profile persists, an isolated one does not.
+        if (isolated && !profile.isEmpty())
+            return fail(QStringLiteral("--profile and --isolated cannot be combined"), Usage);
+
+        QJsonObject p;
+        QString url = args.isEmpty() ? QStringLiteral("about:blank") : args.first();
+        if (!url.contains(QStringLiteral("://")) && !url.startsWith(QStringLiteral("about:")))
+            url = QStringLiteral("https://") + url;
+        p[QStringLiteral("url")] = url;
+        if (!profile.isEmpty())
+            p[QStringLiteral("anoaProfile")] = profile;
+        if (isolated)
+            p[QStringLiteral("anoaIsolated")] = true;
+
+        const CdpResult r = s.call(QStringLiteral("Target.createTarget"), p);
+        if (!r.ok)
+            return fail(QStringLiteral("could not open a tab: %1").arg(r.errorMessage));
+        const QString targetId =
+            r.result.value(QStringLiteral("targetId")).toString();
+
+        // createTarget answers with the engine's id; the tab id is what the
+        // user types next, so it is looked up rather than guessed.
+        const CdpResult listed = s.call(QStringLiteral("Target.getTargets"));
+        QString tabId;
+        const QJsonArray infos =
+            listed.result.value(QStringLiteral("targetInfos")).toArray();
+        for (const QJsonValue &value : infos) {
+            const QJsonObject info = value.toObject();
+            if (info.value(QStringLiteral("targetId")).toString() == targetId) {
+                tabId = info.value(QStringLiteral("anoaTabId")).toString();
+                break;
+            }
+        }
+
+        if (json) {
+            QJsonObject o;
+            o[QStringLiteral("tab")] = tabId;
+            o[QStringLiteral("targetId")] = targetId;
+            out() << QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))
+                  << Qt::endl;
+        } else {
+            out() << tabId << Qt::endl;
+        }
+        return Ok;
+    }
+
+    if (sub == QLatin1String("list")) {
+        const CdpResult r = s.call(QStringLiteral("Target.getTargets"));
+        if (!r.ok)
+            return fail(QStringLiteral("could not list tabs: %1").arg(r.errorMessage));
+        const QJsonArray infos =
+            r.result.value(QStringLiteral("targetInfos")).toArray();
+
+        if (json) {
+            QJsonArray rows;
+            for (const QJsonValue &value : infos) {
+                const QJsonObject info = value.toObject();
+                QJsonObject row;
+                row[QStringLiteral("tab")] = info.value(QStringLiteral("anoaTabId"));
+                row[QStringLiteral("active")] = info.value(QStringLiteral("attached"));
+                row[QStringLiteral("url")] = info.value(QStringLiteral("url"));
+                row[QStringLiteral("title")] = info.value(QStringLiteral("title"));
+                row[QStringLiteral("profile")] = info.value(QStringLiteral("browserContextId"));
+                rows.append(row);
+            }
+            out() << QString::fromUtf8(QJsonDocument(rows).toJson(QJsonDocument::Compact))
+                  << Qt::endl;
+            return Ok;
+        }
+
+        for (const QJsonValue &value : infos) {
+            const QJsonObject info = value.toObject();
+            out() << info.value(QStringLiteral("anoaTabId")).toString()
+                  << (info.value(QStringLiteral("attached")).toBool()
+                          ? QStringLiteral(" * ")
+                          : QStringLiteral("   "))
+                  << info.value(QStringLiteral("url")).toString();
+            const QString title = info.value(QStringLiteral("title")).toString();
+            if (!title.isEmpty())
+                out() << " - " << title;
+            out() << Qt::endl;
+        }
+        return Ok;
+    }
+
+    if (sub == QLatin1String("close") || sub == QLatin1String("select")) {
+        if (args.isEmpty())
+            return fail(QStringLiteral("tab %1 needs an id — try: anoa tab %1 t2").arg(sub),
+                        Usage);
+        const QString tabId = args.first();
+        if (!isValidTabId(tabId))
+            return fail(QStringLiteral("tab takes an id like t1, not '%1'").arg(tabId), Usage);
+
+        // The registry speaks target ids, so the tab id is translated first —
+        // and an id no tab answers to is caught here rather than upstream.
+        const CdpResult listed = s.call(QStringLiteral("Target.getTargets"));
+        QString targetId;
+        const QJsonArray infos =
+            listed.result.value(QStringLiteral("targetInfos")).toArray();
+        for (const QJsonValue &value : infos) {
+            const QJsonObject info = value.toObject();
+            if (info.value(QStringLiteral("anoaTabId")).toString() == tabId) {
+                targetId = info.value(QStringLiteral("targetId")).toString();
+                break;
+            }
+        }
+        if (targetId.isEmpty())
+            return fail(QStringLiteral("no tab %1 — try: anoa tab list").arg(tabId));
+
+        QJsonObject p;
+        p[QStringLiteral("targetId")] = targetId;
+
+        if (sub == QLatin1String("select")) {
+            const CdpResult r = s.call(QStringLiteral("Target.activateTarget"), p);
+            if (!r.ok)
+                return fail(QStringLiteral("could not select %1: %2")
+                                .arg(tabId, r.errorMessage));
+            return Ok;
+        }
+
+        const CdpResult r = s.call(QStringLiteral("Target.closeTarget"), p);
+        if (!r.ok)
+            return fail(QStringLiteral("could not close %1: %2").arg(tabId, r.errorMessage));
+        // The registry refuses the last tab. Saying so plainly beats handing
+        // back a protocol result the user cannot act on.
+        if (!r.result.value(QStringLiteral("success")).toBool()) {
+            return fail(QStringLiteral("%1 is the only tab; stop the browser instead")
+                            .arg(tabId));
+        }
+        return Ok;
+    }
+
+    return fail(kUsage, Usage);
+}
 
 int cmdOpen(Session &s, QStringList args, bool json)
 {
@@ -1052,7 +1209,7 @@ bool isAgentCommand(const QString &verb)
         QStringLiteral("help"),   QStringLiteral("cookies"),  QStringLiteral("storage"),
         QStringLiteral("set"),    QStringLiteral("find"),     QStringLiteral("console"),
         QStringLiteral("errors"), QStringLiteral("network"),  QStringLiteral("mouse"),
-        QStringLiteral("close"),
+        QStringLiteral("close"),  QStringLiteral("tab"),
     };
     return verbs.contains(verb);
 }
@@ -1081,8 +1238,16 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
     if (!portOk || port < 1 || port > 65535)
         return fail(QStringLiteral("--port must be 1-65535"), Usage);
 
+    // Which tab. Validated here rather than at discovery so a typo is a usage
+    // error the moment it is typed, instead of a network round trip that ends
+    // in "no tab tw0".
+    const QString tabId = takeOption(args, QStringLiteral("--tab"));
+    if (!tabId.isEmpty() && !isValidTabId(tabId))
+        return fail(QStringLiteral("--tab takes an id like t1, not '") + tabId + QLatin1Char('\''),
+                    Usage);
+
     Session session;
-    if (!session.attach(host, port, token, 10000)) {
+    if (!session.attach(host, port, token, 10000, tabId)) {
         err() << "anoa: no browser on " << host << ":" << port;
         if (!session.why().isEmpty())
             err() << " (" << session.why() << ")";
@@ -1091,6 +1256,8 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
         return NoBrowser;
     }
 
+    if (verb == QStringLiteral("tab"))
+        return cmdTab(session, args, json);
     if (verb == QStringLiteral("open") || verb == QStringLiteral("goto"))
         return cmdOpen(session, args, json);
     if (verb == QStringLiteral("snapshot"))

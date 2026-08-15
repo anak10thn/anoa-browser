@@ -1,6 +1,15 @@
 #include "http/http_server.h"
 
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QWebEnginePage>
+#include <QWebEngineView>
+
 #include "browser/anoa_browser.h"
+#include "browser/tab_ids.h"
 
 #include <QBuffer>
 #include <QEventLoop>
@@ -85,6 +94,78 @@ struct HtmlCaptureState {
     QEventLoop *loop = nullptr;
 };
 
+QByteArray HttpServer::rebuildTargetList(const QByteArray &rewritten,
+                                         const QString &hostName) const
+{
+    if (!m_browser)
+        return rewritten;
+
+    const QJsonArray upstream = QJsonDocument::fromJson(rewritten).array();
+
+    // Title and url come from Chromium where it has them: it knows the live
+    // document, while the view's own properties lag a navigation slightly.
+    QHash<QString, QJsonObject> byTargetId;
+    for (const QJsonValue &value : upstream) {
+        const QJsonObject target = value.toObject();
+        byTargetId.insert(target.value(QStringLiteral("id")).toString(), target);
+    }
+
+    QList<TabTargetInfo> tabs;
+    const QString activeId = m_browser->activeTabId();
+    for (const QString &tabId : m_browser->tabIds()) {
+        TabTargetInfo info;
+        info.tabId = tabId;
+        info.chromiumTargetId = m_browser->chromiumTargetId(tabId);
+        info.active = (tabId == activeId);
+
+        const QJsonObject target = byTargetId.value(info.chromiumTargetId);
+        info.title = target.value(QStringLiteral("title")).toString();
+        info.url = target.value(QStringLiteral("url")).toString();
+        if (info.url.isEmpty()) {
+            if (QWebEngineView *view = m_browser->viewFor(tabId)) {
+                info.url = view->url().toString();
+                info.title = view->title();
+            }
+        }
+        tabs.append(info);
+    }
+
+    QJsonArray out = buildTargetList(tabs, hostName, m_proxyPort);
+    // Nothing resolved yet — task-004's lookup is still in flight. Answering an
+    // empty array here would show a client zero targets where it sees one
+    // today, which reads as "the browser has no pages" rather than "ask again".
+    if (out.isEmpty())
+        return rewritten;
+
+    // Everything that is not a page — service workers, iframes — keeps its
+    // upstream entry, already host-rewritten, so no client loses a target it
+    // can see today.
+    for (const QJsonValue &value : upstream) {
+        const QJsonObject target = value.toObject();
+        if (target.value(QStringLiteral("type")).toString() != QLatin1String("page"))
+            out.append(target);
+    }
+
+    return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
+
+QWebEngineView *HttpServer::resolveRenderTab(const QUrlQuery &query, QString *badId) const
+{
+    if (!m_browser)
+        return nullptr;
+    const QString tabId = query.queryItemValue(QStringLiteral("tab"));
+    if (tabId.isEmpty())
+        return m_browser->activeView();
+    if (!isValidTabId(tabId)) {
+        *badId = tabId;
+        return nullptr;
+    }
+    QWebEngineView *view = m_browser->viewFor(tabId);
+    if (!view)
+        *badId = tabId;
+    return view;
+}
+
 void HttpServer::handleNewConnection()
 {
     QTcpSocket *socket = m_server->nextPendingConnection();
@@ -138,6 +219,21 @@ void HttpServer::handleNewConnection()
         bool viaQuery = query.queryItemValue(QStringLiteral("token")) == m_authToken;
         if (!viaBearer && !viaQuery) {
             sendResponse(socket, 401, "Unauthorized", R"({"error":"unauthorized"})");
+            return;
+        }
+    }
+
+    // Which tab this request means, resolved once. A caller that names a tab
+    // that is not there gets told so — falling back to the active tab would
+    // send clicks to the wrong page and look like the page was wrong.
+    QWebEngineView *renderView = nullptr;
+    const QString renderTabId = query.queryItemValue(QStringLiteral("tab"));
+    if (path.startsWith(QStringLiteral("/render"))) {
+        QString badId;
+        renderView = resolveRenderTab(query, &badId);
+        if (!badId.isEmpty()) {
+            sendResponse(socket, 404, "Not Found",
+                         QByteArray("{\"error\":\"no tab ") + badId.toUtf8() + "\"}");
             return;
         }
     }
@@ -202,6 +298,13 @@ void HttpServer::handleNewConnection()
             );
             // Rewrite any remaining bare 127.0.0.1 references.
             body.replace(QByteArrayLiteral("127.0.0.1"), hostName.toUtf8());
+
+            // The target list is rebuilt from the registry rather than
+            // byte-patched, because a tab id is ours and appears nowhere in
+            // Chromium's answer. /json/version is left alone: its
+            // webSocketDebuggerUrl is the browser endpoint, not a page.
+            if (path != QLatin1String("/json/version"))
+                body = rebuildTargetList(body, hostName);
         } else {
             body = R"({"error":"upstream unavailable"})";
             statusCode = 503;
@@ -215,7 +318,7 @@ void HttpServer::handleNewConnection()
         QByteArray pngBytes;
         bool ok = false;
         if (m_browser) {
-            QPixmap pixmap = m_browser->grab();
+            QPixmap pixmap = renderView->grab();
             if (!pixmap.isNull()) {
                 QBuffer buf(&pngBytes);
                 buf.open(QIODevice::WriteOnly);
@@ -229,8 +332,8 @@ void HttpServer::handleNewConnection()
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: image/png\r\n"
                 "Cache-Control: no-cache\r\n"
-                "X-Anoa-Viewport-Width: " + QByteArray::number(m_browser->width()) + "\r\n"
-                "X-Anoa-Viewport-Height: " + QByteArray::number(m_browser->height()) + "\r\n"
+                "X-Anoa-Viewport-Width: " + QByteArray::number(renderView->width()) + "\r\n"
+                "X-Anoa-Viewport-Height: " + QByteArray::number(renderView->height()) + "\r\n"
                 "Content-Length: " + QByteArray::number(pngBytes.size()) + "\r\n"
                 "Connection: close\r\n"
                 "\r\n";
@@ -241,14 +344,14 @@ void HttpServer::handleNewConnection()
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render/html")) {
         auto state = std::make_shared<HtmlCaptureState>();
 
-        if (m_browser && m_browser->page()) {
+        if (renderView && renderView->page()) {
             QEventLoop loop;
             QTimer timer;
             state->loop = &loop;
             timer.setSingleShot(true);
             connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
             timer.start(5000);
-            m_browser->page()->toHtml([state](const QString &html) {
+            renderView->page()->toHtml([state](const QString &html) {
                 if (!state->waiting)
                     return;
                 state->html = html;
@@ -307,7 +410,7 @@ void HttpServer::handleNewConnection()
         }
 
         if (m_browser)
-            m_browser->load(parsedUrl);
+            renderView->load(parsedUrl);
 
         sendResponse(socket, 200, "OK", "navigating", "text/plain");
     } else if (method == QLatin1String("POST")
@@ -323,11 +426,11 @@ void HttpServer::handleNewConnection()
         // that changed nothing is the honest description of what happened.
         if (m_browser) {
             if (path.endsWith(QLatin1String("back")))
-                m_browser->back();
+                renderView->back();
             else if (path.endsWith(QLatin1String("forward")))
-                m_browser->forward();
+                renderView->forward();
             else
-                m_browser->reload();
+                renderView->reload();
         }
         sendResponse(socket, 200, "OK", "ok", "text/plain");
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render")) {
@@ -381,10 +484,10 @@ setInterval(refresh,500);
         QByteArray ppmBytes;
         int viewportW = 0, viewportH = 0;
         if (m_browser) {
-            QPixmap pixmap = m_browser->grab();
+            QPixmap pixmap = renderView->grab();
             if (!pixmap.isNull()) {
-                viewportW = m_browser->width();
-                viewportH = m_browser->height();
+                viewportW = renderView->width();
+                viewportH = renderView->height();
                 QImage img = pixmap.toImage();
                 int reqW = query.queryItemValue(QStringLiteral("w")).toInt();
                 int reqH = query.queryItemValue(QStringLiteral("h")).toInt();
@@ -442,7 +545,7 @@ setInterval(refresh,500);
             return;
         }
 
-        m_browser->sendClick(QPoint(x, y), button);
+        m_browser->sendClick(QPoint(x, y), button, renderTabId);
         sendResponse(socket, 200, "OK", "clicked", "text/plain");
     } else if (method == QLatin1String("POST") && path == QLatin1String("/render/scroll")) {
         bool okDy = false;
@@ -461,10 +564,10 @@ setInterval(refresh,500);
         bool okX = false, okY = false;
         int x = query.queryItemValue(QStringLiteral("x")).toInt(&okX);
         int y = query.queryItemValue(QStringLiteral("y")).toInt(&okY);
-        QPoint pos(okX && x >= 0 ? x : m_browser->width() / 2,
-                   okY && y >= 0 ? y : m_browser->height() / 2);
+        QPoint pos(okX && x >= 0 ? x : renderView->width() / 2,
+                   okY && y >= 0 ? y : renderView->height() / 2);
 
-        m_browser->sendScroll(pos, dy);
+        m_browser->sendScroll(pos, dy, renderTabId);
         sendResponse(socket, 200, "OK", "scrolled", "text/plain");
     } else if (method == QLatin1String("POST") && path == QLatin1String("/render/type")) {
         // Prefer text from the query string; fall back to the request body
@@ -493,7 +596,7 @@ setInterval(refresh,500);
             return;
         }
 
-        m_browser->sendText(text);
+        m_browser->sendText(text, renderTabId);
         sendResponse(socket, 200, "OK", "typed", "text/plain");
     } else if (method == QLatin1String("POST") && path == QLatin1String("/render/key")) {
         const QString keyName = query.queryItemValue(QStringLiteral("key"));
@@ -506,7 +609,7 @@ setInterval(refresh,500);
             return;
         }
 
-        if (!m_browser->sendKey(keyName)) {
+        if (!m_browser->sendKey(keyName, renderTabId)) {
             sendResponse(socket, 400, "Bad Request", "unknown key", "text/plain");
             return;
         }

@@ -62,10 +62,17 @@ private:
     // sent too; the server accepts either, and both are kept so the request on
     // the wire is unchanged.
     std::string withToken(std::string path) const;
+
+public:
+    void setTab(const QString &tabId) override;
+    QStringList tabIds() override;
+
+private:
     // Fire-and-forget POST for the input endpoints — the reply carries nothing
     // the viewer needs and a failure shows up as the next lost frame.
     void post(const std::string &path) const;
 
+    std::string m_tab; // empty = whichever tab the browser has active
     std::string m_host;
     int m_port = 9222;
     std::string m_token;

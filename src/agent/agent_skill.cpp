@@ -109,11 +109,35 @@ as you do.
 Add `--json` to any command for structured output. Exit codes: `0` success,
 `1` the command failed, `2` bad usage, `3` no browser is listening.
 
+## More than one page at a time
+
+One browser holds many tabs. Open one and keep the id it prints:
+
+```bash
+TAB=$(anoa tab new example.com)
+anoa --tab "$TAB" get text
+```
+
+Without `--tab`, every command acts on the active tab, so nothing you already
+do changes. `anoa tab list` shows them all with `*` on the active one.
+
+**Refs do not cross tabs.** They live in the page as `data-anoa-ref`
+attributes, so `@e2` in one tab names nothing in another. Snapshot the tab you
+are about to act on, with the same `--tab` you will use for the click.
+
+**Cookies are shared unless you ask otherwise.** A login in one tab is a login
+in all of them. For two accounts on one site at once:
+
+```bash
+anoa tab new example.com --isolated       # its own cookies, gone with the tab
+anoa tab new example.com --profile work   # its own cookies, kept on disk
+```
+
 ## Watching it happen
 
 `anoa terminal` renders the live page in the terminal and forwards clicks and
 typing. It attaches to the same running browser, so it can be left open in one
-pane while commands run in another.
+pane while commands run in another. `Ctrl-N` cycles tabs.
 )";
 
 const char kCommands[] = R"(# `anoa` command reference
@@ -122,9 +146,35 @@ Every command attaches to a browser that is already running. Start one with
 `anoa --headless --port 9222 &`. Exit codes: `0` ok, `1` the command failed,
 `2` bad usage, `3` nothing is listening. Add `--json` to any command for
 structured output, and `--port` / `--host` / `--token` to reach a browser
-somewhere else.
+somewhere else. `--tab <id>` picks which tab to act on; without it every command
+acts on the active tab.
 
 `<target>` below is either a ref from a snapshot (`@e2`) or any CSS selector.
+
+## Tabs
+
+One browser holds many pages, each with a stable id (`t1`, `t2`, …) that
+survives between commands and between processes.
+
+| Command | Does |
+|---|---|
+| `anoa tab new [url]` | open a tab and print its id |
+| `anoa tab new --profile <name>` | open it with its own persistent cookies |
+| `anoa tab new --isolated` | open it with a throwaway jar, gone with the tab |
+| `anoa tab list` | every tab; `*` marks the active one |
+| `anoa tab select <id>` | make a tab the active one |
+| `anoa tab close <id>` | close a tab; the last one cannot be closed |
+
+`tab new` prints the id alone, so it composes:
+
+```bash
+TAB=$(anoa tab new example.com)
+anoa --tab "$TAB" get text
+```
+
+Tabs share one cookie jar by default, so a login in one is a login in all.
+`--profile` and `--isolated` are how two tabs hold two different logins to the
+same site at once — which is the reason to reach for them.
 
 ## Navigate
 
@@ -242,8 +292,7 @@ subscribed to the events in time. Consequences worth knowing:
 Worth knowing so you do not reach for them: there is no React introspection, no
 Web Vitals, no accessibility audit, no credential vault, no MCP server, no
 plugin system, and no request interception — `anoa network` observes, it cannot
-block or rewrite. Tabs cannot be created over CDP either; the embedded engine
-does not implement `Target.createTarget`.
+block or rewrite.
 )";
 
 const char kIndex[] = R"(core       the workflow: start a browser, snapshot, act by ref

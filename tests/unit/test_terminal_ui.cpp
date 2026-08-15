@@ -91,6 +91,13 @@ public:
     QList<QString> navActions;
     QList<QSize> resizes;
 
+    // Tab support, off unless a case turns it on: a backend with no tabs is
+    // the shape the CDP and in-process paths keep.
+    QStringList tabs;
+    QList<QString> tabSelections;
+    QStringList tabIds() override { return tabs; }
+    void setTab(const QString &tabId) override { tabSelections.append(tabId); }
+
 private:
     QString m_description;
 };
@@ -1311,6 +1318,54 @@ private slots:
 
         QVERIFY2(capture.take().contains("\x1b[2J"), "stale cells were not cleared");
         QVERIFY2(!term::takeResized(), "the resize flag was not one-shot");
+    }
+
+    // TERM-TERM-09: Ctrl-N cycles tabs and wraps, and the status row names the
+    // one on screen.
+    void testCtrlNCyclesTabs()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend;
+        backend.tabs = QStringList{QStringLiteral("t1"), QStringLiteral("t2"),
+                                   QStringLiteral("t3")};
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        // Nothing is selected yet, so the first press moves off the first tab
+        // rather than re-selecting it.
+        QVERIFY(ui.feedInput("\x0E", 1));
+        QCOMPARE(backend.tabSelections.size(), 1);
+        QCOMPARE(backend.tabSelections.at(0), QStringLiteral("t2"));
+        QVERIFY2(capture.take().contains("t2/3"), "the status row did not name the tab");
+
+        QVERIFY(ui.feedInput("\x0E", 1));
+        QCOMPARE(backend.tabSelections.at(1), QStringLiteral("t3"));
+
+        // Wraps rather than stopping at the end.
+        QVERIFY(ui.feedInput("\x0E", 1));
+        QCOMPARE(backend.tabSelections.at(2), QStringLiteral("t1"));
+        QVERIFY2(capture.take().contains("t1/3"), "the wrapped tab was not shown");
+    }
+
+    // TERM-TERM-10: with one tab or none, Ctrl-N selects nothing.
+    //
+    // The viewer also says so in the status row, but this case does not assert
+    // the words: without begin() the UI never wires the backend's signals, so
+    // it renders as permanently disconnected, and "connection lost — retrying"
+    // is 28 columns of an 80-column row that the tail yields to by design. That
+    // budget is TERM-TERM-03's subject, not this one's. What matters here is
+    // that no tab is selected.
+    void testCtrlNWithoutTabsSelectsNothing()
+    {
+        CapturedStdout capture;
+        RecordingBackend backend; // tabs stays empty
+        TerminalUi ui(terminalConfig("halfblock"), &backend);
+
+        QVERIFY(ui.feedInput("\x0E", 1));
+        QVERIFY2(backend.tabSelections.isEmpty(), "a tab was selected where there are none");
+
+        backend.tabs = QStringList{QStringLiteral("t1")};
+        QVERIFY(ui.feedInput("\x0E", 1));
+        QVERIFY2(backend.tabSelections.isEmpty(), "the only tab was re-selected");
     }
 
     // TERM-TERM-08: a quit signal stops the frame loop without asking the

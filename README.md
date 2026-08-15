@@ -10,6 +10,7 @@
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#usage">Usage</a> ·
+  <a href="#tabs">Tabs</a> ·
   <a href="#terminal-viewer-anoa-terminal">Terminal viewer</a> ·
   <a href="docs/BUILDING.md">Building</a>
 </p>
@@ -335,6 +336,59 @@ request interception — `anoa network` observes, it cannot block or rewrite.
 
 ---
 
+## Tabs
+
+One browser holds many pages. Each has a short id — `t1`, `t2` — that stays
+valid between commands and between processes, so an agent can capture one and
+come back to it.
+
+```bash
+anoa tab new example.com          # opens a tab, prints its id
+anoa tab list                     # every tab; * marks the active one
+anoa tab select t2                # make it the active one
+anoa tab close t2                 # the last tab cannot be closed
+```
+
+Every other command takes `--tab <id>` and acts on the active tab without it:
+
+```bash
+TAB=$(anoa tab new example.com)
+anoa --tab "$TAB" get text        # reads that tab, whatever else is on screen
+```
+
+The `/render/*` endpoints take the same choice as `?tab=<id>`, and answer
+`404 {"error":"no tab t9"}` for one that is not there rather than quietly using
+the active tab. `/json/list` reports one entry per tab, each carrying
+`anoaTabId` and `anoaActive` alongside the fields every CDP client already
+reads.
+
+**Cookies are shared unless you say otherwise.** A login in one tab is a login
+in all of them, which is usually what you want. Two flags change that, and they
+mean different things:
+
+```bash
+anoa tab new example.com --profile work   # its own cookies, kept on disk
+anoa tab new example.com --isolated       # its own cookies, gone with the tab
+```
+
+That is how two tabs hold two different logins to one site at the same time.
+
+In the window, a tab strip appears once there is more than one tab. In the
+terminal viewer, **Ctrl-N** cycles tabs and the status row shows which one you
+are looking at.
+
+### What tabs do not do
+
+- No tab groups, pinning, reordering, or session restore across restarts.
+- One window per process. Opening a tab never opens a window.
+- `anoa terminal` with no target hosts its own single-tab browser; multi-tab
+  applies to a browser you connect to.
+- No per-tab viewport or device emulation — the size is process-wide.
+- Extensions load once, against the shared profile. A tab on its own profile
+  gets none of them.
+
+---
+
 ## Web Render Endpoints
 
 The HTTP server exposes a `/render/*` family for inspecting the live browser view from any web browser or CLI tool — no CDP client required.
@@ -444,6 +498,7 @@ Mouse reporting uses the SGR extended protocol (`ESC [ < btn ; col ; row M`), wh
 | `Ctrl-L` | Open the address prompt on the status row |
 | `Ctrl-R` | Reload |
 | `Alt-Left` / `Alt-Right` | Back / forward through history |
+| `Ctrl-N` | Next tab; the status row shows which one is on screen (`t2/3`) |
 | `Ctrl-B` | Show or hide the status bar |
 | `Ctrl-C` / `Ctrl-Q` | Quit and restore the terminal |
 
@@ -534,16 +589,22 @@ brew uninstall --zap --cask anoa && brew install --cask anoa   # macOS
 | `Browser.setDownloadBehavior` | Stubbed → `{}` |
 | `Browser.getWindowForTarget` | Stubbed → `{}` |
 
-### Not Supported
+### Tabs over CDP
 
-| Command | Reason |
-|---|---|
-| `Target.createTarget` | the embedded engine cannot create tabs over CDP |
+`Target.getTargets`, `createTarget`, `activateTarget`, `closeTarget` and
+`getTargetInfo` are answered from anoa's own tab registry, so `browser.newPage()`
+works and each tab appears as its own target:
 
-**Playwright workaround:** use the existing page instead of `browser.newPage()`:
 ```js
-const page = browser.contexts()[0].pages()[0];
+const page = await browser.newPage();   // opens a real second tab
 ```
+
+`Target.createTarget` takes two extra parameters anoa understands and other
+clients ignore: `anoaProfile` for a persistent named cookie jar and
+`anoaIsolated` for a throwaway one.
+
+`Target.createBrowserContext` still returns a synthetic id — Playwright's
+`newContext()` expects more than a tab-scoped profile provides.
 
 ---
 

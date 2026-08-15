@@ -379,3 +379,65 @@
 - Watch out for pkill -f matching the ssh command line itself: `pkill -f "port
   9333"` over ssh kills the shell running it, and the command returns silently
   with no output. `pkill -x anoa` matches the process, not the sentence about it.
+
+- tests/coverage.sh names its build targets twice: once in TARGETS (the gcov
+  object paths it measures) and once in the `cmake --build --target` list. Adding
+  a unit lib to only the first passes `make test` and then fails `make coverage`
+  with "Not Run", because the test binary was never built into build-coverage.
+
+- `make test` builds the main anoa target too, not just the unit libs. A commit
+  that deliberately leaves the tree unlinkable (task-002 of multi-tab did)
+  therefore cannot run the unit suite at all — grepping its output for "tests
+  passed" silently finds nothing rather than failing loudly.
+
+- /render/click takes its coordinates as QUERY PARAMETERS, not a JSON body.
+  A POST with a JSON payload returns "invalid coordinates" as a 400, which is
+  easy to misread as the click having missed its target.
+
+- Target.getTargetInfo must pass through for ids the registry does not know.
+  Chromium owns targets we never registered — the browser target itself, service
+  workers, a popup from window.open — and answering "No target with given id"
+  for those broke Playwright's connectOverCDP outright: it asks about the
+  browser target during the handshake, and a client cannot attach to a browser
+  that denies its own existence. Applies to any Target command that can name a
+  non-tab target.
+
+- Playwright's afterAll calls browser.close(), which on a connectOverCDP
+  connection closes the real browser. Chaining the Playwright suite into another
+  e2e suite that attaches to the same instance therefore fails the second one
+  for reasons that have nothing to do with the code under test.
+
+- The e2e suites assume a browser with ONE tab: they take contexts()[0].pages()[0]
+  and reason about counts. Running them against an instance left holding tabs
+  from an earlier probe silently changes which page they drive, and a case can
+  drop out of the run entirely. Start a fresh browser per suite now that tabs
+  exist.
+
+- Google Chrome squats 127.0.0.1:9222 when its remote-debugging port is on (the
+  claude-in-chrome extension does this). anoa binds *:9222 on IPv6, so a request
+  to 127.0.0.1:9222 reaches CHROME instead, and every probe describes the wrong
+  browser: four targets including browser_ui, no anoaTabId, and /json/list
+  looking as if the tab registry had broken. Check `lsof -nP -iTCP:9222` before
+  believing a discovery result, or verify on a port nothing else holds.
+
+- `pkill -f anoa` matches the path of anything with "anoa" in its command line,
+  including editors and this repo's own tooling. `pkill -x anoa` matches the
+  process name only.
+
+- QStackedLayout lays out only the widget it is showing. A background tab keeps
+  the size it was born with (100x30), so /render/screenshot.png?tab=t2 reported
+  a viewport a hundred pixels wide and every coordinate measured against it was
+  wrong. AnoaBrowser resizes every view on resizeEvent and at creation.
+
+- A hidden QWebEngineView processes no input at all — not Qt synthetic events,
+  and not CDP Input.dispatchMouseEvent either. Both paths still answer
+  "clicked". Reads work fine on a hidden view, which is what makes this easy to
+  miss. See bugs.md for the multi-tab feature.
+
+- Do not host tabs in a QStackedLayout. It hides every view but the current one,
+  and a hidden QWebEngineView processes no input at all — not Qt synthetic
+  events, not CDP Input.dispatchMouseEvent — while both paths still answer
+  "clicked". Reads keep working, so the gap is invisible until something clicks
+  a background tab and nothing happens. Views are children at the container's
+  geometry with the active one raised, each show()n at creation: a view that was
+  never shown takes no input even once it is raised.

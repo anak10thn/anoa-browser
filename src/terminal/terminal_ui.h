@@ -104,6 +104,8 @@ public slots:
 
 private:
     void renderStatusBar();
+    // Ctrl-N. Cycles to the next tab the backend reports, wrapping.
+    void switchToNextTab();
     // The URL prompt takes over the status row while it is open. Drawn from
     // renderStatusBar() rather than beside it, because there is one row and
     // both want it.
@@ -131,6 +133,11 @@ private:
     QByteArray m_lastPng;  // last frame sent to a gfx terminal, to skip repeats
     std::string m_inputBuf;
     std::string m_lastInput;    // last event forwarded, shown in the status bar
+    // "t2/3" once the backend knows of more than one tab. Outranks the link
+    // field on the status row: which page you are looking at matters more than
+    // a reminder that the connection is still up.
+    std::string m_tabLabel;
+    QString m_currentTab;
     std::string m_status;       // connection state reported by the backend
     std::string m_link;         // what the backend is attached to, when it is
     std::string m_backendLabel; // "http" / "cdp" / "embedded"; empty hides it
