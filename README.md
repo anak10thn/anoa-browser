@@ -128,16 +128,22 @@ That unpacks the whole payload on every invocation: about 6 seconds per command
 against 1 for the tarball. Fine for a one-off, wrong for an agent loop — use the
 tarball or the container image there instead.
 
-**HTTPS needs two packages from the host**, on a truly bare system:
+**HTTPS needs NSS from the host** on a system that has none — a stripped
+container, not a distro:
 
 ```bash
-sudo apt install ca-certificates libnss3   # Debian/Ubuntu
+sudo apt install libnss3 ca-certificates   # Debian/Ubuntu
 ```
 
-Chromium reads certificates through NSS, and NSS loads its modules at runtime
-rather than linking them, so no bundle ever names them. Any ordinary desktop
-already has both. Without them a page load fails with
-`nss_util.cc ... Error initializing NSS`.
+Chromium reads certificates through NSS, and `libnss3` loads `libsoftokn3`,
+`libfreebl3` and `libnssckbi` at runtime instead of linking them — so `ldd`
+never names them and no bundle can package them by walking dependencies.
+Without them the browser still starts and local commands still work; only page
+loads fail, with `nss_util.cc ... Error initializing NSS`.
+
+Every ordinary distro already has NSS. Measured on a bare `debian:12-slim` with
+nothing installed: `--version`, the browser and `eval` all work; `open` does
+not until `libnss3` is there.
 
 ### Linux (portable tarball)
 
