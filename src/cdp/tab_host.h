@@ -16,7 +16,11 @@ class TabHost
 public:
     virtual ~TabHost() = default;
 
-    virtual QString newTab(const QUrl &url, const QString &profileName, bool isolated) = 0;
+    // `name` is optional and, when given, becomes an alias for the minted id:
+    // both resolve to the same tab, and an agent can use whichever it finds
+    // easier to keep track of. Returns empty if the name is already taken.
+    virtual QString newTab(const QUrl &url, const QString &profileName, bool isolated,
+                           const QString &name = QString()) = 0;
     virtual bool closeTab(const QString &tabId) = 0;
     virtual bool selectTab(const QString &tabId) = 0;
 
@@ -27,6 +31,10 @@ public:
     // confused: a Chromium target id changes when a page is recreated.
     virtual QString targetIdFor(const QString &tabId) const = 0;
     virtual QString tabIdForTargetId(const QString &targetId) const = 0;
+
+    // An id or a name to the id it means, or empty for neither.
+    virtual QString resolveTab(const QString &idOrName) const = 0;
+    virtual QString nameFor(const QString &tabId) const = 0;
 
     virtual QString titleFor(const QString &tabId) const = 0;
     virtual QString urlFor(const QString &tabId) const = 0;

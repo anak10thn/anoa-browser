@@ -144,6 +144,9 @@ QJsonObject targetInfoFor(TabHost *tabs, const QString &tabId)
     // field ignores it; `anoa tab` is the reason it is here, because the id a
     // user types is not the id Chromium mints.
     info[QStringLiteral("anoaTabId")] = tabId;
+    const QString name = tabs->nameFor(tabId);
+    if (!name.isEmpty())
+        info[QStringLiteral("anoaTabName")] = name;
     return info;
 }
 
@@ -231,6 +234,7 @@ QString CdpExtensions::handleTarget(const QJsonObject &cmd, TabHost *tabs, bool 
         // them gets the shared profile, which is what every client expects.
         const QString profileName = params.value(QStringLiteral("anoaProfile")).toString();
         const bool isolated = params.value(QStringLiteral("anoaIsolated")).toBool();
+        const QString wantName = params.value(QStringLiteral("anoaName")).toString();
 
         // A context we minted means "open it beside the tabs already there";
         // one we never issued is a mistake worth saying out loud, rather than
@@ -243,10 +247,16 @@ QString CdpExtensions::handleTarget(const QJsonObject &cmd, TabHost *tabs, bool 
                                          + contextId);
             tabId = tabs->newTabInBrowserContext(url, contextId);
         } else {
-            tabId = tabs->newTab(url, profileName, isolated);
+            tabId = tabs->newTab(url, profileName, isolated, wantName);
         }
-        if (tabId.isEmpty())
+        if (tabId.isEmpty()) {
+            // The one failure worth naming: a name already in use is a caller
+            // mistake with an obvious fix, not a browser that would not open a
+            // tab.
+            if (!wantName.isEmpty() && !tabs->resolveTab(wantName).isEmpty())
+                return cdpError(cmd, QStringLiteral("Tab name already in use: ") + wantName);
             return cdpError(cmd, QStringLiteral("Could not create target"));
+        }
 
         *deferred = true;
         const QJsonObject request = cmd;

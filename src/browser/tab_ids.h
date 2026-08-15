@@ -29,12 +29,21 @@ private:
 // would otherwise be two spellings of one tab.
 bool isValidTabId(const QString &id);
 
+// A name a caller chose: ^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$, and never something
+// that could be read as a minted id.
+//
+// That last rule is what keeps `--tab t2` unambiguous. Allowing a tab to be
+// named "t2" would mean an id and a name could point at different tabs and the
+// same string would resolve to either, depending on lookup order.
+bool isValidTabName(const QString &name);
+
 // One tab, as the discovery document needs to see it.
 //
 // tabId is ours and stable; chromiumTargetId is the engine's and changes when a
 // page is recreated, which is the whole reason the two are kept apart.
 struct TabTargetInfo {
     QString tabId;
+    QString tabName; // empty unless the caller chose one
     QString chromiumTargetId;
     QString title;
     QString url;

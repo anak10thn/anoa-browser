@@ -18,6 +18,8 @@ private slots:
     void mintingNeverRecyclesAClosedId();
     void validIdsAccepted();
     void invalidIdsRejected();
+    void namesAcceptedAndRejected();
+    void targetListCarriesANameOnlyWhenThereIsOne();
     void targetListHasOneEntryPerTab();
     void targetListPointsAtTheProxyPort();
     void targetListMarksExactlyOneActiveTab();
@@ -74,6 +76,26 @@ void TestTabIds::invalidIdsRejected()
     QVERIFY(!isValidTabId(QStringLiteral("1")));
 }
 
+void TestTabIds::namesAcceptedAndRejected()
+{
+    QVERIFY(isValidTabName(QStringLiteral("search")));
+    QVERIFY(isValidTabName(QStringLiteral("cart-2")));
+    QVERIFY(isValidTabName(QStringLiteral("A_b-9")));
+    QVERIFY(isValidTabName(QString(32, QLatin1Char('a'))));
+
+    QVERIFY(!isValidTabName(QString()));
+    QVERIFY(!isValidTabName(QString(33, QLatin1Char('a'))));   // one over
+    QVERIFY(!isValidTabName(QStringLiteral("has space")));
+    QVERIFY(!isValidTabName(QStringLiteral("-leading")));      // must start alnum
+    QVERIFY(!isValidTabName(QStringLiteral("has/slash")));
+    // The rule that keeps --tab unambiguous: a name may never read as an id.
+    QVERIFY(!isValidTabName(QStringLiteral("t1")));
+    QVERIFY(!isValidTabName(QStringLiteral("t42")));
+    // ...but an id-ish string that is not a valid id is a fine name.
+    QVERIFY(isValidTabName(QStringLiteral("t0")));
+    QVERIFY(isValidTabName(QStringLiteral("tab1")));
+}
+
 static TabTargetInfo makeTab(const QString &tabId,
                              const QString &targetId,
                              bool active = false)
@@ -85,6 +107,21 @@ static TabTargetInfo makeTab(const QString &tabId,
     tab.url = QStringLiteral("https://example.com/");
     tab.active = active;
     return tab;
+}
+
+void TestTabIds::targetListCarriesANameOnlyWhenThereIsOne()
+{
+    TabTargetInfo named = makeTab(QStringLiteral("t1"), QStringLiteral("AAAA"), true);
+    named.tabName = QStringLiteral("search");
+    TabTargetInfo plain = makeTab(QStringLiteral("t2"), QStringLiteral("BBBB"));
+
+    const QJsonArray list = buildTargetList({named, plain},
+                                            QStringLiteral("127.0.0.1"), 9224);
+    QCOMPARE(list.at(0).toObject().value(QStringLiteral("anoaTabName")).toString(),
+             QStringLiteral("search"));
+    // Absent, not empty: an empty key reads as "named nothing" rather than
+    // "unnamed".
+    QVERIFY(!list.at(1).toObject().contains(QStringLiteral("anoaTabName")));
 }
 
 void TestTabIds::targetListHasOneEntryPerTab()

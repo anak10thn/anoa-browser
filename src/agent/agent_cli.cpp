@@ -98,6 +98,7 @@ public:
     }
 
     QString why() const { return m_why; }
+    bool tabNotFound() const { return m_client && m_client->tabNotFound(); }
 
     CdpResult call(const QString &method, const QJsonObject &params = QJsonObject())
     {
@@ -274,6 +275,14 @@ int cmdTab(Session &s, QStringList args, bool json)
     if (sub == QLatin1String("new")) {
         const bool isolated = takeFlag(args, QStringLiteral("--isolated"));
         const QString profile = takeOption(args, QStringLiteral("--profile"));
+        // A name an agent chooses beats an id it has to remember: t1 and t2
+        // mean nothing three commands later, "search" and "cart" do.
+        const QString name = takeOption(args, QStringLiteral("--name"));
+        if (!name.isEmpty() && !isValidTabName(name)) {
+            return fail(QStringLiteral("--name takes letters, digits, - and _ (max 32) "
+                                       "and cannot look like an id: '") + name + QLatin1Char('\''),
+                        Usage);
+        }
         // Two ways of saying "not the shared jar" that mean different things:
         // a named profile persists, an isolated one does not.
         if (isolated && !profile.isEmpty())
@@ -288,6 +297,8 @@ int cmdTab(Session &s, QStringList args, bool json)
             p[QStringLiteral("anoaProfile")] = profile;
         if (isolated)
             p[QStringLiteral("anoaIsolated")] = true;
+        if (!name.isEmpty())
+            p[QStringLiteral("anoaName")] = name;
 
         const CdpResult r = s.call(QStringLiteral("Target.createTarget"), p);
         if (!r.ok)
@@ -312,11 +323,16 @@ int cmdTab(Session &s, QStringList args, bool json)
         if (json) {
             QJsonObject o;
             o[QStringLiteral("tab")] = tabId;
+            if (!name.isEmpty())
+                o[QStringLiteral("name")] = name;
             o[QStringLiteral("targetId")] = targetId;
             out() << QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))
                   << Qt::endl;
         } else {
-            out() << tabId << Qt::endl;
+            // The name when there is one — it is what the caller passes to
+            // --tab next, and printing the id instead would make them look it
+            // up again.
+            out() << (name.isEmpty() ? tabId : name) << Qt::endl;
         }
         return Ok;
     }
@@ -334,6 +350,7 @@ int cmdTab(Session &s, QStringList args, bool json)
                 const QJsonObject info = value.toObject();
                 QJsonObject row;
                 row[QStringLiteral("tab")] = info.value(QStringLiteral("anoaTabId"));
+                row[QStringLiteral("name")] = info.value(QStringLiteral("anoaTabName"));
                 row[QStringLiteral("active")] = info.value(QStringLiteral("attached"));
                 row[QStringLiteral("url")] = info.value(QStringLiteral("url"));
                 row[QStringLiteral("title")] = info.value(QStringLiteral("title"));
@@ -350,8 +367,11 @@ int cmdTab(Session &s, QStringList args, bool json)
             out() << info.value(QStringLiteral("anoaTabId")).toString()
                   << (info.value(QStringLiteral("attached")).toBool()
                           ? QStringLiteral(" * ")
-                          : QStringLiteral("   "))
-                  << info.value(QStringLiteral("url")).toString();
+                          : QStringLiteral("   "));
+            const QString tabName = info.value(QStringLiteral("anoaTabName")).toString();
+            if (!tabName.isEmpty())
+                out() << tabName << " ";
+            out() << info.value(QStringLiteral("url")).toString();
             const QString title = info.value(QStringLiteral("title")).toString();
             if (!title.isEmpty())
                 out() << " - " << title;
@@ -365,8 +385,10 @@ int cmdTab(Session &s, QStringList args, bool json)
             return fail(QStringLiteral("tab %1 needs an id — try: anoa tab %1 t2").arg(sub),
                         Usage);
         const QString tabId = args.first();
-        if (!isValidTabId(tabId))
-            return fail(QStringLiteral("tab takes an id like t1, not '%1'").arg(tabId), Usage);
+        if (!isValidTabId(tabId) && !isValidTabName(tabId)) {
+            return fail(QStringLiteral("tab takes an id like t1 or a name, not '%1'")
+                            .arg(tabId), Usage);
+        }
 
         // The registry speaks target ids, so the tab id is translated first —
         // and an id no tab answers to is caught here rather than upstream.
@@ -376,7 +398,8 @@ int cmdTab(Session &s, QStringList args, bool json)
             listed.result.value(QStringLiteral("targetInfos")).toArray();
         for (const QJsonValue &value : infos) {
             const QJsonObject info = value.toObject();
-            if (info.value(QStringLiteral("anoaTabId")).toString() == tabId) {
+            if (info.value(QStringLiteral("anoaTabId")).toString() == tabId
+                || info.value(QStringLiteral("anoaTabName")).toString() == tabId) {
                 targetId = info.value(QStringLiteral("targetId")).toString();
                 break;
             }
@@ -1255,12 +1278,23 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
     // error the moment it is typed, instead of a network round trip that ends
     // in "no tab tw0".
     const QString tabId = takeOption(args, QStringLiteral("--tab"));
-    if (!tabId.isEmpty() && !isValidTabId(tabId))
-        return fail(QStringLiteral("--tab takes an id like t1, not '") + tabId + QLatin1Char('\''),
+    if (!tabId.isEmpty() && !isValidTabId(tabId) && !isValidTabName(tabId)) {
+        return fail(QStringLiteral("--tab takes an id like t1 or a name, not '")
+                        + tabId + QLatin1Char('\''),
                     Usage);
+    }
 
     Session session;
     if (!session.attach(host, port, token, 10000, tabId)) {
+        // A browser that is running but has no such tab is a different problem
+        // from no browser at all, and "start one first" is actively wrong
+        // advice for it.
+        if (session.tabNotFound()) {
+            // Discovery already printed which tabs there are; only the way out
+            // is missing.
+            err() << "      list them with:  anoa tab list --port " << port << Qt::endl;
+            return NoBrowser;
+        }
         err() << "anoa: no browser on " << host << ":" << port;
         if (!session.why().isEmpty())
             err() << " (" << session.why() << ")";

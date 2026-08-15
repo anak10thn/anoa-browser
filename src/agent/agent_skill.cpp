@@ -118,6 +118,24 @@ TAB=$(anoa tab new example.com)
 anoa --tab "$TAB" get text
 ```
 
+Or name it, and skip keeping the id around at all:
+
+```bash
+anoa tab new example.com --name search
+anoa --tab search get text
+```
+
+Or give it a name and stop tracking ids:
+
+```bash
+anoa tab new example.com --name search
+anoa --tab search get text
+```
+
+A name is an alias — the id keeps working, and `--tab` takes either. Names must
+be unique and cannot look like an id (`t2`), which is what keeps `--tab t2`
+unambiguous.
+
 Without `--tab`, every command acts on the active tab, so nothing you already
 do changes. `anoa tab list` shows them all with `*` on the active one.
 
@@ -159,6 +177,7 @@ survives between commands and between processes.
 | Command | Does |
 |---|---|
 | `anoa tab new [url]` | open a tab and print its id |
+| `anoa tab new --name <name>` | name it; `--tab` takes the name afterwards |
 | `anoa tab new --profile <name>` | open it with its own persistent cookies |
 | `anoa tab new --isolated` | open it with a throwaway jar, gone with the tab |
 | `anoa tab list` | every tab; `*` marks the active one |

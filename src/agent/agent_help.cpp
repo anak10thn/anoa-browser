@@ -49,11 +49,15 @@ const Group kGroups[] = {
     --tab <id>                      which tab to act on (default: the active one))"},
 
     {"tabs", "TABS  — one browser, many pages", R"(  anoa tab new [url]                open a tab, print its id
+      --name <name>                 call it something; --tab takes it after
       --profile <name>              give it its own persistent cookies
       --isolated                    give it a throwaway jar, gone with the tab
   anoa tab list                     every tab; * marks the active one
   anoa tab select <id>              make a tab the active one
   anoa tab close <id>               close a tab (the last one cannot be closed)
+
+  --tab takes an id or a name, so `--tab search` and `--tab t2` can be the same
+  tab. A name is an alias: the id keeps working.
 
   Every other command takes --tab <id> and acts on the active tab without it,
   so `anoa --tab t2 get text` reads tab 2 while tab 1 keeps doing its own work.

@@ -498,7 +498,13 @@ describe('Agent CLI (Suite 8)', () => {
       assert.match(unknown.err, /t1/);
       assert.match(unknown.err, new RegExp(t2));
 
-      const malformed = anoa('get', 'text', '--tab', 'junk');
+      // "junk" is a legal NAME now, so it can only fail as an unknown tab —
+      // a malformed one has to be something no tab could ever be called.
+      const unnamed = anoa('get', 'text', '--tab', 'junk');
+      assert.notEqual(unnamed.code, 0);
+      assert.match(unnamed.err, /no tab junk/);
+
+      const malformed = anoa('get', 'text', '--tab', 'has space');
       assert.equal(malformed.code, 2);
       assert.match(malformed.err, /--tab/);
     } finally {
@@ -559,6 +565,53 @@ describe('Agent CLI (Suite 8)', () => {
       assert.equal(run(['eval', 'document.title', `--port=${port}`, `--tab=${t2}`]).out, 'BRAVO');
       // and with no --tab at all it is still the active tab
       assert.equal(run(['eval', 'document.title', '--port', port]).out, 'ALPHA');
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-30: a tab can be given a name, and the name works wherever an id
+  // does. Ids like t1 and t2 mean nothing to an agent three commands later;
+  // "search" and "cart" survive the round trip.
+  it('a named tab answers to its name and to its id', () => {
+    const printed = anoa('tab', 'new', '--name', 'searchtab').out.trim();
+    try {
+      // `tab new` prints the NAME when there is one — it is what gets typed next.
+      assert.equal(printed, 'searchtab');
+
+      anoa('eval', "document.title = 'NAMED'", '--tab', 'searchtab');
+      assert.equal(anoa('eval', 'document.title', '--tab', 'searchtab').out, 'NAMED');
+
+      // The id is still a valid handle: the name is an alias, not a rename.
+      const row = JSON.parse(anoa('tab', 'list', '--json').out)
+                    .find(r => r.name === 'searchtab');
+      assert.ok(row, 'the named tab is missing from tab list');
+      assert.equal(anoa('eval', 'document.title', '--tab', row.tab).out, 'NAMED');
+
+      // select and close take a name too.
+      assert.equal(anoa('tab', 'select', 'searchtab').code, 0);
+      assert.equal(JSON.parse(anoa('tab', 'list', '--json').out)
+                     .find(r => r.active).name, 'searchtab');
+    } finally {
+      closeExtraTabs();
+    }
+  });
+
+  // AGENT-31: the rules that keep a name from becoming a second, conflicting
+  // way to say the same thing.
+  it('rejects a duplicate name, and a name shaped like an id', () => {
+    anoa('tab', 'new', '--name', 'dup');
+    try {
+      const again = anoa('tab', 'new', '--name', 'dup');
+      assert.notEqual(again.code, 0);
+      assert.match(again.err, /already in use/i);
+
+      // A tab named "t9" would make --tab t9 ambiguous forever.
+      const idish = anoa('tab', 'new', '--name', 't9');
+      assert.equal(idish.code, 2);
+      assert.match(idish.err, /--name/);
+
+      assert.equal(anoa('tab', 'new', '--name', 'has space').code, 2);
     } finally {
       closeExtraTabs();
     }

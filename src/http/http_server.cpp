@@ -116,6 +116,7 @@ QByteArray HttpServer::rebuildTargetList(const QByteArray &rewritten,
         TabTargetInfo info;
         info.tabId = tabId;
         info.chromiumTargetId = m_browser->chromiumTargetId(tabId);
+        info.tabName = m_browser->nameFor(tabId);
         info.active = (tabId == activeId);
 
         const QJsonObject target = byTargetId.value(info.chromiumTargetId);
@@ -153,16 +154,18 @@ QWebEngineView *HttpServer::resolveRenderTab(const QUrlQuery &query, QString *ba
 {
     if (!m_browser)
         return nullptr;
-    const QString tabId = query.queryItemValue(QStringLiteral("tab"));
-    if (tabId.isEmpty())
+    const QString asked = query.queryItemValue(QStringLiteral("tab"));
+    if (asked.isEmpty())
         return m_browser->activeView();
-    if (!isValidTabId(tabId)) {
-        *badId = tabId;
+    // An id or a name — whichever the caller finds easier to keep track of.
+    if (!isValidTabId(asked) && !isValidTabName(asked)) {
+        *badId = asked;
         return nullptr;
     }
-    QWebEngineView *view = m_browser->viewFor(tabId);
+    const QString tabId = m_browser->resolveTab(asked);
+    QWebEngineView *view = tabId.isEmpty() ? nullptr : m_browser->viewFor(tabId);
     if (!view)
-        *badId = tabId;
+        *badId = asked;
     return view;
 }
 
@@ -227,7 +230,10 @@ void HttpServer::handleNewConnection()
     // that is not there gets told so — falling back to the active tab would
     // send clicks to the wrong page and look like the page was wrong.
     QWebEngineView *renderView = nullptr;
-    const QString renderTabId = query.queryItemValue(QStringLiteral("tab"));
+    // Normalised to the minted id, because the input helpers below look a tab
+    // up by id. Passing a name straight through would find the right view for
+    // a screenshot and no view at all for a click.
+    QString renderTabId;
     if (path.startsWith(QStringLiteral("/render"))) {
         QString badId;
         renderView = resolveRenderTab(query, &badId);
@@ -236,6 +242,9 @@ void HttpServer::handleNewConnection()
                          QByteArray("{\"error\":\"no tab ") + badId.toUtf8() + "\"}");
             return;
         }
+        const QString asked = query.queryItemValue(QStringLiteral("tab"));
+        if (!asked.isEmpty() && m_browser)
+            renderTabId = m_browser->resolveTab(asked);
     }
 
     // Redirect /render/ (trailing slash) to /render, preserving query string.
