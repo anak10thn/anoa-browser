@@ -53,15 +53,14 @@ jobs:
             runner: ubuntu-22.04-arm
             qt_host: linux_arm64
             qt_arch: linux_gcc_arm64
-            # Deliberately newer than x86_64. Qt 6.7.3's arm64 WebEngineCore
-            # links libwebp.so.6, which no supported Ubuntu ships any more —
-            # only Focal does, at libwebp 0.6.1, which carries CVE-2023-4863,
-            # a heap overflow in the WebP decoder that was exploited in the
-            # wild. Shipping that inside a browser to save a version bump is
-            # not a trade worth making.
-            qt_version: '6.9.3'
-            cc: gcc-12
-            cxx: g++-12
+            # The same Qt as x86_64. Qt 6.8+ is not an option here at all:
+            # its arm64 *moc* binary requires GLIBC_2.38, so it cannot run on
+            # jammy, and building on 24.04 to satisfy it raises the bundle's
+            # floor to glibc 2.39 — which excludes Debian 12 and Ubuntu 22.04,
+            # the two most common systems on an ARM board. Verified on an
+            # RK3588 running bookworm: every bundled library demanded
+            # GLIBC_2.38 and nothing ran.
+            qt_version: '6.7.3'
             # Bookworm, the same base x86_64 is tested against: built on
             # jammy's glibc 2.35, this bundle is expected to run there. That is
             # the whole point of building on 22.04 rather than 24.04.
@@ -92,18 +91,23 @@ jobs:
           # small packages cost less than a conditional that can rot.
           sudo apt-get install -y libcups2-dev file patchelf \
                                   libevent-dev libminizip-dev
-          # Qt 6.8+'s moc fails against GCC 11's headers on aarch64 —
-          # "AutoMoc subprocess error" with no diagnostic, while the same
-          # header passes moc 6.10 elsewhere. A newer compiler fixes moc
-          # without touching glibc, which is what decides the bundle's reach.
+          # Qt's arm64 WebEngineCore links libwebp.so.6, which no supported
+          # Ubuntu ships — jammy has libwebp7 and the soname is not compatible.
+          # Focal's is the last one, and it is the SECURITY-UPDATED build:
+          # Ubuntu's tracker records CVE-2023-4863 as fixed in
+          # 0.6.1-2ubuntu0.20.04.3, which is this package. Ubuntu backports
+          # fixes without moving the upstream version, so 0.6.1 alone says
+          # nothing about whether it is patched.
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
-            sudo apt-get install -y gcc-12 g++-12
+            webp_deb=libwebp6_0.6.1-2ubuntu0.20.04.3_arm64.deb
+            curl -fsSL -O "http://ports.ubuntu.com/ubuntu-ports/pool/main/libw/libwebp/${webp_deb}"
+            dpkg-deb -x "${webp_deb}" /tmp/webp6
+            sudo cp -a /tmp/webp6/usr/lib/aarch64-linux-gnu/libwebp.so.6* /usr/lib/aarch64-linux-gnu/
+            sudo ldconfig
+            rm -f "${webp_deb}"
           fi
 
       - name: Configure & Build
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR \
             -DANOA_VERSION_OVERRIDE="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"

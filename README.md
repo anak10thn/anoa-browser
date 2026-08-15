@@ -75,12 +75,9 @@ chmod +x anoa-x86_64.AppImage          # or anoa-aarch64.AppImage
 ./anoa-x86_64.AppImage open example.com
 ```
 
-Built for **x86_64** and **aarch64**. The two are not identical underneath: the
-aarch64 bundle is built on Ubuntu 24.04 against Qt 6.9, so it needs **glibc 2.39
-or newer** — Ubuntu 24.04, Debian 13, Fedora 40 and later. The x86_64 bundle is
-built on Ubuntu 22.04 and reaches further back. Qt's own arm64 WebEngine forces
-that: the 6.7 build links a libwebp no supported distribution ships any more,
-and 6.8+ needs a newer toolchain than 22.04 provides.
+Built for **x86_64** and **aarch64**, both on Ubuntu 22.04 against the same Qt,
+so both run on anything with **glibc 2.35 or newer** — Ubuntu 22.04, Debian 12
+and later, which is what an ARM board usually runs.
 
 Verified on a stock Ubuntu 24.04: headless, a real window with GLX, the terminal
 viewer, and the agent commands.
