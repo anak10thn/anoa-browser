@@ -35,7 +35,12 @@ jobs:
             qt_arch: linux_gcc_64
             qt_version: '6.7.3'
           - arch: aarch64
-            runner: ubuntu-22.04-arm
+            # 24.04, not 22.04: Qt 6.8+'s moc fails against Ubuntu 22.04's GCC
+            # 11 headers on this arch — "AutoMoc subprocess error" with no
+            # diagnostic — while the same header passes moc 6.10 elsewhere. A
+            # newer Qt wants a newer toolchain. The cost is real and stated in
+            # the README: the aarch64 bundle needs glibc 2.39 or newer.
+            runner: ubuntu-24.04-arm
             qt_host: linux_arm64
             qt_arch: linux_gcc_arm64
             # Deliberately newer than x86_64. Qt 6.7.3's arm64 WebEngineCore
@@ -44,7 +49,7 @@ jobs:
             # a heap overflow in the WebP decoder that was exploited in the
             # wild. Shipping that inside a browser to save a version bump is
             # not a trade worth making.
-            qt_version: '6.8.3'
+            qt_version: '6.9.3'
 
     steps:
       - uses: actions/checkout@v4
