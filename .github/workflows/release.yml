@@ -62,10 +62,9 @@ jobs:
             qt_version: '6.9.3'
             cc: gcc-12
             cxx: g++-12
-            # Bookworm, not bookworm: this bundle is built on Ubuntu 24.04, so it
-            # needs glibc 2.39 and cannot run on bookworm's 2.36 by
-            # construction. Testing it against a base it never claimed to
-            # support would be a failing test that proves nothing.
+            # Bookworm, the same base x86_64 is tested against: built on
+            # jammy's glibc 2.35, this bundle is expected to run there. That is
+            # the whole point of building on 22.04 rather than 24.04.
             bare_image: 'debian:12-slim'
 
     steps:
