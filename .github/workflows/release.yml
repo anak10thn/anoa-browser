@@ -53,7 +53,16 @@ jobs:
           cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ matrix.qt_arch }}
 
       - name: Install system dependencies
-        run: sudo apt-get install -y libcups2-dev file patchelf
+        run: |
+          # libevent and libminizip are needed for aarch64 and harmless on
+          # x86_64. Qt's official arm64 WebEngineCore links them from the
+          # SYSTEM, while the x86_64 build carries its own — so the arm64 link
+          # failed with undefined references to event_base_new and
+          # zipOpenNewFileInZip4_64 while x86_64 built cleanly from the same
+          # source. Installed for both rather than branching the matrix: two
+          # small packages cost less than a conditional that can rot.
+          sudo apt-get install -y libcups2-dev file patchelf \
+                                  libevent-dev libminizip-dev
 
       - name: Configure & Build
         run: |
