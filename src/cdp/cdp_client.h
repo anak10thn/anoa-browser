@@ -139,6 +139,10 @@ public:
     // Narrows discovery to one anoa tab. Empty means "the active one", which is
     // what every invocation without --tab asks for.
     void setTabFilter(const QString &tabId);
+    // Set when discovery reached the browser and it simply has no such tab.
+    // "no browser, start one" is the wrong advice for that, and it is the
+    // advice a bare attach failure produces.
+    bool tabNotFound() const { return m_tabNotFound; }
 
 private slots:
     void onSocketConnected();
@@ -168,6 +172,7 @@ private:
     // One line on stderr, discoveryFailed(), and (by default) exec() -> 1.
     void failDiscovery(const QString &message);
     QString m_tabFilter;
+    bool m_tabNotFound = false;
     void openSocket();
     void setState(State state, const QString &text);
     void scheduleReconnect(const QString &reason);

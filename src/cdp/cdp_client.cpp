@@ -55,6 +55,7 @@ struct PageTarget {
     // anoa's own fields, absent from any other CDP endpoint — which is what
     // keeps the picker's behaviour unchanged against Chrome itself.
     QString anoaTabId;
+    QString anoaTabName;
     bool anoaActive = false;
 };
 
@@ -347,6 +348,7 @@ void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
         page.url = target.value(QStringLiteral("url")).toString();
         page.socketUrl = socketUrl;
         page.anoaTabId = target.value(QStringLiteral("anoaTabId")).toString();
+        page.anoaTabName = target.value(QStringLiteral("anoaTabName")).toString();
         page.anoaActive = target.value(QStringLiteral("anoaActive")).toBool();
         pages.append(page);
     }
@@ -369,7 +371,10 @@ void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
     int chosen = -1;
     if (!m_tabFilter.isEmpty()) {
         for (int i = 0; i < pages.size(); ++i) {
-            if (pages.at(i).anoaTabId == m_tabFilter) {
+            // Either the minted id or the name the caller gave it.
+            if (pages.at(i).anoaTabId == m_tabFilter
+                || (!pages.at(i).anoaTabName.isEmpty()
+                    && pages.at(i).anoaTabName == m_tabFilter)) {
                 chosen = i;
                 break;
             }
@@ -377,9 +382,17 @@ void CdpClient::onDiscoveryFinished(QNetworkReply *reply)
         if (chosen < 0) {
             QStringList known;
             for (const PageTarget &page : pages) {
-                if (!page.anoaTabId.isEmpty())
-                    known.append(page.anoaTabId);
+                if (page.anoaTabId.isEmpty())
+                    continue;
+                // Named tabs are listed by name: that is what the caller wrote
+                // down, and echoing only ids would be answering a question
+                // nobody asked.
+                known.append(page.anoaTabName.isEmpty()
+                                 ? page.anoaTabId
+                                 : page.anoaTabName + QStringLiteral(" (")
+                                       + page.anoaTabId + QStringLiteral(")"));
             }
+            m_tabNotFound = true;
             failDiscovery(QStringLiteral("no tab %1 at %2 (saw: %3)")
                               .arg(m_tabFilter, hostPort(m_requestedUrl),
                                    known.isEmpty() ? QStringLiteral("none")

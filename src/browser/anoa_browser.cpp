@@ -161,10 +161,18 @@ int AnoaBrowser::indexOf(const QString &id) const
     return -1;
 }
 
-QString AnoaBrowser::newTab(const QUrl &url, const QString &profileName, bool isolated)
+QString AnoaBrowser::newTab(const QUrl &url, const QString &profileName, bool isolated,
+                            const QString &name)
 {
+    // A name is an alias, so it has to be unique or it is not one. Refusing
+    // here rather than overwriting: two tabs answering to "search" would make
+    // every later --tab search a coin toss.
+    if (!name.isEmpty() && !resolveTab(name).isEmpty())
+        return QString();
+
     Tab tab;
     tab.id = m_minter.next();
+    tab.name = name;
     tab.profileName = profileName;
     tab.profile = profileFor(profileName, isolated);
     tab.view = createView(tab.profile);
@@ -386,6 +394,28 @@ QString AnoaBrowser::chromiumTargetId(const QString &tabId) const
 {
     const int idx = indexOf(tabId);
     return idx < 0 ? QString() : m_tabs.at(idx).chromiumTargetId;
+}
+
+QString AnoaBrowser::resolveTab(const QString &idOrName) const
+{
+    if (idOrName.isEmpty())
+        return QString();
+    // Ids first. They are minted, unique and cannot collide with a name —
+    // isValidTabName rejects anything shaped like one — so this order is a
+    // statement of which namespace owns the string, not a tie-break.
+    if (indexOf(idOrName) >= 0)
+        return idOrName;
+    for (const Tab &tab : m_tabs) {
+        if (!tab.name.isEmpty() && tab.name == idOrName)
+            return tab.id;
+    }
+    return QString();
+}
+
+QString AnoaBrowser::nameFor(const QString &tabId) const
+{
+    const int idx = indexOf(tabId);
+    return idx < 0 ? QString() : m_tabs.at(idx).name;
 }
 
 QString AnoaBrowser::targetIdFor(const QString &tabId) const

@@ -15,6 +15,16 @@ bool isValidTabId(const QString &id)
     return re.match(id).hasMatch();
 }
 
+bool isValidTabName(const QString &name)
+{
+    static const QRegularExpression re(
+        QStringLiteral("\\A[A-Za-z0-9][A-Za-z0-9_-]{0,31}\\z"));
+    if (!re.match(name).hasMatch())
+        return false;
+    // A name that reads like an id would make --tab ambiguous.
+    return !isValidTabId(name);
+}
+
 QJsonArray buildTargetList(const QList<TabTargetInfo> &tabs,
                            const QString &host,
                            quint16 proxyPort)
@@ -46,6 +56,10 @@ QJsonArray buildTargetList(const QList<TabTargetInfo> &tabs,
         // them; `anoa --tab` is the reason they are here.
         entry[QStringLiteral("anoaTabId")] = tab.tabId;
         entry[QStringLiteral("anoaActive")] = tab.active;
+        // Only when there is one: an empty key would read as "named nothing"
+        // rather than "unnamed".
+        if (!tab.tabName.isEmpty())
+            entry[QStringLiteral("anoaTabName")] = tab.tabName;
 
         out.append(entry);
     }

@@ -49,12 +49,14 @@ public:
     // TabHost. Neither profile argument given means the shared default, so a
     // login in one tab is a login everywhere — today's behaviour.
     QString newTab(const QUrl &url = QUrl(), const QString &profileName = QString(),
-                   bool isolated = false) override;
+                   bool isolated = false, const QString &name = QString()) override;
     // Refuses to close the last tab: one process still means at least one page.
     bool closeTab(const QString &id) override;
     bool selectTab(const QString &id) override;
     QStringList tabIds() const override;
     QString activeTabId() const override;
+    QString resolveTab(const QString &idOrName) const override;
+    QString nameFor(const QString &tabId) const override;
     QString targetIdFor(const QString &tabId) const override;
     QString tabIdForTargetId(const QString &targetId) const override;
     QString titleFor(const QString &tabId) const override;
@@ -120,6 +122,7 @@ private:
         QString id;
         QWebEngineView *view = nullptr;
         QWebEngineProfile *profile = nullptr;
+        QString name;        // empty unless the caller chose one
         QString profileName; // empty = the shared default
         QString chromiumTargetId;
     };

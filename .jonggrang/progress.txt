@@ -482,3 +482,19 @@
 
 - Reported by a user driving the CLI for real, not by any test. The suites all
   used the after-the-verb form, which is exactly the half that worked.
+
+- Tab names are an ALIAS for the minted id, never a replacement. Both resolve to
+  the same tab, and isValidTabName rejects anything shaped like an id
+  (^t[1-9][0-9]*$) — without that rule, a tab named "t2" would make --tab t2
+  mean either tab depending on lookup order.
+
+- Resolution happens in four places and every one of them had to learn names:
+  the CDP client's target picker, /render/*'s ?tab=, `anoa tab select|close`, and
+  Target.* over the proxy. The subtle one is /render/*: the resolved view is
+  enough for a screenshot, but the input helpers look a tab up by ID, so the
+  query value has to be normalised to the id or a named tab takes screenshots
+  and ignores clicks.
+
+- "no browser on host:port — start one first" was printed for a browser that IS
+  running but has no such tab. Wrong advice, and it predates tab names: any
+  --tab t99 produced it. The client now flags a tab miss separately.

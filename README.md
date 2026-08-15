@@ -399,6 +399,17 @@ anoa tab select t2                # make it the active one
 anoa tab close t2                 # the last tab cannot be closed
 ```
 
+Or name it, and stop keeping track of ids:
+
+```bash
+anoa tab new example.com --name search
+anoa --tab search get text
+```
+
+A name is an alias, not a rename: the id keeps working and `--tab` takes either.
+Names must be unique, and cannot be shaped like an id (`t2`) — that is what
+keeps `--tab t2` from ever meaning two different tabs.
+
 Every other command takes `--tab <id>` and acts on the active tab without it:
 
 ```bash
