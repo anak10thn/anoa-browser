@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QIcon>
 #include <QString>
 #include <QStringList>
 #include <QTextStream>
@@ -253,6 +254,11 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
     app.setApplicationVersion(QStringLiteral(ANOA_VERSION));
+    // Read from the binary's own resources, so it is there wherever the bundle
+    // was unpacked to. macOS takes the dock icon from the .icns in the bundle
+    // instead and ignores this; X11 and Windows use it for the window and the
+    // task switcher.
+    app.setWindowIcon(QIcon(QStringLiteral(":/anoa.png")));
 
     Config config = parseArgs(argc, argv);
 

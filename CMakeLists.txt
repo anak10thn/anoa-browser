@@ -45,10 +45,31 @@ set(SOURCES
     src/main.cpp
 )
 
+# The window icon, compiled in rather than read from disk: the bundle is
+# relocatable and the launcher rewrites the paths it runs from, so an icon
+# found by path is an icon that is sometimes missing.
+qt_add_resources(SOURCES resources/icons/anoa.qrc)
+
+# Windows reads an executable's icon from a resource compiled into it. Listed
+# only there because .rc is meaningless to the other two toolchains.
+if(WIN32)
+    list(APPEND SOURCES resources/icons/anoa.rc)
+endif()
+
 add_executable(anoa ${SOURCES})
 
 if(APPLE)
-    set_target_properties(anoa PROPERTIES MACOSX_BUNDLE TRUE)
+    # The .icns has to be INSIDE the bundle as well as named in Info.plist —
+    # naming it alone gives a bundle that asks for an icon it does not carry,
+    # which Finder renders as the generic application square.
+    target_sources(anoa PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/anoa.icns")
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/anoa.icns"
+        PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    set_target_properties(anoa PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_ICON_FILE "anoa.icns")
 endif()
 
 target_sources(anoa PRIVATE

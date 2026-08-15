@@ -90,12 +90,15 @@ DESKTOP
 
 # appimagetool wants the icon at the AppDir root under the name the .desktop
 # gives, and again under usr/share/icons for desktop integration to find it.
-if [ -f "$ROOT/docs/anoa-logo.png" ]; then
-    cp "$ROOT/docs/anoa-logo.png" "$APPDIR/anoa.png"
+# resources/icons/anoa.png, not docs/anoa-logo.png: the latter is a 720x392
+# README banner, and a desktop that squares it off gets a mostly-empty tile with
+# unreadable lettering. The icon is the mascot alone, square, on transparency.
+if [ -f "$ROOT/resources/icons/anoa.png" ]; then
+    cp "$ROOT/resources/icons/anoa.png" "$APPDIR/anoa.png"
     mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-    cp "$ROOT/docs/anoa-logo.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/anoa.png"
+    cp "$ROOT/resources/icons/anoa.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/anoa.png"
 else
-    echo "    no docs/anoa-logo.png; writing a placeholder icon" >&2
+    echo "    no resources/icons/anoa.png; writing a placeholder icon" >&2
     # A 1x1 PNG. appimagetool refuses an AppDir with no icon at all, and a
     # missing file should not be the thing that fails a release build.
     printf '\211PNG\r\n\032\n\0\0\0\rIHDR\0\0\0\1\0\0\0\1\10\6\0\0\0\37\25\304\211\0\0\0\nIDATx\234c\370\17\0\1\1\1\0\30\335\215\260\0\0\0\0IEND\256B`\202' \
