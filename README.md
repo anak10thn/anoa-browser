@@ -101,6 +101,51 @@ install-linux.sh --prefix /opt/anoa   # somewhere other than ~/.local
 install-linux.sh --uninstall          # remove it again
 ```
 
+### Linux (AppImage)
+
+One file. Download, make it executable, run it — no unpacking, no install, no
+root:
+
+```bash
+chmod +x anoa-x86_64.AppImage
+./anoa-x86_64.AppImage --headless --port 9222
+./anoa-x86_64.AppImage open example.com
+```
+
+Verified on a stock Ubuntu 24.04: headless, a real window with GLX, the terminal
+viewer, and the agent commands.
+
+It carries its own FUSE, so it does **not** need the `libfuse2` package that
+Ubuntu dropped in 22.04 — the runtime AppImage's own tooling embeds by default
+fails there with `dlopen(): error loading libfuse.so.2` before anything runs.
+
+**On a host with no FUSE at all** — most containers — run it without mounting:
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage --version
+```
+
+That unpacks the whole payload on every invocation: about 6 seconds per command
+against 1 for the tarball. Fine for a one-off, wrong for an agent loop — use the
+tarball or the container image there instead.
+
+**HTTPS needs NSS from the host** on a system that has none — a stripped
+container, not a distro:
+
+```bash
+sudo apt install libnss3 ca-certificates   # Debian/Ubuntu
+```
+
+Chromium reads certificates through NSS, and `libnss3` loads `libsoftokn3`,
+`libfreebl3` and `libnssckbi` at runtime instead of linking them — so `ldd`
+never names them and no bundle can package them by walking dependencies.
+Without them the browser still starts and local commands still work; only page
+loads fail, with `nss_util.cc ... Error initializing NSS`.
+
+Every ordinary distro already has NSS. Measured on a bare `debian:12-slim` with
+nothing installed: `--version`, the browser and `eval` all work; `open` does
+not until `libnss3` is there.
+
 ### Linux (portable tarball)
 
 The release tarball is self-contained: one executable, every shared library it needs under `lib/`, its resources and translations, plus a launcher script that wires them together. Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
