@@ -39,12 +39,18 @@ jobs:
             # comfortably enough.
             bare_image: 'debian:12-slim'
           - arch: aarch64
-            # 24.04, not 22.04: Qt 6.8+'s moc fails against Ubuntu 22.04's GCC
-            # 11 headers on this arch — "AutoMoc subprocess error" with no
-            # diagnostic — while the same header passes moc 6.10 elsewhere. A
-            # newer Qt wants a newer toolchain. The cost is real and stated in
-            # the README: the aarch64 bundle needs glibc 2.39 or newer.
-            runner: ubuntu-24.04-arm
+            # 22.04 with a newer compiler, rather than 24.04.
+            #
+            # glibc comes from the base image and decides how far the bundle
+            # reaches; GCC only has to be new enough for Qt's moc. Building on
+            # 24.04 satisfied moc but raised the floor to glibc 2.39, which
+            # excludes Debian 12 and Ubuntu 22.04 — the two most common systems
+            # on an ARM board. Verified on a real RK3588 running bookworm
+            # (glibc 2.36): every bundled library demanded GLIBC_2.38 and
+            # nothing ran.
+            #
+            # So: jammy's glibc 2.35, and gcc-12 installed on top for moc.
+            runner: ubuntu-22.04-arm
             qt_host: linux_arm64
             qt_arch: linux_gcc_arm64
             # Deliberately newer than x86_64. Qt 6.7.3's arm64 WebEngineCore
@@ -54,11 +60,13 @@ jobs:
             # wild. Shipping that inside a browser to save a version bump is
             # not a trade worth making.
             qt_version: '6.9.3'
-            # Trixie, not bookworm: this bundle is built on Ubuntu 24.04, so it
+            cc: gcc-12
+            cxx: g++-12
+            # Bookworm, not bookworm: this bundle is built on Ubuntu 24.04, so it
             # needs glibc 2.39 and cannot run on bookworm's 2.36 by
             # construction. Testing it against a base it never claimed to
             # support would be a failing test that proves nothing.
-            bare_image: 'debian:13-slim'
+            bare_image: 'debian:12-slim'
 
     steps:
       - uses: actions/checkout@v4
@@ -85,8 +93,18 @@ jobs:
           # small packages cost less than a conditional that can rot.
           sudo apt-get install -y libcups2-dev file patchelf \
                                   libevent-dev libminizip-dev
+          # Qt 6.8+'s moc fails against GCC 11's headers on aarch64 —
+          # "AutoMoc subprocess error" with no diagnostic, while the same
+          # header passes moc 6.10 elsewhere. A newer compiler fixes moc
+          # without touching glibc, which is what decides the bundle's reach.
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            sudo apt-get install -y gcc-12 g++-12
+          fi
 
       - name: Configure & Build
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$QT_ROOT_DIR \
             -DANOA_VERSION_OVERRIDE="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}"
