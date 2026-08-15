@@ -34,6 +34,10 @@ jobs:
             qt_host: linux
             qt_arch: linux_gcc_64
             qt_version: '6.7.3'
+            # The oldest base this bundle claims to run on, used by the bare
+            # smoke test below. Built on 22.04, so bookworm's glibc 2.36 is
+            # comfortably enough.
+            bare_image: 'debian:12-slim'
           - arch: aarch64
             # 24.04, not 22.04: Qt 6.8+'s moc fails against Ubuntu 22.04's GCC
             # 11 headers on this arch — "AutoMoc subprocess error" with no
@@ -50,6 +54,11 @@ jobs:
             # wild. Shipping that inside a browser to save a version bump is
             # not a trade worth making.
             qt_version: '6.9.3'
+            # Trixie, not bookworm: this bundle is built on Ubuntu 24.04, so it
+            # needs glibc 2.39 and cannot run on bookworm's 2.36 by
+            # construction. Testing it against a base it never claimed to
+            # support would be a failing test that proves nothing.
+            bare_image: 'debian:13-slim'
 
     steps:
       - uses: actions/checkout@v4
@@ -327,7 +336,7 @@ jobs:
           [ "$got" = "42" ] || { echo "::error::eval failed on a bare host"; exit 1; }
           BARE
           docker run --rm -v "$PWD:/work" -v /tmp/bare.sh:/tmp/bare.sh \
-            debian:12-slim bash /tmp/bare.sh
+            ${{ matrix.bare_image }} bash /tmp/bare.sh
 
       - name: Smoke test the AppImage
         run: |
