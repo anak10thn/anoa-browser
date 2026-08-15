@@ -1,0 +1,4 @@
+// Windows takes its executable icon from a resource, not from a file beside
+// it. IDI_ICON1 is the conventional first icon id, which is what Explorer and
+// the taskbar look for.
+IDI_ICON1 ICON "anoa.ico"

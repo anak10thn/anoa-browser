@@ -1,0 +1,13 @@
+<!DOCTYPE RCC>
+<!--
+  The window icon, compiled into the binary.
+
+  A file on disk would not do: the bundle is relocatable and the terminal
+  viewer runs from paths the launcher rewrites, so an icon looked up by path is
+  an icon that is sometimes missing. Compiled in, it is always there.
+-->
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file alias="anoa.png">anoa.png</file>
+  </qresource>
+</RCC>
