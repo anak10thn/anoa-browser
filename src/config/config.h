@@ -8,6 +8,11 @@ struct Config {
     bool headless = false;
     bool noSandbox = false;
     QString profileDir;
+    // Opt back in to Qt's off-the-record default profile: nothing is written
+    // and nothing survives the process. The default is persistent, because a
+    // browser that forgets every login is not one you can drive across
+    // commands.
+    bool ephemeral = false;
     QString profileName;
     QStringList extensionPaths;
     QString authToken;

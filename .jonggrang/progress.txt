@@ -498,3 +498,20 @@
 - "no browser on host:port — start one first" was printed for a browser that IS
   running but has no such tab. Wrong advice, and it predates tab names: any
   --tab t99 produced it. The client now flags a tab miss separately.
+
+- Sessions were lost on SIGTERM/SIGINT. Chromium writes cookies and local
+  storage lazily and flushes when the profile is destroyed; browser mode had NO
+  signal handling, so a signal killed the process before any of it reached disk.
+  `--profile work` created its directory and wrote Favicons and Session Storage
+  but never a Cookies file — a profile that looked like it was working. `anoa
+  close` was always clean, which is why nothing caught it: the documented exit
+  flushed and every other one did not.
+
+- QWebEngineProfile::defaultProfile() is OFF-THE-RECORD. With no --profile,
+  anoa kept nothing at all — log in, exit, logged out, silently. The default is
+  a persistent profile named "default" under QStandardPaths::AppDataLocation
+  now; --ephemeral asks for the old behaviour.
+
+- PRF-03 asserted that no --profile writes NO directory. That was a test
+  describing the bug as intended behaviour. It asserts the default profile
+  exists now, with a sibling case for --ephemeral.

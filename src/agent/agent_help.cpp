@@ -46,7 +46,14 @@ const Group kGroups[] = {
   Reaching a browser from an agent command:
     --port <n> / --host <h>         where it is listening (default 127.0.0.1:9222)
     --token <secret>                its bearer token, if it demands one
-    --tab <id>                      which tab to act on (default: the active one))"},
+    --tab <id>                      which tab to act on (default: the active one)
+
+  Sessions:
+    Cookies and logins are kept between runs, in a profile named "default"
+    under your platform's application data directory.
+    --profile <name>                use a different one
+    --profile-dir <dir>             keep profiles somewhere else
+    --ephemeral                     keep nothing; gone when the process ends)"},
 
     {"tabs", "TABS  — one browser, many pages", R"(  anoa tab new [url]                open a tab, print its id
       --name <name>                 call it something; --tab takes it after

@@ -143,8 +143,12 @@ do changes. `anoa tab list` shows them all with `*` on the active one.
 attributes, so `@e2` in one tab names nothing in another. Snapshot the tab you
 are about to act on, with the same `--tab` you will use for the click.
 
-**Cookies are shared unless you ask otherwise.** A login in one tab is a login
-in all of them. For two accounts on one site at once:
+**Logins survive between runs.** Cookies go to a persistent profile, so you can
+log in once and use it in later commands and later sessions. `--ephemeral`
+starts a browser that keeps nothing.
+
+**Cookies are shared between tabs unless you ask otherwise.** A login in one tab
+is a login in all of them. For two accounts on one site at once:
 
 ```bash
 anoa tab new example.com --isolated       # its own cookies, gone with the tab

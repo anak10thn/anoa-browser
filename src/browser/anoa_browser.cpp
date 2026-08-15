@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QStandardPaths>
 #include <QResizeEvent>
 #include <QWheelEvent>
 #include <QJsonArray>
@@ -105,7 +106,27 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     if (m_config.headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
-    m_profile = QWebEngineProfile::defaultProfile();
+    // A persistent profile, not Qt's default one.
+    //
+    // QWebEngineProfile::defaultProfile() is OFF-THE-RECORD: it keeps nothing.
+    // So `anoa` with no --profile logged you into a site, and logged you out
+    // again the moment the process ended — with no error and nothing on disk to
+    // suggest why. A browser you drive across separate commands is exactly the
+    // case where that is wrong.
+    //
+    // Named "default" and stored where the platform keeps application data, so
+    // it behaves like any other browser profile. --profile picks a different
+    // one; --ephemeral asks for the old off-the-record behaviour back.
+    if (m_config.ephemeral) {
+        m_profile = QWebEngineProfile::defaultProfile();
+    } else {
+        const QString base = m_config.profileDir.isEmpty()
+            ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+            : m_config.profileDir;
+        m_profile = new QWebEngineProfile(QStringLiteral("default"), this);
+        m_profile->setPersistentStoragePath(QDir(base).filePath(QStringLiteral("default")));
+        m_profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    }
 
     // No layout at all. Views are children at identical geometry and the
     // active one is raised — see the header for why hiding them is not an
@@ -316,6 +337,8 @@ QWebEngineView *AnoaBrowser::activeView() const
 
 QWebEngineProfile *AnoaBrowser::profileFor(const QString &name, bool isolated)
 {
+    // The shared profile's storage root, so a named tab profile lands beside it
+    // rather than in the working directory.
     // Off-the-record and unnamed: a fresh jar per tab, gone when the tab goes.
     // Asked for explicitly, because it is the opposite of what a browser
     // normally does with a login.
@@ -330,8 +353,11 @@ QWebEngineProfile *AnoaBrowser::profileFor(const QString &name, bool isolated)
     if (QWebEngineProfile *existing = m_profilesByName.value(name))
         return existing;
 
+    const QString base = m_config.profileDir.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+        : m_config.profileDir;
     auto *profile = new QWebEngineProfile(name, this);
-    profile->setPersistentStoragePath(QDir(m_config.profileDir).filePath(name));
+    profile->setPersistentStoragePath(QDir(base).filePath(name));
     profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
     m_profilesByName.insert(name, profile);
     return profile;
@@ -701,8 +727,11 @@ void AnoaBrowser::setupNamedProfile(const QString &name, const QString &baseDir)
     if (m_profile != QWebEngineProfile::defaultProfile())
         m_profile->deleteLater();
 
+    const QString base = baseDir.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+        : baseDir;
     m_profile = new QWebEngineProfile(name, this);
-    m_profile->setPersistentStoragePath(QDir(baseDir).filePath(name));
+    m_profile->setPersistentStoragePath(QDir(base).filePath(name));
     m_profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
 
     // Called before init() in practice, so there is usually nothing to move.

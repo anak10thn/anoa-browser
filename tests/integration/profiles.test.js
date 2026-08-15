@@ -48,16 +48,31 @@ describe('Profile Isolation & Cookie Tests', () => {
     expect(statA).not.toBe(statB);
   }, 40000);
 
-  // PRF-03
-  it('No --profile flag uses default profile (no named directory created)', async () => {
+  // PRF-03: with no --profile there is still a profile, and it is on disk.
+  //
+  // This asserted the opposite — that nothing was written — which described
+  // Qt's off-the-record default profile. That profile kept nothing at all, so
+  // `anoa` with no flags logged you into a site and logged you out again when
+  // the process ended, silently. The default is a persistent profile named
+  // "default" now, and --ephemeral is how you ask for the old behaviour.
+  it('with no --profile there is still a persistent default profile', async () => {
     const base = mkdtempSync(join(tmpdir(), 'anoa-default-'));
     const proc = await startBrowser([`--profile-dir=${base}`]);
     await new Promise((r) => setTimeout(r, 500));
     await stopBrowser(proc);
-    // With no --profile, no named subdirectory should be created
     const { readdirSync } = await import('fs');
-    const entries = readdirSync(base);
-    expect(entries.length).toBe(0);
+    expect(readdirSync(base)).toContain('default');
+    rmSync(base, { recursive: true, force: true });
+  }, 25000);
+
+  // PRF-03b: and --ephemeral still keeps nothing.
+  it('--ephemeral writes no profile directory at all', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'anoa-ephemeral-'));
+    const proc = await startBrowser([`--profile-dir=${base}`, '--ephemeral']);
+    await new Promise((r) => setTimeout(r, 500));
+    await stopBrowser(proc);
+    const { readdirSync } = await import('fs');
+    expect(readdirSync(base).length).toBe(0);
     rmSync(base, { recursive: true, force: true });
   }, 25000);
 

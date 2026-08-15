@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <memory>
 
@@ -11,6 +12,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTextStream>
+#include <QTimer>
 
 #include "agent/agent_cli.h"
 #include "agent/agent_help.h"
@@ -363,6 +365,34 @@ int main(int argc, char *argv[])
         qCritical("Failed to bind CDP proxy to port %u (already in use?)", wsPort);
         return 1;
     }
+
+#ifndef Q_OS_WIN
+    // Ctrl-C and SIGTERM have to end in a clean Qt shutdown, or the session is
+    // lost.
+    //
+    // Chromium writes cookies and local storage lazily and flushes them when
+    // the profile is destroyed. Until this existed, a signal killed the process
+    // outright: `--profile work` created its directory, wrote Favicons and
+    // Session Storage, and never produced a Cookies file at all — so a user who
+    // logged in, stopped the browser and started it again found themselves
+    // logged out, with a profile directory that looked like it was working.
+    //
+    // `anoa close` was always clean, which is why this went unnoticed: the
+    // documented way out flushed, and every other way did not.
+    //
+    // The handler only sets a flag. Calling into Qt from a signal handler is
+    // not safe, so a timer notices it on the event loop and asks the
+    // application to quit, which unwinds main() and destroys the profile.
+    static volatile std::sig_atomic_t quitRequested = 0;
+    std::signal(SIGINT, [](int) { quitRequested = 1; });
+    std::signal(SIGTERM, [](int) { quitRequested = 1; });
+    QTimer signalPoll;
+    QObject::connect(&signalPoll, &QTimer::timeout, &app, [&app]() {
+        if (quitRequested)
+            app.quit();
+    });
+    signalPoll.start(100);
+#endif
 
     return app.exec();
 }

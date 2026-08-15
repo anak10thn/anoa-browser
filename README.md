@@ -423,9 +423,15 @@ the active tab. `/json/list` reports one entry per tab, each carrying
 `anoaTabId` and `anoaActive` alongside the fields every CDP client already
 reads.
 
-**Cookies are shared unless you say otherwise.** A login in one tab is a login
-in all of them, which is usually what you want. Two flags change that, and they
-mean different things:
+**Logins survive between runs.** Cookies and local storage go to a profile named
+`default` under your platform's application data directory, so a browser you log
+into stays logged in the next time you start one. `--profile <name>` picks a
+different one, `--profile-dir <dir>` moves them, and `--ephemeral` keeps nothing
+at all.
+
+**Cookies are shared between tabs unless you say otherwise.** A login in one tab
+is a login in all of them, which is usually what you want. Two flags change
+that, and they mean different things:
 
 ```bash
 anoa tab new example.com --profile work   # its own cookies, kept on disk
