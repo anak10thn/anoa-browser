@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QSet>
 #include <QList>
 #include <QNetworkCookie>
 #include <QPoint>
@@ -102,6 +103,7 @@ public:
     bool sendKey(const QString &keyName, const QString &tabId = QString());
 
 signals:
+    void downloadFinished(const QString &path, bool ok);
     void tabCreated(const QString &id);
     void tabClosed(const QString &id);
     void tabActivated(const QString &id);
@@ -142,6 +144,9 @@ private:
     // Asynchronous by construction: a seam is crossed by signals, never by a
     // blocking call, and the answer does not exist yet when the tab is created.
     void resolveTargetId(const QString &tabId, int attempt);
+    // Once per profile: a second connection would accept the same download
+    // twice and race over the file name.
+    void acceptDownloadsOn(QWebEngineProfile *profile);
 
     Config m_config;
     QWebEngineProfile *m_profile;
@@ -155,6 +160,7 @@ private:
     // A CDP browser context is a profile as a client sees it. Minted per
     // profile OBJECT, so two tabs sharing a profile report one id and an
     // isolated tab reports its own.
+    QSet<QWebEngineProfile *> m_downloadWired;
     QHash<QWebEngineProfile *, QString> m_contextIds;
     int m_nextContextId = 0;
     QString m_activeTabId;

@@ -15,6 +15,8 @@
 #include "agent/agent_help.h"
 #include "agent/agent_script.h"
 #include "agent/agent_skill.h"
+#include <QFileInfo>
+
 #include "browser/tab_ids.h"
 #include "cdp/cdp_client.h"
 #include "config/config.h"
@@ -112,24 +114,41 @@ public:
         return result;
     }
 
+    // Runtime.evaluate that keeps the OBJECT rather than its value, with the
+    // helper script installed first. DOM.requestNode needs a handle, and
+    // returnByValue would have serialised the element into a plain object and
+    // thrown the handle away.
+    CdpResult evaluateHandle(const QString &expression)
+    {
+        installScript();
+        QJsonObject params;
+        params[QStringLiteral("expression")] = expression;
+        return call(QStringLiteral("Runtime.evaluate"), params);
+    }
+
     // Runtime.evaluate with the helper script guaranteed to be installed.
     // Installing on every call rather than once is deliberate: the page may
     // have navigated since the last command, and this process has no way to
     // know that without asking. The script returns early when it is already
     // there, so the cost is a property read.
+    bool installScript()
+    {
+        if (m_installed)
+            return true;
+        QJsonObject boot;
+        boot[QStringLiteral("expression")] = agentScript();
+        boot[QStringLiteral("returnByValue")] = true;
+        const CdpResult r = call(QStringLiteral("Runtime.evaluate"), boot);
+        m_installed = r.ok;
+        return m_installed;
+    }
+
     QJsonValue evaluate(const QString &expression, QString *error)
     {
-        if (!m_installed) {
-            QJsonObject boot;
-            boot[QStringLiteral("expression")] = agentScript();
-            boot[QStringLiteral("returnByValue")] = true;
-            const CdpResult r = call(QStringLiteral("Runtime.evaluate"), boot);
-            if (!r.ok) {
-                if (error)
-                    *error = r.errorMessage;
-                return QJsonValue();
-            }
-            m_installed = true;
+        if (!installScript()) {
+            if (error)
+                *error = QStringLiteral("could not install the page helper");
+            return QJsonValue();
         }
 
         QJsonObject params;
@@ -263,6 +282,78 @@ void printSnapshot(const QJsonObject &snap)
 // `anoa tab ...` acts on the BROWSER, not on a page: every subcommand is a
 // Target.* call the proxy answers from the tab registry, whichever page this
 // client happens to be attached to. That is why nothing here honours --tab.
+// `anoa upload <target> <file...>` — put files into a file input.
+//
+// Clicking one does nothing useful: the click asks the browser for a file
+// dialog, and there is nobody to answer it. DOM.setFileInputFiles hands the
+// files straight to the element and fires the change event the page is
+// listening for, which is what Playwright and Puppeteer do underneath their
+// own upload helpers.
+int cmdUpload(Session &s, QStringList args, bool json)
+{
+    if (args.size() < 2) {
+        return fail(QStringLiteral("upload needs a target and a file — "
+                                   "try: anoa upload @e2 ./report.pdf"),
+                    Usage);
+    }
+    const QString target = args.takeFirst();
+
+    QJsonArray files;
+    for (const QString &path : args) {
+        const QFileInfo info(path);
+        if (!info.exists() || !info.isFile())
+            return fail(QStringLiteral("no such file: %1").arg(path));
+        // Chromium resolves these in the browser process, which has its own
+        // working directory; a relative path would land somewhere else.
+        files.append(info.absoluteFilePath());
+    }
+
+    // The element, as an object the DOM domain can turn into a node id. This
+    // goes through __anoa.resolve so a ref (@e2) works exactly as a selector
+    // does, rather than upload being the one command that only takes CSS.
+    QString why;
+    Q_UNUSED(why)
+    const CdpResult handle =
+        s.evaluateHandle(QStringLiteral("__anoa.resolve(%1)").arg(jsString(target)));
+    const QString objectId =
+        handle.result.value(QStringLiteral("result")).toObject()
+              .value(QStringLiteral("objectId")).toString();
+    if (objectId.isEmpty())
+        return fail(QStringLiteral("no element for %1").arg(target));
+
+    // DOM.requestNode answers out of the node map, and the map does not exist
+    // until the domain has been enabled and the document walked once. Without
+    // these two it fails with an empty error, which reads like the element was
+    // wrong rather than the domain being asleep.
+    s.call(QStringLiteral("DOM.enable"));
+    s.call(QStringLiteral("DOM.getDocument"));
+
+    const CdpResult node = s.call(QStringLiteral("DOM.requestNode"),
+                                  QJsonObject{{QStringLiteral("objectId"), objectId}});
+    const int nodeId = node.result.value(QStringLiteral("nodeId")).toInt();
+    if (!node.ok || nodeId == 0)
+        return fail(QStringLiteral("could not address %1: %2").arg(target, node.errorMessage));
+
+    const CdpResult set = s.call(QStringLiteral("DOM.setFileInputFiles"),
+                                 QJsonObject{{QStringLiteral("nodeId"), nodeId},
+                                             {QStringLiteral("files"), files}});
+    if (!set.ok) {
+        // The error Chromium gives for a non-input element is worth passing on
+        // rather than flattening: "Node is not a file input element".
+        return fail(QStringLiteral("upload failed: %1").arg(set.errorMessage));
+    }
+
+    if (json) {
+        QJsonObject o;
+        o[QStringLiteral("target")] = target;
+        o[QStringLiteral("files")] = files;
+        out() << QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)) << Qt::endl;
+    } else {
+        out() << "uploaded " << files.size() << " file(s) to " << target << Qt::endl;
+    }
+    return Ok;
+}
+
 int cmdTab(Session &s, QStringList args, bool json)
 {
     static const QString kUsage =
@@ -1246,6 +1337,7 @@ bool isAgentCommand(const QString &verb)
         QStringLiteral("set"),    QStringLiteral("find"),     QStringLiteral("console"),
         QStringLiteral("errors"), QStringLiteral("network"),  QStringLiteral("mouse"),
         QStringLiteral("close"),  QStringLiteral("tab"),
+        QStringLiteral("upload"),
     };
     return verbs.contains(verb);
 }
@@ -1305,6 +1397,8 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
 
     if (verb == QStringLiteral("tab"))
         return cmdTab(session, args, json);
+    if (verb == QStringLiteral("upload"))
+        return cmdUpload(session, args, json);
     if (verb == QStringLiteral("open") || verb == QStringLiteral("goto"))
         return cmdOpen(session, args, json);
     if (verb == QStringLiteral("snapshot"))

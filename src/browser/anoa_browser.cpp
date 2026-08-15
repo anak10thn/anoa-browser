@@ -1,5 +1,7 @@
 #include "anoa_browser.h"
 
+#include <functional>
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -18,6 +20,7 @@
 #include <QJsonObject>
 #include <QTimer>
 #include <QWebEngineCookieStore>
+#include <QWebEngineDownloadRequest>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 #include <QWebEngineScript>
@@ -41,6 +44,34 @@ public:
     {
     }
 
+    // What the page asked and what it was told, newest last. An agent cannot
+    // see a dialog it never gets to answer, so the answer is recorded instead.
+    struct DialogRecord {
+        QString kind; // alert | confirm | prompt | beforeunload
+        QString message;
+        QString answer;
+    };
+    QList<DialogRecord> takeDialogs()
+    {
+        QList<DialogRecord> out;
+        out.swap(m_dialogs);
+        return out;
+    }
+    void setConfirmAnswer(bool accept) { m_confirmAnswer = accept; }
+    void setPromptAnswer(const QString &text) { m_promptAnswer = text; }
+
+    // How this page opens another one. Set by the registry, because a page
+    // cannot make a tab on its own and src/browser is the only place that
+    // knows how.
+    void setTabOpener(std::function<QWebEnginePage *()> opener)
+    {
+        m_openTab = std::move(opener);
+    }
+    // Files handed to the next <input type=file> that asks. Armed ahead of the
+    // click, because the click is what triggers the request and there is
+    // nobody to answer a file dialog.
+    void armFiles(const QStringList &paths) { m_armedFiles = paths; }
+
 protected:
     void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString &message,
                                   int lineNumber, const QString &sourceId) override
@@ -50,8 +81,84 @@ protected:
         QWebEnginePage::javaScriptConsoleMessage(level, message, lineNumber, sourceId);
     }
 
+    // The default implementations put a modal dialog on screen and block the
+    // renderer until somebody clicks it. Nobody ever does here: headless has no
+    // screen, and the agent driving the browser is on the other side of a
+    // socket the renderer has stopped serving.
+    //
+    // One alert() therefore killed the browser outright — not the tab, the
+    // whole process. Every later command, down to Target.getTargets at the
+    // browser level, timed out, and the only way back was SIGKILL. Any ordinary
+    // site that pops a confirm did it.
+    //
+    // So they answer immediately and record what happened, which is also what
+    // an automated browser is expected to do: Chrome's own headless mode
+    // dismisses dialogs unless a client has subscribed to Page.javascriptDialog.
+    void javaScriptAlert(const QUrl &securityOrigin, const QString &msg) override
+    {
+        Q_UNUSED(securityOrigin)
+        m_dialogs.append({QStringLiteral("alert"), msg, QString()});
+    }
+
+    bool javaScriptConfirm(const QUrl &securityOrigin, const QString &msg) override
+    {
+        Q_UNUSED(securityOrigin)
+        m_dialogs.append({QStringLiteral("confirm"), msg,
+                          m_confirmAnswer ? QStringLiteral("true") : QStringLiteral("false")});
+        return m_confirmAnswer;
+    }
+
+    bool javaScriptPrompt(const QUrl &securityOrigin, const QString &msg,
+                          const QString &defaultValue, QString *result) override
+    {
+        Q_UNUSED(securityOrigin)
+        // The page's own default unless one was set, so a prompt that offers a
+        // sensible value gets it rather than an empty string.
+        const QString answer = m_promptAnswer.isNull() ? defaultValue : m_promptAnswer;
+        if (result)
+            *result = answer;
+        m_dialogs.append({QStringLiteral("prompt"), msg, answer});
+        return true;
+    }
+
+    // window.open and target=_blank. Without this, Qt drops the request and
+    // returns nothing — the page sees a null window, or worse, sees a truthy
+    // one and waits for a document that never arrives. Now it becomes a real
+    // background tab, which is what a browser with tabs should do with it.
+    QWebEnginePage *createWindow(WebWindowType type) override
+    {
+        Q_UNUSED(type)
+        if (!m_openTab)
+            return nullptr;
+        return m_openTab();
+    }
+
+    // A file input asked for files. The default puts a native dialog on screen
+    // — invisible in headless, and unanswerable by an agent either way, so the
+    // upload simply never happened.
+    QStringList chooseFiles(FileSelectionMode mode, const QStringList &oldFiles,
+                            const QStringList &acceptedMimeTypes) override
+    {
+        Q_UNUSED(oldFiles)
+        Q_UNUSED(acceptedMimeTypes)
+        if (m_armedFiles.isEmpty())
+            return QStringList();
+        // One arming, one use: leaving them set would attach the same file to
+        // every later upload on the page.
+        QStringList files;
+        files.swap(m_armedFiles);
+        if (mode == FileSelectOpen && files.size() > 1)
+            files = QStringList{files.first()};
+        return files;
+    }
+
 private:
     bool m_silenceConsole;
+    std::function<QWebEnginePage *()> m_openTab;
+    QStringList m_armedFiles;
+    QList<DialogRecord> m_dialogs;
+    bool m_confirmAnswer = true;   // accept: the common intent when driving
+    QString m_promptAnswer;        // null = use the page's default
 };
 
 } // namespace
@@ -133,10 +240,52 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     // option.
 }
 
+void AnoaBrowser::acceptDownloadsOn(QWebEngineProfile *profile)
+{
+    if (!profile || m_downloadWired.contains(profile))
+        return;
+    m_downloadWired.insert(profile);
+    // Qt cancels a download nobody accepts, silently. A page that offers a file
+    // therefore did nothing at all, with no error anywhere to say why.
+    connect(profile, &QWebEngineProfile::downloadRequested, this,
+            [this](QWebEngineDownloadRequest *item) {
+                if (!item)
+                    return;
+                const QString dir = m_config.downloadDir.isEmpty()
+                    ? QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)
+                    : m_config.downloadDir;
+                QDir().mkpath(dir);
+                item->setDownloadDirectory(dir);
+                item->accept();
+                connect(item, &QWebEngineDownloadRequest::isFinishedChanged, this, [this, item]() {
+                    if (!item->isFinished())
+                        return;
+                    emit downloadFinished(QDir(item->downloadDirectory())
+                                              .filePath(item->downloadFileName()),
+                                          item->state()
+                                              == QWebEngineDownloadRequest::DownloadCompleted);
+                });
+            });
+}
+
 QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)
 {
     auto *view = new QWebEngineView(this);
-    view->setPage(new AnoaPage(m_config.terminalMode, profile, view));
+    acceptDownloadsOn(profile);
+    auto *page = new AnoaPage(m_config.terminalMode, profile, view);
+    // A popup becomes a background tab on the same profile: it is the same
+    // session the opener belongs to, and putting it in front would interrupt
+    // whoever is driving the active tab.
+    page->setTabOpener([this, profile]() -> QWebEnginePage * {
+        Tab tab;
+        tab.id = m_minter.next();
+        tab.profile = profile;
+        tab.view = createView(profile);
+        m_profileUsers[profile] += 1;
+        const QString id = finishNewTab(tab, QUrl());
+        return id.isEmpty() ? nullptr : pageFor(id);
+    });
+    view->setPage(page);
 
     // Every view reports through the same three signals, filtered to whichever
     // tab is active. A filter rather than connect/disconnect on every switch:

@@ -515,3 +515,18 @@
 - PRF-03 asserted that no --profile writes NO directory. That was a test
   describing the bug as intended behaviour. It asserts the default profile
   exists now, with a sibling case for --ephemeral.
+
+- QWebEnginePage's dialog defaults BLOCK the renderer waiting for a click that
+  never comes. One alert() killed the whole browser: every later command timed
+  out, including Target.getTargets at the browser level, and only SIGKILL got it
+  back. Any ordinary site with a confirm did it. AnoaPage answers and records
+  them now.
+
+- Qt drops what nobody accepts, silently, in three more places: downloads
+  without a downloadRequested handler, window.open without createWindow, and
+  file inputs without chooseFiles. None of them error — the page simply does
+  not work, which is far harder to diagnose than a failure.
+
+- DOM.requestNode answers out of a node map that does not exist until DOM.enable
+  and one DOM.getDocument have run. Without them it fails with an EMPTY error
+  message, which reads as "wrong element" rather than "domain asleep".

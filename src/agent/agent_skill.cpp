@@ -155,6 +155,26 @@ anoa tab new example.com --isolated       # its own cookies, gone with the tab
 anoa tab new example.com --profile work   # its own cookies, kept on disk
 ```
 
+## Things a page does that used to fail quietly
+
+`alert`, `confirm` and `prompt` are answered and recorded rather than shown:
+confirm returns true, prompt returns the page's own default. Nothing blocks.
+
+`window.open` and `target=_blank` open a real background tab — `anoa tab list`
+shows it, and the tab you were driving stays active.
+
+Downloads are accepted and saved. `--download-dir` says where.
+
+Clicking a file input opens a dialog nobody can answer, so upload the file
+directly instead:
+
+```bash
+anoa upload @e2 ./report.pdf
+```
+
+That fires the page's `change` handler, which is what a form validating on
+change is waiting for.
+
 ## Watching it happen
 
 `anoa terminal` renders the live page in the terminal and forwards clicks and
@@ -244,6 +264,7 @@ more. Use `snapshot` when you need to *act*, `get text` when you need to *read*.
 | `anoa click <target>` | click, hit-tested — refuses if something covers it |
 | `anoa fill <target> <text>` | write into a field and fire input/change |
 | `anoa type <text>` | type into whatever has focus |
+| `anoa upload <target> <file...>` | put files into a file input |
 | `anoa press <key>` | Enter, Tab, Escape, ArrowDown, … |
 | `anoa scroll [--up] [--by <px>]` | scroll the page |
 | `anoa scroll --top` / `--bottom` | jump to either end |

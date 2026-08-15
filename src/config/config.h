@@ -13,6 +13,8 @@ struct Config {
     // browser that forgets every login is not one you can drive across
     // commands.
     bool ephemeral = false;
+    // Where accepted downloads land. Empty = the platform's Downloads folder.
+    QString downloadDir;
     QString profileName;
     QStringList extensionPaths;
     QString authToken;

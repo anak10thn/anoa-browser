@@ -161,6 +161,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     QCommandLineOption headlessOpt("headless", "Run in offscreen/headless mode");
     QCommandLineOption noSandboxOpt("no-sandbox", "Disable Chromium sandbox");
     QCommandLineOption profileDirOpt("profile-dir", "Base directory for browser profiles", "dir");
+    QCommandLineOption downloadDirOpt("download-dir",
+        "Where downloads are saved (default: the platform Downloads folder)", "dir");
     QCommandLineOption ephemeralOpt("ephemeral",
         "Keep nothing: no cookies, no storage, gone when the process ends");
     QCommandLineOption profileNameOpt("profile", "Named profile to activate", "name");
@@ -184,6 +186,7 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     parser.addOption(headlessOpt);
     parser.addOption(noSandboxOpt);
     parser.addOption(profileDirOpt);
+    parser.addOption(downloadDirOpt);
     parser.addOption(ephemeralOpt);
     parser.addOption(profileNameOpt);
     parser.addOption(extensionOpt);
@@ -214,6 +217,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
         cfg.noSandbox = true;
     if (parser.isSet(profileDirOpt))
         cfg.profileDir = parser.value(profileDirOpt);
+    if (parser.isSet(downloadDirOpt))
+        cfg.downloadDir = parser.value(downloadDirOpt);
     if (parser.isSet(ephemeralOpt))
         cfg.ephemeral = true;
     if (parser.isSet(profileNameOpt))

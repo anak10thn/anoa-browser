@@ -104,6 +104,7 @@ const Group kGroups[] = {
     {"interact", "INTERACT", R"(  anoa click <target>               click, hit-tested — fails if something covers it
   anoa fill <target> <text>         set a field's value and fire input/change
   anoa type <text>                  type into whatever has focus
+  anoa upload <target> <file...>    put files into a file input
   anoa press <key>                  Enter, Tab, Escape, ArrowDown, …
   anoa scroll [--up] [--by <px>]    scroll the page
   anoa scroll --top | --bottom      jump to either end
