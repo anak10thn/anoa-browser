@@ -306,6 +306,29 @@ jobs:
         run: |
           scripts/build-appimage.sh dist/anoa anoa-${{ matrix.arch }}.AppImage
 
+      # The AppImage on a host with nothing on it. The runner is a full Ubuntu,
+      # so it can only prove the payload is intact — this proves the thing
+      # users actually hit, and does it natively on both architectures.
+      - name: Smoke test the AppImage on a bare container
+        run: |
+          cat > /tmp/bare.sh <<'BARE'
+          A=/work/anoa-${{ matrix.arch }}.AppImage
+          cd /tmp
+          v="$(APPIMAGE_EXTRACT_AND_RUN=1 $A --version 2>/dev/null)"
+          echo "bare container reports: [$v]"
+          case "$v" in "anoa "*) ;; *) echo "::error::no version on a bare host"; exit 1 ;; esac
+          APPIMAGE_EXTRACT_AND_RUN=1 $A --headless --no-sandbox --port 9555 >/tmp/b.log 2>&1 &
+          for i in $(seq 1 90); do (echo > /dev/tcp/127.0.0.1/9555) 2>/dev/null && break; sleep 1; done
+          (echo > /dev/tcp/127.0.0.1/9555) 2>/dev/null || { echo "::error::browser did not start"; exit 1; }
+          # eval needs no page, no certificates and no NSS — the honest floor
+          # for "runs at all with nothing installed".
+          got="$(APPIMAGE_EXTRACT_AND_RUN=1 $A eval '6*7' --port 9555 2>/dev/null)"
+          echo "bare container eval 6*7: [$got]"
+          [ "$got" = "42" ] || { echo "::error::eval failed on a bare host"; exit 1; }
+          BARE
+          docker run --rm -v "$PWD:/work" -v /tmp/bare.sh:/tmp/bare.sh \
+            debian:12-slim bash /tmp/bare.sh
+
       - name: Smoke test the AppImage
         run: |
           # Runs the real file, not an extracted copy: a GitHub runner has no
