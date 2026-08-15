@@ -167,9 +167,29 @@ jobs:
           # and libEGL.so.1 directly, and a bare container has no GL packages at
           # all, so excluding them outright broke --headless, which needs no GL
           # whatsoever.
+          #
+          # NSS joins them for a third reason, found by an AppImage smoke test
+          # on a GitHub runner:
+          #
+          #   nss_util.cc(239) Error initializing NSS with a persistent database
+          #     libsoftokn3.so: cannot open shared object file
+          #
+          # libnss3.so is a link-time dependency, so the walk above bundles it —
+          # but NSS loads libsoftokn3, libfreebl3 and libnssckbi at RUNTIME, so
+          # ldd never names them and no dependency walk can find them. The
+          # bundled libnss3 then shadows the host's complete, coherent set and
+          # goes looking for modules that were never packaged. Chromium reads
+          # certificates through NSS, so the symptom is that every HTTPS page
+          # fails while everything local still works.
+          #
+          # Host-first fixes it wherever NSS is installed, which is every
+          # ordinary distro. A host with no NSS at all still needs libnss3 —
+          # the Dockerfile has always installed it for exactly this reason.
           mkdir -p "$bundle/lib/hostfirst"
           for hf in libGL.so libGLX.so libGLdispatch.so libEGL.so libOpenGL.so libglapi.so \
-                    libX11.so libstdc++.so; do
+                    libX11.so libstdc++.so \
+                    libnss3.so libnssutil3.so libsmime3.so libnspr4.so \
+                    libplc4.so libplds4.so; do
             for f in "$bundle"/lib/${hf}*; do
               [ -e "$f" ] && mv "$f" "$bundle/lib/hostfirst/" 2>/dev/null || true
             done
@@ -273,8 +293,18 @@ jobs:
             || { echo "::error::AppImage browser never came up"; exit 1; }
           title="$(APPIMAGE_EXTRACT_AND_RUN=1 ./anoa-x86_64.AppImage \
                      open example.com --port 9444 | head -1)"
-          echo "AppImage opened: $title"
+          echo "AppImage opened: [$title]"
           pkill -x anoa || true
+
+          # Asserted, not just printed. The first version of this step only
+          # checked --version and reported success while `open` returned
+          # nothing at all — the bundle was shadowing the host's NSS and every
+          # HTTPS load was failing. A smoke test that cannot see that is not
+          # worth running.
+          if [ -z "$title" ]; then
+            echo "::error::AppImage started but could not load a page"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
