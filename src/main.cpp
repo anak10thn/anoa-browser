@@ -146,7 +146,53 @@ int main(int argc, char *argv[])
             agentVerb = QString::fromLocal8Bit(argv[i]);
             for (int j = i + 1; j < argc; ++j)
                 agentArgs << QString::fromLocal8Bit(argv[j]);
-            argc = i;
+            // Anything before the verb goes with it too, so both orders work:
+            //
+            //   anoa get text --tab t2      (always did)
+            //   anoa --tab t2 get text      (used to be "Unknown option 'tab'")
+            //
+            // The second is the form our own README, help and skill documents
+            // told agents to use, and it is what a person reaches for — `git
+            // --no-pager log` reads the same way. It failed loudly, which is
+            // better than acting on the wrong tab, but "loudly wrong" is still
+            // wrong when the documentation said to type it.
+            //
+            // Only these five are moved, and only with their value. They are
+            // the options that address a browser rather than describe one, so
+            // they mean the same thing whichever side of the verb they sit;
+            // every other flag before a verb still belongs to the browser
+            // parser. The arity problem the comment above describes is why
+            // this is a fixed list rather than a general rule.
+            for (int j = 1; j < i; ++j) {
+                // Already taken as the previous option's value.
+                if (!argv[j])
+                    continue;
+                const bool addressing =
+                    isOption(argv[j], "--tab") || isOption(argv[j], "--port")
+                    || isOption(argv[j], "--host") || isOption(argv[j], "--token")
+                    || isOption(argv[j], "--auth-token");
+                if (!addressing)
+                    continue;
+                agentArgs << QString::fromLocal8Bit(argv[j]);
+                // --opt=value carries its own value; --opt value takes the next
+                // word, which must not be left behind for the browser parser to
+                // trip over.
+                const bool joined = std::strchr(argv[j], '=') != nullptr;
+                if (!joined && j + 1 < i) {
+                    agentArgs << QString::fromLocal8Bit(argv[j + 1]);
+                    argv[j + 1] = nullptr;
+                }
+                argv[j] = nullptr;
+            }
+            // Compact what is left: parseArgs still runs on this argv, and a
+            // hole in the middle of it is not something QCommandLineParser
+            // survives.
+            int keep = 1;
+            for (int j = 1; j < i; ++j) {
+                if (argv[j])
+                    argv[keep++] = argv[j];
+            }
+            argc = keep;
             argv[argc] = nullptr;
             break;
         }
