@@ -33,24 +33,32 @@ jobs:
             runner: ubuntu-22.04
             qt_host: linux
             qt_arch: linux_gcc_64
+            qt_version: '6.7.3'
           - arch: aarch64
             runner: ubuntu-22.04-arm
             qt_host: linux_arm64
             qt_arch: linux_gcc_arm64
+            # Deliberately newer than x86_64. Qt 6.7.3's arm64 WebEngineCore
+            # links libwebp.so.6, which no supported Ubuntu ships any more —
+            # only Focal does, at libwebp 0.6.1, which carries CVE-2023-4863,
+            # a heap overflow in the WebP decoder that was exploited in the
+            # wild. Shipping that inside a browser to save a version bump is
+            # not a trade worth making.
+            qt_version: '6.9.3'
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
+          version: ${{ matrix.qt_version }}
           host: ${{ matrix.qt_host }}
           target: desktop
           arch: ${{ matrix.qt_arch }}
           modules: qtwebchannel qtwebsockets qtpositioning qtwebengine
           install-deps: true
           cache: true
-          cache-key-prefix: qt-${{ env.QT_VERSION }}-${{ matrix.qt_arch }}
+          cache-key-prefix: qt-${{ matrix.qt_version }}-${{ matrix.qt_arch }}
 
       - name: Install system dependencies
         run: |
