@@ -181,6 +181,19 @@ bool takeFlag(QStringList &args, const QString &name)
 
 QString takeOption(QStringList &args, const QString &name, const QString &fallback = QString())
 {
+    // --name=value first. QCommandLineParser accepts that spelling for every
+    // browser option, so a user who writes --port=9222 out of habit and then
+    // writes --tab=t2 has no reason to expect the second to be ignored — and
+    // ignored is what it was: the value never applied and nothing said so.
+    const QString joined = name + QLatin1Char('=');
+    for (int i = 0; i < args.size(); ++i) {
+        if (!args.at(i).startsWith(joined))
+            continue;
+        const QString value = args.at(i).mid(joined.size());
+        args.removeAt(i);
+        return value;
+    }
+
     const int i = args.indexOf(name);
     if (i < 0 || i + 1 >= args.size())
         return fallback;

@@ -534,4 +534,33 @@ describe('Agent CLI (Suite 8)', () => {
       closeExtraTabs();
     }
   });
+
+  // AGENT-29: --tab works on either side of the verb, and in both spellings.
+  //
+  // It used to work only after the verb. Everything before one was handed to
+  // the browser parser, which has never heard of --tab, so
+  // `anoa --tab t2 get text` died with "Unknown option 'tab'" — and that is
+  // the form the README, the help and the core skill all told agents to type.
+  // --tab=t2 was worse: takeOption did not understand the = spelling at all,
+  // so the value was dropped in silence and the command ran against the wrong
+  // tab.
+  it('--tab is accepted before or after the verb, joined or separate', () => {
+    anoa('eval', "document.title = 'ALPHA'");
+    const t2 = anoa('tab', 'new').out.trim();
+    anoa('eval', "document.title = 'BRAVO'", '--tab', t2);
+    try {
+      const port = String(PORT);
+      // after the verb, separate — the form that always worked
+      assert.equal(run(['eval', 'document.title', '--port', port, '--tab', t2]).out, 'BRAVO');
+      // before the verb, separate — the form the docs used and that failed
+      assert.equal(run(['--tab', t2, '--port', port, 'eval', 'document.title']).out, 'BRAVO');
+      // joined, both sides
+      assert.equal(run([`--tab=${t2}`, `--port=${port}`, 'eval', 'document.title']).out, 'BRAVO');
+      assert.equal(run(['eval', 'document.title', `--port=${port}`, `--tab=${t2}`]).out, 'BRAVO');
+      // and with no --tab at all it is still the active tab
+      assert.equal(run(['eval', 'document.title', '--port', port]).out, 'ALPHA');
+    } finally {
+      closeExtraTabs();
+    }
+  });
 });

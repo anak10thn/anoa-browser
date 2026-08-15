@@ -466,3 +466,19 @@
   failure names ca-certificates, the next names libnss3, and neither is the
   whole list. The Dockerfile's 24 packages are the real answer, and they apply
   equally to the tarball and the AppImage.
+
+- `--tab` only worked AFTER the verb, and the README, help and core skill all
+  documented it BEFORE one. The pre-scan hands everything before the verb to the
+  browser parser, which has never heard of --tab, so the documented idiom died
+  with "Unknown option 'tab'". The five addressing options — --tab, --port,
+  --host, --token, --auth-token — are moved across the verb boundary now,
+  because they name a browser rather than describe one and mean the same thing
+  on either side. Everything else still belongs to whichever side it was typed.
+
+- takeOption did not understand --opt=value at all. QCommandLineParser accepts
+  that spelling for every browser option, so --tab=t2 looked reasonable and was
+  silently dropped: the command ran against the wrong tab and said nothing. It
+  handles both spellings now.
+
+- Reported by a user driving the CLI for real, not by any test. The suites all
+  used the after-the-verb form, which is exactly the half that worked.
