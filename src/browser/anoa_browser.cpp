@@ -951,7 +951,8 @@ static QWidget *inputTarget(QWebEngineView *view)
     return proxy ? proxy : static_cast<QWidget *>(view);
 }
 
-void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId)
+void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId,
+                            Qt::KeyboardModifiers mods)
 {
     QWidget *target = inputTarget(viewForOrActive(tabId));
     if (!target)
@@ -964,17 +965,60 @@ void AnoaBrowser::sendClick(const QPoint &pos, Qt::MouseButton button, const QSt
     // Leading move puts the pointer at the click position so hover/hit-testing
     // state matches a real interaction before the press arrives.
     auto *move = new QMouseEvent(QEvent::MouseMove, posF, posF, globalF,
-                                 Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                                 Qt::NoButton, Qt::NoButton, mods);
     move->setTimestamp(stamp);
     auto *press = new QMouseEvent(QEvent::MouseButtonPress, posF, posF, globalF,
-                                  button, button, Qt::NoModifier);
+                                  button, button, mods);
     press->setTimestamp(stamp + 1);
     auto *release = new QMouseEvent(QEvent::MouseButtonRelease, posF, posF, globalF,
-                                    button, Qt::NoButton, Qt::NoModifier);
+                                    button, Qt::NoButton, mods);
     release->setTimestamp(stamp + 50);
     QCoreApplication::postEvent(target, move);
     QCoreApplication::postEvent(target, press);
     QCoreApplication::postEvent(target, release);
+}
+
+// The three below share everything except the event type and which buttons are
+// reported held, so they post through one helper rather than three copies that
+// would drift.
+static void postMouse(QWidget *target, QEvent::Type type, const QPoint &pos,
+                      Qt::MouseButton button, Qt::MouseButtons held,
+                      Qt::KeyboardModifiers mods)
+{
+    if (!target)
+        return;
+    const QPointF posF(pos);
+    const QPointF globalF(target->mapToGlobal(pos));
+    auto *ev = new QMouseEvent(type, posF, posF, globalF, button, held, mods);
+    // Same reason as sendClick: a zero timestamp reads as "same instant as the
+    // last one", and a stream of those is a multi-click, not a drag.
+    ev->setTimestamp(static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
+    QCoreApplication::postEvent(target, ev);
+}
+
+void AnoaBrowser::sendMouseMove(const QPoint &pos, Qt::MouseButtons heldButtons,
+                                Qt::KeyboardModifiers mods, const QString &tabId)
+{
+    // Qt reports no *triggering* button on a move — the buttons still down go
+    // in the third argument. Passing the held set as the trigger instead makes
+    // Chromium read every move as a fresh press.
+    postMouse(inputTarget(viewForOrActive(tabId)), QEvent::MouseMove, pos,
+              Qt::NoButton, heldButtons, mods);
+}
+
+void AnoaBrowser::sendMouseDown(const QPoint &pos, Qt::MouseButton button,
+                                Qt::KeyboardModifiers mods, const QString &tabId)
+{
+    postMouse(inputTarget(viewForOrActive(tabId)), QEvent::MouseButtonPress, pos,
+              button, button, mods);
+}
+
+void AnoaBrowser::sendMouseUp(const QPoint &pos, Qt::MouseButton button,
+                              Qt::KeyboardModifiers mods, const QString &tabId)
+{
+    // The button is released, so it is the trigger but no longer held.
+    postMouse(inputTarget(viewForOrActive(tabId)), QEvent::MouseButtonRelease, pos,
+              button, Qt::NoButton, mods);
 }
 
 void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY, const QString &tabId)
@@ -984,12 +1028,38 @@ void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY, const QString &
         return;
     const QPointF posF(pos);
     const QPointF globalF(target->mapToGlobal(pos));
+    const auto stamp = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
+
+    auto post = [&](const QPoint &angle, const QPoint &pixels, Qt::ScrollPhase phase,
+                    quint64 at) {
+        auto *wheel = new QWheelEvent(posF, globalF, pixels, angle,
+                                      Qt::NoButton, Qt::NoModifier, phase, false);
+        wheel->setTimestamp(at);
+        QCoreApplication::postEvent(target, wheel);
+    };
+
+#ifdef Q_OS_MACOS
+    // macOS has no phaseless wheel. Qt delivers real scroll input there as a
+    // gesture — begin, update, end — and QtWebEngine maps Qt::NoScrollPhase to
+    // a Blink phase Chromium drops on the floor. The event was posted, accepted
+    // and discarded: /render/scroll answered "scrolled", the page never saw a
+    // wheel event at all, and nothing moved. Verified against Linux/aarch64,
+    // where the same phaseless event scrolls correctly.
+    //
+    // pixelDelta is what a phased event is steered by, and it has to be filled
+    // in or the gesture is a no-op with a different shape. angleDelta/2 is the
+    // ratio measured on Linux — 600 angle units moved the page 300 px — so the
+    // two platforms scroll the same distance for the same request.
+    const QPoint angle(0, angleDeltaY);
+    const QPoint pixels(0, angleDeltaY / 2);
+    post(QPoint(), QPoint(), Qt::ScrollBegin, stamp);
+    post(angle, pixels, Qt::ScrollUpdate, stamp + 1);
+    post(QPoint(), QPoint(), Qt::ScrollEnd, stamp + 2);
+#else
     // Null pixelDelta = classic notched wheel; angleDelta is in 1/8 degree,
     // one wheel notch = 120.
-    auto *wheel = new QWheelEvent(posF, globalF, QPoint(), QPoint(0, angleDeltaY),
-                                  Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-    wheel->setTimestamp(static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
-    QCoreApplication::postEvent(target, wheel);
+    post(QPoint(0, angleDeltaY), QPoint(), Qt::NoScrollPhase, stamp);
+#endif
 }
 
 void AnoaBrowser::sendText(const QString &text, const QString &tabId)
@@ -1007,7 +1077,8 @@ void AnoaBrowser::sendText(const QString &text, const QString &tabId)
     }
 }
 
-bool AnoaBrowser::sendKey(const QString &keyName, const QString &tabId)
+bool AnoaBrowser::sendKey(const QString &keyName, const QString &tabId,
+                          Qt::KeyboardModifiers mods)
 {
     struct NamedKey {
         const char *name;
@@ -1029,22 +1100,56 @@ bool AnoaBrowser::sendKey(const QString &keyName, const QString &tabId)
         {"end", Qt::Key_End, ""},
         {"pageup", Qt::Key_PageUp, ""},
         {"pagedown", Qt::Key_PageDown, ""},
+        {"insert", Qt::Key_Insert, ""},
+    };
+
+    QWidget *target = inputTarget(viewForOrActive(tabId));
+    if (!target)
+        return false;
+
+    // A shortcut carries no text. Chromium turns text into an insertion, so
+    // Ctrl+A with text "a" both selects all and types an "a".
+    const bool isShortcut = mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+
+    auto post = [&](Qt::Key key, const QString &text) {
+        const QString payload = isShortcut ? QString() : text;
+        QCoreApplication::postEvent(target,
+            new QKeyEvent(QEvent::KeyPress, key, mods, payload));
+        QCoreApplication::postEvent(target,
+            new QKeyEvent(QEvent::KeyRelease, key, mods, payload));
     };
 
     const QString wanted = keyName.toLower();
     for (const NamedKey &k : keys) {
         if (wanted == QLatin1String(k.name)) {
-            QWidget *target = inputTarget(viewForOrActive(tabId));
-            if (!target)
-                return false;
-            QCoreApplication::postEvent(target,
-                new QKeyEvent(QEvent::KeyPress, k.key, Qt::NoModifier,
-                              QString::fromLatin1(k.text)));
-            QCoreApplication::postEvent(target,
-                new QKeyEvent(QEvent::KeyRelease, k.key, Qt::NoModifier,
-                              QString::fromLatin1(k.text)));
+            post(k.key, QString::fromLatin1(k.text));
             return true;
         }
     }
+
+    // f1..f12. Spelled out rather than tabulated because the enum is contiguous
+    // and twelve more table rows would say less than this does.
+    if (wanted.size() >= 2 && wanted.at(0) == QLatin1Char('f')) {
+        bool ok = false;
+        const int n = QStringView{wanted}.mid(1).toInt(&ok);
+        if (ok && n >= 1 && n <= 12) {
+            post(static_cast<Qt::Key>(Qt::Key_F1 + n - 1), QString());
+            return true;
+        }
+    }
+
+    // A single printable character, which is what a shortcut needs: "a" alone
+    // is better served by sendText, but Ctrl+"a" has no other way in.
+    if (keyName.size() == 1) {
+        const QChar ch = keyName.at(0);
+        if (ch.isPrint()) {
+            // Qt's key codes for letters and digits are their uppercase ASCII
+            // values; anything else printable maps to its own code point.
+            const QChar upper = ch.toUpper();
+            post(static_cast<Qt::Key>(upper.unicode()), keyName);
+            return true;
+        }
+    }
+
     return false;
 }
