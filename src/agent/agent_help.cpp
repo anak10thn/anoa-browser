@@ -31,6 +31,7 @@ const Group kGroups[] = {
     --auth-token <secret>           require this bearer token on CDP
     --embed-origin <origin>         let this origin iframe the live view at
                                     /render (repeatable; default same-origin)
+    --download-dir <dir>            where downloads land (default: Downloads)
     --config <file>                 JSON or INI file of the above
     -v, --version                   print the version and exit
 

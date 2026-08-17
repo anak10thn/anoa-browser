@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>anoa — install and CLI reference</title>
+<meta name="description" content="How to install anoa on macOS, Linux, Windows and in a container, and every command and option it takes.">
+<link rel="icon" href="images/anoa-mascot.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="images/anoa-mascot.png" alt="">anoa</a>
+    <div class="links">
+      <a class="opt" href="index.html#watch">Live view</a>
+      <a class="opt" href="index.html#terminal">Terminal</a>
+      <a href="docs.html">Docs</a>
+      <a href="https://github.com/porcupine-md/anoa-browser">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <div class="docs">
+
+    <aside class="toc">
+      <h4>Install</h4>
+      <ul>
+        <li><a href="#macos">macOS</a></li>
+        <li><a href="#linux">Linux</a></li>
+        <li><a href="#windows">Windows</a></li>
+        <li><a href="#container">Container</a></li>
+        <li><a href="#source">From source</a></li>
+      </ul>
+      <h4>Running it</h4>
+      <ul>
+        <li><a href="#start">Starting a browser</a></li>
+        <li><a href="#reaching">Reaching one</a></li>
+        <li><a href="#sessions">Sessions and profiles</a></li>
+        <li><a href="#terminal-opts">Terminal viewer</a></li>
+      </ul>
+      <h4>Commands</h4>
+      <ul>
+        <li><a href="#tabs">Tabs</a></li>
+        <li><a href="#navigate">Navigate</a></li>
+        <li><a href="#inspect">Inspect</a></li>
+        <li><a href="#interact">Interact</a></li>
+        <li><a href="#capture">Capture</a></li>
+        <li><a href="#state">State</a></li>
+        <li><a href="#debug">Debug</a></li>
+        <li><a href="#agents">Agents</a></li>
+        <li><a href="#exit">Output and exit codes</a></li>
+      </ul>
+    </aside>
+
+    <article>
+
+      <section>
+        <p class="eyebrow">Reference</p>
+        <h1 style="font-size:clamp(30px,4.2vw,42px);margin-bottom:14px">Install, and every option</h1>
+        <p class="lede" style="font-size:18px">How to get anoa onto each platform, and the
+        complete command line — every flag the browser takes, every command you can send it.</p>
+        <div class="note" style="margin-top:26px">
+          <p>The binary carries this reference too. <code>anoa help</code> prints it grouped,
+          <code>anoa help &lt;group&gt;</code> prints one section, and
+          <code>anoa skills get commands</code> prints the whole thing in a form meant to be
+          pasted into an agent's context rather than read.</p>
+        </div>
+      </section>
+
+      <!-- ── INSTALL ────────────────────────────────────────────────────── -->
+
+      <section id="macos">
+        <h2>macOS — Homebrew</h2>
+        <p>One universal build serves both Intel and Apple Silicon.</p>
+<pre class="term"><span class="p">$</span> brew tap porcupine-md/tap
+<span class="p">$</span> brew trust porcupine-md/tap
+<span class="p">$</span> brew install --cask anoa</pre>
+        <p style="margin-top:16px">It installs a single <code>anoa</code> shim on your
+        <code>PATH</code>. That one executable is the whole product — the terminal viewer is
+        its <code>terminal</code> subcommand, not a separate file. The app is Developer ID
+        signed and notarized, so it opens with no Gatekeeper warnings.</p>
+        <h3>Upgrading</h3>
+        <p><code>brew update</code> first, or the tap will not have seen the newest release.</p>
+<pre class="term"><span class="p">$</span> brew update
+<span class="p">$</span> brew upgrade --cask anoa</pre>
+      </section>
+
+      <section id="linux">
+        <h2>Linux</h2>
+
+        <h3>AppImage — recommended</h3>
+        <p>One file. Download it, make it executable, run it. No unpacking, no install,
+        no root.</p>
+<pre class="term"><span class="p">$</span> chmod +x anoa-x86_64.AppImage          <span class="c"># or anoa-aarch64.AppImage</span>
+<span class="p">$</span> ./anoa-x86_64.AppImage --headless --port 9222
+<span class="p">$</span> ./anoa-x86_64.AppImage open example.com</pre>
+        <p style="margin-top:16px">Built for <strong>x86_64</strong> and
+        <strong>aarch64</strong> against the same Qt, so both run on anything with
+        <strong>glibc 2.35 or newer</strong> — Ubuntu 22.04, Debian 12 and later, which is
+        what an ARM board usually runs. It carries its own FUSE, so it does not need the
+        <code>libfuse2</code> package Ubuntu dropped in 22.04.</p>
+        <p><a href="https://github.com/porcupine-md/anoa-browser/releases/latest">Download the latest release →</a></p>
+
+        <h3>Install script — no root</h3>
+        <p>Installs the portable bundle under your home directory and puts the launcher on
+        your <code>PATH</code>. Re-running it upgrades in place.</p>
+<pre class="term"><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/porcupine-md/anoa-browser/master/scripts/install-linux.sh | bash</pre>
+<pre class="term"><span class="o">~/.local/lib/anoa/     the unpacked bundle — self-contained, nothing system-wide
+~/.local/bin/anoa  ->  ../lib/anoa/anoa.sh</span></pre>
+        <p style="margin-top:16px">The symlink points at the <em>launcher</em>, never at the
+        raw binary: the launcher sets up the environment the bundled libraries need. It tells
+        you if <code>~/.local/bin</code> is not on your <code>PATH</code>.</p>
+
+        <h3>Homebrew on Linux</h3>
+<pre class="term"><span class="p">$</span> brew tap porcupine-md/tap
+<span class="p">$</span> brew install anoa</pre>
+      </section>
+
+      <section id="windows">
+        <h2>Windows</h2>
+        <p>Download <code>anoa-windows-x86_64.zip</code> from the releases page, unzip it, and
+        run <code>anoa.exe</code>.</p>
+<pre class="term"><span class="p">&gt;</span> anoa.exe --headless --port 9222
+<span class="p">&gt;</span> anoa.exe open example.com</pre>
+        <div class="note">
+          <p><strong>Everything works except <code>anoa terminal</code>.</strong> The terminal
+          viewer needs termios and <code>select()</code> on stdin, which have no MSVC
+          equivalent, so those sources are left out of the Windows build entirely and the
+          binary reports the unsupported platform if you ask for them.</p>
+        </div>
+      </section>
+
+      <section id="container">
+        <h2>Container</h2>
+<pre class="term"><span class="p">$</span> docker run -d --name anoa -p 9222:9222 ghcr.io/porcupine-md/anoa-browser
+<span class="p">$</span> docker exec anoa anoa open example.com
+<span class="p">$</span> docker exec anoa anoa snapshot -i
+<span class="p">$</span> docker exec anoa anoa click @e1</pre>
+        <p style="margin-top:16px">Publish <code>9224</code> as well if a CDP client outside
+        the container needs to attach — that is where the WebSocket ends up. See
+        <a href="#reaching">the port layout</a>.</p>
+      </section>
+
+      <section id="source">
+        <h2>From source</h2>
+        <p>Prebuilt packages are above; building it yourself needs Qt 6.4 or newer with the
+        WebEngine modules, and CMake. Prerequisites, targets, architecture and the release
+        process are in
+        <a href="https://github.com/porcupine-md/anoa-browser/blob/master/docs/BUILDING.md">docs/BUILDING.md</a>.</p>
+<pre class="term"><span class="p">$</span> cmake -B build -DCMAKE_BUILD_TYPE=Release
+<span class="p">$</span> cmake --build build -j</pre>
+      </section>
+
+      <!-- ── RUNNING ────────────────────────────────────────────────────── -->
+
+      <section id="start">
+        <h2>Starting a browser</h2>
+        <p>The browser is the session. Every command in the reference below attaches to one
+        that is already running and leaves it running, so the page, the cookies and the scroll
+        position survive between them.</p>
+<pre class="term"><span class="p">$</span> anoa --headless --port 9222 &amp;</pre>
+
+        <table class="ref">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>-p, --port &lt;n&gt;</code></td><td>CDP port, default 9222. Also uses <code>n+1</code> and <code>n+2</code> — see <a href="#reaching">the port layout</a></td></tr>
+            <tr><td><code>--headless</code></td><td>No window, and no display server needed</td></tr>
+            <tr><td><code>--no-sandbox</code></td><td>Disable the Chromium sandbox. Usually needed inside containers</td></tr>
+            <tr><td><code>--width &lt;px&gt;</code><br><code>--height &lt;px&gt;</code></td><td>Viewport size, default 1280×720</td></tr>
+            <tr><td><code>--profile &lt;name&gt;</code></td><td>A named profile with its own cookies and storage</td></tr>
+            <tr><td><code>--profile-dir &lt;dir&gt;</code></td><td>Where profiles live</td></tr>
+            <tr><td><code>--ephemeral</code></td><td>Keep nothing: no cookies, no storage, gone when the process ends</td></tr>
+            <tr><td><code>--download-dir &lt;dir&gt;</code></td><td>Where downloads are saved. Default is the platform's Downloads folder</td></tr>
+            <tr><td><code>--extension &lt;path&gt;</code></td><td>Load an unpacked Chromium extension (manifest v2). Repeatable</td></tr>
+            <tr><td><code>--auth-token &lt;secret&gt;</code></td><td>Require this bearer token on CDP and on the HTTP endpoints</td></tr>
+            <tr><td><code>--embed-origin &lt;origin&gt;</code></td><td>Let this origin put the live view at <code>/render</code> in an iframe, and read the JSON endpoints. Repeatable; <code>'*'</code> allows any. Default is same-origin only</td></tr>
+            <tr><td><code>--config &lt;file&gt;</code></td><td>A JSON or INI file of the options above</td></tr>
+            <tr><td><code>-v, --version</code></td><td>Print the version and exit</td></tr>
+          </tbody>
+        </table>
+
+        <div class="note">
+          <p><strong>The live view forwards keystrokes, not just pixels.</strong> A page that
+          can frame it can watch a logged-in session and act inside it, which is why
+          <code>--embed-origin</code> exists and why the default refuses every origin but its
+          own.</p>
+          <p>Note too that <code>--auth-token</code> is off by default, and the
+          <code>/render/*</code> endpoints carry no origin check of their own. On a shared or
+          untrusted machine, set a token.</p>
+        </div>
+      </section>
+
+      <section id="reaching">
+        <h2>Reaching a running browser</h2>
+        <p>Agent commands take these wherever they appear — before the verb or after it, both
+        work.</p>
+        <table class="ref">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>--port &lt;n&gt;</code></td><td>Where it is listening, default 9222</td></tr>
+            <tr><td><code>--host &lt;h&gt;</code></td><td>Which host, default 127.0.0.1</td></tr>
+            <tr><td><code>--token &lt;secret&gt;</code></td><td>Its bearer token, if it demands one</td></tr>
+            <tr><td><code>--tab &lt;id&gt;</code></td><td>Which tab to act on. Default is the active one</td></tr>
+          </tbody>
+        </table>
+
+        <h3>The port layout</h3>
+        <p>One number gives three ports.</p>
+        <table class="ref">
+          <thead><tr><th>Port</th><th>What listens there</th></tr></thead>
+          <tbody>
+            <tr><td><code>9222</code></td><td>Discovery (<code>/json</code>, <code>/json/version</code>, <code>/json/list</code>) and the <code>/render/*</code> endpoints. This is what you point a client at</td></tr>
+            <tr><td><code>9223</code></td><td>Chromium's own debugging port, kept internal. It also serves the DevTools frontend</td></tr>
+            <tr><td><code>9224</code></td><td>The CDP proxy. The WebSocket a client is handed lands here — it multiplexes sessions and checks the token</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sessions">
+        <h2>Sessions and profiles</h2>
+        <p>Cookies and logins are kept between runs, in a profile named <code>default</code>
+        under your platform's application data directory. A browser that forgot every login
+        would not be one you could drive across separate commands.</p>
+<pre class="term"><span class="c"># its own cookie jar and storage, kept on disk</span>
+<span class="p">$</span> anoa --headless --profile work
+
+<span class="c"># keep profiles somewhere else</span>
+<span class="p">$</span> anoa --headless --profile-dir /srv/anoa-profiles
+
+<span class="c"># keep nothing at all</span>
+<span class="p">$</span> anoa --headless --ephemeral</pre>
+        <p style="margin-top:16px">Tabs share one jar unless asked otherwise, which is what
+        makes two logins to the same site possible at once — see
+        <code>tab new --profile</code> and <code>--isolated</code> below.</p>
+      </section>
+
+      <section id="terminal-opts">
+        <h2>Terminal viewer</h2>
+        <p><code>anoa terminal</code> renders the live page in your terminal and forwards your
+        clicks, scrolls and typing back to it. These options are CLI-only — they are never
+        read from a config file — and they are named apart from <code>--port</code> and
+        <code>--auth-token</code> so no flag changes meaning between modes.</p>
+        <table class="ref">
+          <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>--term-host &lt;host&gt;</code></td><td>Host of the anoa to view, default 127.0.0.1</td></tr>
+            <tr><td><code>--term-port &lt;n&gt;</code></td><td>Port of the anoa to view, default 9222</td></tr>
+            <tr><td><code>--term-token &lt;secret&gt;</code></td><td>Bearer token for the viewed endpoint</td></tr>
+            <tr><td><code>--cdp &lt;url&gt;</code></td><td>Attach to any external CDP endpoint instead — <code>http://</code>, <code>https://</code> or <code>ws://</code></td></tr>
+            <tr><td><code>--fps &lt;n&gt;</code></td><td>Refresh rate, 1–120, default 30</td></tr>
+            <tr><td><code>--gfx &lt;mode&gt;</code></td><td><code>auto</code> · <code>halfblock</code> · <code>iterm</code> · <code>kitty</code></td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:18px">Given no target at all, <code>anoa terminal</code> attaches
+        to a browser already on 9222, and hosts its own only when there is none.</p>
+      </section>
+
+      <!-- ── COMMANDS ───────────────────────────────────────────────────── -->
+
+      <section id="tabs">
+        <h2>Tabs</h2>
+<pre class="term"><span class="p">$</span> anoa tab new [url]                <span class="o">open a tab, print its id</span>
+      --name &lt;name&gt;               <span class="o">call it something; --tab takes it after</span>
+      --profile &lt;name&gt;            <span class="o">give it its own persistent cookies</span>
+      --isolated                  <span class="o">a throwaway jar, gone with the tab</span>
+<span class="p">$</span> anoa tab list                     <span class="o">every tab; * marks the active one</span>
+<span class="p">$</span> anoa tab select &lt;id&gt;              <span class="o">make a tab the active one</span>
+<span class="p">$</span> anoa tab close &lt;id&gt;               <span class="o">close it (the last one cannot be closed)</span></pre>
+        <p style="margin-top:16px"><code>--tab</code> takes an id or a name, so
+        <code>--tab search</code> and <code>--tab t2</code> can be the same tab. A name is an
+        alias; the id keeps working. Every other command takes <code>--tab</code> and acts on
+        the active tab without it, so <code>anoa --tab t2 get text</code> reads tab 2 while
+        tab 1 carries on with its own work.</p>
+      </section>
+
+      <section id="navigate">
+        <h2>Navigate</h2>
+<pre class="term"><span class="p">$</span> anoa open &lt;url&gt;                   <span class="o">go to a url (scheme optional)</span>
+<span class="p">$</span> anoa back | forward | reload      <span class="o">move through history</span>
+<span class="p">$</span> anoa wait --load                  <span class="o">wait for the page to finish loading</span>
+<span class="p">$</span> anoa wait --selector &lt;css&gt;        <span class="o">wait for an element to appear</span>
+<span class="p">$</span> anoa wait --ms &lt;n&gt;                <span class="o">wait a fixed time</span>
+<span class="p">$</span> anoa wait --text "&lt;text&gt;"         <span class="o">wait for text to appear</span>
+<span class="p">$</span> anoa wait --url "&lt;fragment&gt;"      <span class="o">wait for the url to contain something</span>
+<span class="p">$</span> anoa wait --fn "&lt;js&gt;"             <span class="o">wait for a JS expression to be truthy</span>
+<span class="p">$</span> anoa wait &lt;css&gt; --state hidden    <span class="o">wait for an element to go away</span>
+      --timeout &lt;ms&gt;              <span class="o">give up after this long (default 15000)</span></pre>
+        <p style="margin-top:16px">A bare argument is read as a duration when it is a number
+        and as a selector otherwise, so <code>anoa wait 500</code> and
+        <code>anoa wait "#results"</code> both do what they look like.</p>
+      </section>
+
+      <section id="inspect">
+        <h2>Inspect</h2>
+<pre class="term"><span class="p">$</span> anoa snapshot                     <span class="o">page outline + interactive elements with refs</span>
+<span class="p">$</span> anoa snapshot -i                  <span class="o">interactive elements only</span>
+<span class="p">$</span> anoa find role &lt;role&gt;             <span class="o">locate by role (button, link, textbox, …)</span>
+<span class="p">$</span> anoa find text &lt;text&gt;             <span class="o">by visible text, deepest match wins</span>
+<span class="p">$</span> anoa find selector &lt;css&gt;          <span class="o">by CSS, returned as refs</span>
+      --nth &lt;n&gt;                   <span class="o">keep only the nth match (1-based)</span>
+<span class="p">$</span> anoa get text [&lt;target&gt;]          <span class="o">visible text of the page or one element</span>
+<span class="p">$</span> anoa get html &lt;target&gt;            <span class="o">outer HTML</span>
+<span class="p">$</span> anoa get value &lt;target&gt;           <span class="o">current form value</span>
+<span class="p">$</span> anoa get attr &lt;target&gt; &lt;name&gt;     <span class="o">one attribute</span>
+<span class="p">$</span> anoa eval &lt;js&gt;                    <span class="o">evaluate an expression in the page</span>
+<span class="p">$</span> anoa status                       <span class="o">what the browser is attached to right now</span></pre>
+        <p style="margin-top:16px"><code>&lt;target&gt;</code> is a ref from a snapshot
+        (<code>@e2</code>) or any CSS selector. <code>snapshot</code> prints refs first,
+        because the ref is what the next command needs:</p>
+<pre class="term"><span class="o">  @e1   link       Documentation
+  @e3   textbox    Search  [required]
+  @e7   button     Sign in</span></pre>
+      </section>
+
+      <section id="interact">
+        <h2>Interact</h2>
+<pre class="term"><span class="p">$</span> anoa click &lt;target&gt;               <span class="o">click, hit-tested — fails if something covers it</span>
+<span class="p">$</span> anoa fill &lt;target&gt; &lt;text&gt;         <span class="o">set a field's value, fire input/change</span>
+<span class="p">$</span> anoa type &lt;text&gt;                  <span class="o">type into whatever has focus</span>
+<span class="p">$</span> anoa upload &lt;target&gt; &lt;file...&gt;    <span class="o">put files into a file input</span>
+<span class="p">$</span> anoa press &lt;key&gt;                  <span class="o">Enter, Tab, Escape, ArrowDown, …</span>
+<span class="p">$</span> anoa scroll [--up] [--by &lt;px&gt;]    <span class="o">scroll the page</span>
+<span class="p">$</span> anoa scroll --top | --bottom      <span class="o">jump to either end</span>
+<span class="p">$</span> anoa mouse move &lt;x&gt; &lt;y&gt;           <span class="o">move the pointer</span>
+<span class="p">$</span> anoa mouse down | up [x] [y]      <span class="o">press or release, for drags</span>
+<span class="p">$</span> anoa mouse wheel &lt;dy&gt; [x] [y]     <span class="o">wheel at a position</span></pre>
+        <div class="note">
+          <p><strong>Clicks are hit-tested.</strong> A button underneath a consent banner is
+          reported rather than clicked through, so you find out the click did not land instead
+          of finding out later.</p>
+        </div>
+      </section>
+
+      <section id="capture">
+        <h2>Capture</h2>
+<pre class="term"><span class="p">$</span> anoa screenshot [file]            <span class="o">PNG of the viewport (default screenshot.png)</span>
+<span class="p">$</span> anoa pdf [file]                   <span class="o">PDF of the page (default page.pdf)</span></pre>
+      </section>
+
+      <section id="state">
+        <h2>State — cookies, storage and emulation</h2>
+<pre class="term"><span class="p">$</span> anoa cookies                      <span class="o">list cookies</span>
+<span class="p">$</span> anoa cookies set &lt;name&gt; &lt;value&gt;   <span class="o">set one, scoped to the current page</span>
+      --url &lt;url&gt;                 <span class="o">scope it somewhere else instead</span>
+<span class="p">$</span> anoa cookies clear                <span class="o">clear them all</span>
+
+<span class="p">$</span> anoa storage local                <span class="o">everything in localStorage</span>
+<span class="p">$</span> anoa storage local &lt;key&gt;          <span class="o">one key</span>
+<span class="p">$</span> anoa storage local set &lt;k&gt; &lt;v&gt;    <span class="o">write one</span>
+<span class="p">$</span> anoa storage local remove &lt;k&gt;     <span class="o">delete one</span>
+<span class="p">$</span> anoa storage local clear          <span class="o">empty it</span>
+<span class="p">$</span> anoa storage session ...          <span class="o">the same, for sessionStorage</span>
+
+<span class="p">$</span> anoa set viewport &lt;w&gt; &lt;h&gt; [scale] <span class="o">resize the page</span>
+<span class="p">$</span> anoa set device [name]            <span class="o">a preset; no name lists them</span>
+<span class="p">$</span> anoa set geo &lt;lat&gt; &lt;lng&gt;          <span class="o">override geolocation</span>
+<span class="p">$</span> anoa set offline [on|off]         <span class="o">cut the page off from the network</span>
+<span class="p">$</span> anoa set headers '&lt;json&gt;'         <span class="o">extra HTTP headers on every request</span>
+<span class="p">$</span> anoa set media dark|light         <span class="o">emulate prefers-color-scheme</span></pre>
+      </section>
+
+      <section id="debug">
+        <h2>Debug — what the page did</h2>
+<pre class="term"><span class="p">$</span> anoa console [--level &lt;lvl&gt;]      <span class="o">console output, newest last</span>
+<span class="p">$</span> anoa errors                       <span class="o">uncaught exceptions and rejections</span>
+<span class="p">$</span> anoa network                      <span class="o">fetch/XHR the page made: method, status, ms</span>
+      --clear                     <span class="o">forget what has been recorded so far</span></pre>
+        <div class="note">
+          <p>These are recorded <em>inside the page</em>, so they cover what happened before
+          the command ran — a one-shot process could never have subscribed in time.</p>
+          <p>The buffer starts empty on every page load and holds the last 500 entries. Only
+          <code>fetch</code> and XHR are seen; document and subresource loads are not.</p>
+        </div>
+      </section>
+
+      <section id="agents">
+        <h2>Agents</h2>
+<pre class="term"><span class="p">$</span> anoa skills list                  <span class="o">what skill documents this binary carries</span>
+<span class="p">$</span> anoa skills get core              <span class="o">the core workflow, for an agent to read</span>
+<span class="p">$</span> anoa skills get commands          <span class="o">every command, with its arguments</span>
+<span class="p">$</span> anoa close                        <span class="o">ask the browser to exit</span></pre>
+        <p style="margin-top:16px">The skill documents are printed straight to stdout, meant
+        to be pasted into a context window rather than read on a screen.</p>
+      </section>
+
+      <section id="exit">
+        <h2>Output and exit codes</h2>
+        <p>Add <code>--json</code> to any command for machine-readable output.</p>
+        <table class="ref">
+          <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>0</code></td><td>OK</td></tr>
+            <tr><td><code>1</code></td><td>The command failed</td></tr>
+            <tr><td><code>2</code></td><td>Usage error</td></tr>
+            <tr><td><code>3</code></td><td>No browser listening</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:20px"><code>anoa help &lt;group&gt;</code> prints one section on its
+        own: <code>browser</code>, <code>navigate</code>, <code>inspect</code>,
+        <code>interact</code>, <code>state</code>, <code>debug</code>, <code>capture</code>,
+        <code>agents</code>.</p>
+        <div class="note">
+          <p>The HTTP endpoints — screenshots, the MJPEG stream, input injection and the live
+          view — are documented in the
+          <a href="https://github.com/porcupine-md/anoa-browser#web-render-endpoints">README</a>.</p>
+        </div>
+      </section>
+
+    </article>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>Named after the <a href="https://en.wikipedia.org/wiki/Anoa">anoa</a>, a dwarf
+    buffalo from Sulawesi. Small, and not to be underestimated.</p>
+    <div class="links">
+      <a href="index.html">Home</a>
+      <a href="https://github.com/porcupine-md/anoa-browser">GitHub</a>
+      <a href="https://github.com/porcupine-md/anoa-browser/releases">Releases</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
