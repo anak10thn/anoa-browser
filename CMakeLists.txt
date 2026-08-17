@@ -179,8 +179,16 @@ else()
     target_compile_options(anoa PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# RPATH for portable Linux distribution (binary finds ./lib at runtime)
-if(UNIX AND NOT APPLE)
+# RPATH for portable Linux distribution (binary finds ./lib at runtime).
+#
+# This is the right answer for the tarball and the AppImage, which carry their
+# own Qt in ./lib beside the binary — and exactly the wrong one for a package
+# manager. USE_LINK_RPATH FALSE replaces the link-time paths rather than adding
+# to them, so a build against Qt at an absolute path (Nix, or a distro's own
+# packaging) would install a binary whose RPATH names one directory that does
+# not contain Qt, and it would not start. Packagers turn it off.
+option(PORTABLE_RPATH "Set the installed RPATH to \$ORIGIN/lib, for a self-contained bundle" ON)
+if(UNIX AND NOT APPLE AND PORTABLE_RPATH)
     set_target_properties(anoa PROPERTIES
         INSTALL_RPATH "$ORIGIN/lib"
         BUILD_RPATH "$ORIGIN/lib"

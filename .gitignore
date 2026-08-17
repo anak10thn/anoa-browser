@@ -47,3 +47,7 @@ node_modules
 # clangd's index, created by any editor using the compile_commands.json that
 # CMAKE_EXPORT_COMPILE_COMMANDS writes into build/
 .cache/
+
+# nix build output symlink
+result
+result-*

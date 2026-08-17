@@ -32,6 +32,7 @@
       <ul>
         <li><a href="#macos">macOS</a></li>
         <li><a href="#linux">Linux</a></li>
+        <li><a href="#nix">Nix</a></li>
         <li><a href="#windows">Windows</a></li>
         <li><a href="#container">Container</a></li>
         <li><a href="#source">From source</a></li>
@@ -119,6 +120,29 @@
         <h3>Homebrew on Linux</h3>
 <pre class="term"><span class="p">$</span> brew tap porcupine-md/tap
 <span class="p">$</span> brew install anoa</pre>
+      </section>
+
+      <section id="nix">
+        <h2>Nix</h2>
+        <p>A flake, so this needs nothing installed beforehand:</p>
+<pre class="term"><span class="p">$</span> nix run github:porcupine-md/anoa-browser -- --headless --port 9222
+<span class="p">$</span> nix run github:porcupine-md/anoa-browser -- open example.com</pre>
+        <p style="margin-top:16px">Or install it into a profile:</p>
+<pre class="term"><span class="p">$</span> nix profile install github:porcupine-md/anoa-browser</pre>
+        <h3>In your own flake</h3>
+<pre class="term"><span class="c"># flake.nix</span>
+inputs.anoa.url = <b>"github:porcupine-md/anoa-browser"</b>;
+
+<span class="c"># then, in a module or a devShell</span>
+environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
+        <p style="margin-top:16px"><code>nix develop</code> gives a shell with Qt, CMake, Node
+        and Python — everything the build and the test suites want.</p>
+        <div class="note">
+          <p>Built for <code>x86_64-linux</code>, <code>aarch64-linux</code> and
+          <code>aarch64-darwin</code>. <strong>Intel Macs are missing</strong> because nixpkgs
+          does not build <code>qt6.qtwebengine</code> for <code>x86_64-darwin</code> — the
+          Homebrew cask is universal and covers them.</p>
+        </div>
       </section>
 
       <section id="windows">

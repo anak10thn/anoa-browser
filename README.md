@@ -151,6 +151,35 @@ install-linux.sh --prefix /opt/anoa   # somewhere other than ~/.local
 install-linux.sh --uninstall          # remove it again
 ```
 
+### Nix
+
+A flake, so `nix run` needs nothing installed beforehand:
+
+```bash
+nix run github:porcupine-md/anoa-browser -- --headless --port 9222
+nix run github:porcupine-md/anoa-browser -- open example.com
+```
+
+Or install it into a profile, or bring it into your own flake:
+
+```bash
+nix profile install github:porcupine-md/anoa-browser
+```
+
+```nix
+# flake.nix
+inputs.anoa.url = "github:porcupine-md/anoa-browser";
+# then, in a module or a devShell
+environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];
+```
+
+`nix develop` gives a shell with Qt, CMake, Node and Python — everything the
+build and the test suites want.
+
+Built for `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`. Intel Macs are
+missing because nixpkgs does not build `qt6.qtwebengine` for `x86_64-darwin`;
+the Homebrew cask above is universal and covers them.
+
 ### Linux (portable tarball)
 
 The release tarball is self-contained: one executable, every shared library it needs under `lib/`, its resources and translations, plus a launcher script that wires them together. Terminal mode is a subcommand of that executable, so the tarball contains no second binary.
