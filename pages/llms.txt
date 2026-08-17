@@ -1,0 +1,112 @@
+# anoa
+
+> A real browser that takes commands. anoa is Chromium in one binary, driven from a shell, an HTTP endpoint, or any CDP client. There is no driver to install alongside it and no headless-versus-real distinction to reason about — `--headless` is a flag on the same executable.
+
+The browser is the session. Every command attaches to a browser that is already
+running and leaves it running, so the page, the cookies and the scroll position
+survive between commands. That is what makes it usable one command at a time, by
+a process that starts and exits, rather than only from inside a long-lived script.
+
+`snapshot` returns refs (`@e1`, `@e2`) that later commands target, and clicks are
+hit-tested — a button underneath a consent banner is reported rather than clicked
+through. Both exist because the caller cannot see the screen.
+
+Platforms: macOS (universal), Linux (x86_64 and aarch64, glibc 2.35+), Windows.
+`anoa terminal` is POSIX-only. Latest release: v0.11.0.
+
+## Start here
+
+- [Install and CLI reference](/docs.html): every install path, every flag the browser takes, every command you can send it
+- [Home](/): what it is, with screenshots of the live view and the terminal viewer
+- [README](https://github.com/porcupine-md/anoa-browser#readme): the same ground plus the HTTP endpoints and CDP details
+- [Releases](https://github.com/porcupine-md/anoa-browser/releases): prebuilt packages for every platform
+- [Building from source](https://github.com/porcupine-md/anoa-browser/blob/master/docs/BUILDING.md): prerequisites, targets, release process
+
+## The core loop
+
+```bash
+anoa --headless --port 9222 &     # start a browser, leave it running
+anoa open example.com             # navigate (scheme optional)
+anoa snapshot -i                  # interactive elements, with refs
+anoa click @e2                    # act by ref, or by any CSS selector
+anoa fill @e3 "user@example.com"
+anoa get text                     # the page's visible text
+anoa wait --selector ".results"
+anoa screenshot page.png
+```
+
+Add `--json` to any command for machine-readable output. Exit codes: `0` ok,
+`1` command failed, `2` usage, `3` no browser listening.
+
+`anoa skills get commands` prints the full command reference to stdout, and
+`anoa skills get core` prints the workflow — both meant to be read by an agent
+rather than by a person.
+
+## Commands
+
+- Navigate: `open`, `back`, `forward`, `reload`, `wait` (`--load`, `--selector`, `--ms`, `--text`, `--url`, `--fn`, `--state hidden`, `--timeout`)
+- Inspect: `snapshot [-i]`, `find role|text|selector [--nth]`, `get text|html|value|attr`, `eval`, `status`
+- Interact: `click`, `fill`, `type`, `upload`, `press`, `scroll`, `mouse move|down|up|wheel`
+- Capture: `screenshot [file]`, `pdf [file]`
+- Tabs: `tab new [url] [--name] [--profile] [--isolated]`, `tab list`, `tab select`, `tab close`
+- State: `cookies`, `storage local|session`, `set viewport|device|geo|offline|headers|media`
+- Debug: `console`, `errors`, `network` — recorded inside the page, so they cover what happened before the command ran
+- Agents: `skills list`, `skills get core|commands`, `close`
+
+## Options
+
+- Starting a browser: `--port`, `--headless`, `--no-sandbox`, `--width`, `--height`, `--profile`, `--profile-dir`, `--ephemeral`, `--download-dir`, `--extension`, `--auth-token`, `--embed-origin`, `--config`
+- Reaching one from a command: `--port`, `--host`, `--token`, `--tab`
+- Terminal viewer: `--term-host`, `--term-port`, `--term-token`, `--cdp`, `--fps`, `--gfx`
+
+`--tab` takes an id (`t2`) or a name given at creation (`--name search`), and
+every command accepts it, so parallel work stays in its own tab.
+
+## Ports
+
+One number gives three. `9222` serves discovery (`/json`, `/json/version`,
+`/json/list`) and the `/render/*` endpoints, and is what a client is pointed at.
+`9223` is Chromium's own debugging port, kept internal, and serves the DevTools
+frontend. `9224` is the CDP proxy — the WebSocket a client is handed lands there,
+and it multiplexes sessions and checks the bearer token.
+
+## Driving it over HTTP
+
+No CDP client required. `/render` is a live view you can open in a browser or put
+in an `<iframe>`: it streams a tab over MJPEG and forwards mouse and keyboard
+back. `?tab=<id>` picks which tab a frame drives, `?embed=1` drops the built-in
+chrome.
+
+The rest of the family: `/render/screenshot.png`, `/render/screenshot.ppm`,
+`/render/stream.mjpeg`, `/render/html`, `/render/viewport`, and for input
+`/render/click`, `/render/move`, `/render/mousedown`, `/render/mouseup`,
+`/render/scroll`, `/render/type`, `/render/key`, plus `/render/navigate`,
+`/render/back|forward|reload` and `/render/tab/new|close`.
+
+Two things to know before mapping coordinates: a captured frame is in *device*
+pixels while every input endpoint speaks *logical* pixels, so on a HiDPI display
+they differ by the device pixel ratio — ask `/render/viewport` rather than
+measuring the image. And `dy` on `/render/scroll` is in angle-delta units where
+negative scrolls down, roughly 60 px of page per 120-unit notch.
+
+## Security
+
+`--auth-token` is off by default and the `/render/*` endpoints carry no origin
+check of their own, so on a shared or untrusted machine, set a token.
+
+Framing the live view is opt-in by origin. It forwards keystrokes as well as
+showing pixels, which means a page that can frame it can watch a logged-in
+session and act inside it; the default is `Content-Security-Policy:
+frame-ancestors 'self'`, and `--embed-origin` widens it.
+
+## Compatibility
+
+Playwright and Puppeteer connect unmodified:
+
+```js
+const browser = await chromium.connectOverCDP('http://localhost:9222');
+const browser = await puppeteer.connect({ browserURL: 'http://localhost:9222' });
+```
+
+Also supported: `Page.printToPDF`, named profiles with isolated cookie jars and
+localStorage, and unpacked Chromium extensions (manifest v2).
