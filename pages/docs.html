@@ -124,7 +124,15 @@
 
       <section id="nix">
         <h2>Nix</h2>
-        <p>A flake, so this needs nothing installed beforehand:</p>
+        <div class="note">
+          <p><strong>Turn flakes on first.</strong> They are still an experimental feature, so
+          a fresh Nix refuses every command below with <em>"experimental Nix feature
+          'nix-command' is disabled"</em>. Once, in <code>~/.config/nix/nix.conf</code>:</p>
+          <p><code>experimental-features = nix-command flakes</code></p>
+          <p>Or per command, changing nothing:
+          <code>--extra-experimental-features "nix-command flakes"</code>.</p>
+        </div>
+        <p style="margin-top:20px">Then this needs nothing else installed beforehand:</p>
 <pre class="term"><span class="p">$</span> nix run github:porcupine-md/anoa-browser -- --headless --port 9222
 <span class="p">$</span> nix run github:porcupine-md/anoa-browser -- open example.com</pre>
         <p style="margin-top:16px">Or install it into a profile:</p>
@@ -137,6 +145,11 @@ inputs.anoa.url = <b>"github:porcupine-md/anoa-browser"</b>;
 environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
         <p style="margin-top:16px"><code>nix develop</code> gives a shell with Qt, CMake, Node
         and Python — everything the build and the test suites want.</p>
+        <p>Driving a remote box over SSH, note that a single-user Nix install puts
+        <code>nix</code> on your <code>PATH</code> through
+        <code>~/.nix-profile/etc/profile.d/nix.sh</code>, which a <em>non-interactive</em>
+        <code>ssh host 'command'</code> never sources. Use the full path,
+        <code>~/.nix-profile/bin/nix</code>, or source that script first.</p>
         <div class="note">
           <p>Built for <code>x86_64-linux</code>, <code>aarch64-linux</code> and
           <code>aarch64-darwin</code>. <strong>Intel Macs are missing</strong> because nixpkgs

@@ -153,7 +153,18 @@ install-linux.sh --uninstall          # remove it again
 
 ### Nix
 
-A flake, so `nix run` needs nothing installed beforehand:
+Flakes are still an experimental feature, so a fresh Nix refuses these commands
+with *"experimental Nix feature 'nix-command' is disabled"* until you turn them
+on. Once, in `~/.config/nix/nix.conf`:
+
+```
+experimental-features = nix-command flakes
+```
+
+Or per command, without changing anything: append
+`--extra-experimental-features "nix-command flakes"`.
+
+Then `nix run` needs nothing else installed beforehand:
 
 ```bash
 nix run github:porcupine-md/anoa-browser -- --headless --port 9222
@@ -175,6 +186,11 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];
 
 `nix develop` gives a shell with Qt, CMake, Node and Python — everything the
 build and the test suites want.
+
+Driving a remote box over SSH, note that a single-user Nix install puts `nix` on
+your `PATH` through `~/.nix-profile/etc/profile.d/nix.sh`, which a
+*non-interactive* `ssh host 'command'` never sources. Use the full path,
+`~/.nix-profile/bin/nix`, or source that script first.
 
 Built for `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`. Intel Macs are
 missing because nixpkgs does not build `qt6.qtwebengine` for `x86_64-darwin`;
