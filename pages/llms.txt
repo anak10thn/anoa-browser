@@ -60,7 +60,15 @@ rather than by a person.
 
 ## Options
 
-- Starting a browser: `--port`, `--headless`, `--no-sandbox`, `--width`, `--height`, `--profile`, `--profile-dir`, `--ephemeral`, `--download-dir`, `--extension`, `--auth-token`, `--embed-origin`, `--config`
+- Starting a browser: `--port`, `--headless`, `--no-sandbox`, `--width`, `--height`, `--profile`, `--profile-dir`, `--ephemeral`, `--download-dir`, `--extension`, `--auth-token`, `--embed-origin`, `--max-renderers`, `--config`
+
+Memory scales with tabs because Chromium runs a renderer process per tab:
+measured, nine tabs cost 1031 MB of renderers against 117 MB for one, while the
+browser process itself moved only 156 to 255 MB. `--max-renderers <n>` caps
+that — 4 processes for 9 tabs was 468 MB — but tabs sharing a process share one
+main thread, so nine tabs computing at once went from 469 ms to 1061 ms. It is
+free when tabs are idle or driven one at a time, expensive when they all work at
+once.
 - Reaching one from a command: `--port`, `--host`, `--token`, `--tab`
 - Terminal viewer: `--term-host`, `--term-port`, `--term-token`, `--cdp`, `--fps`, `--gfx`
 

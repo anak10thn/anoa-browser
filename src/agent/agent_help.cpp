@@ -32,6 +32,8 @@ const Group kGroups[] = {
     --embed-origin <origin>         let this origin iframe the live view at
                                     /render (repeatable; default same-origin)
     --download-dir <dir>            where downloads land (default: Downloads)
+    --max-renderers <n>             cap Chromium renderer processes; fewer
+                                    processes is less memory, less parallelism
     --config <file>                 JSON or INI file of the above
     -v, --version                   print the version and exit
 

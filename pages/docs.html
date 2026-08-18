@@ -42,6 +42,7 @@
         <li><a href="#start">Starting a browser</a></li>
         <li><a href="#reaching">Reaching one</a></li>
         <li><a href="#sessions">Sessions and profiles</a></li>
+        <li><a href="#memory">Memory, many tabs</a></li>
         <li><a href="#terminal-opts">Terminal viewer</a></li>
       </ul>
       <h4>Commands</h4>
@@ -213,6 +214,7 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
             <tr><td><code>--profile-dir &lt;dir&gt;</code></td><td>Where profiles live</td></tr>
             <tr><td><code>--ephemeral</code></td><td>Keep nothing: no cookies, no storage, gone when the process ends</td></tr>
             <tr><td><code>--download-dir &lt;dir&gt;</code></td><td>Where downloads are saved. Default is the platform's Downloads folder</td></tr>
+            <tr><td><code>--max-renderers &lt;n&gt;</code></td><td>Cap Chromium renderer processes. Chromium gives each tab its own, which is where the memory goes; fewer processes is less memory and less parallelism — see <a href="#memory">Memory with many tabs</a></td></tr>
             <tr><td><code>--extension &lt;path&gt;</code></td><td>Load an unpacked Chromium extension (manifest v2). Repeatable</td></tr>
             <tr><td><code>--auth-token &lt;secret&gt;</code></td><td>Require this bearer token on CDP and on the HTTP endpoints</td></tr>
             <tr><td><code>--embed-origin &lt;origin&gt;</code></td><td>Let this origin put the live view at <code>/render</code> in an iframe, and read the JSON endpoints. Repeatable; <code>'*'</code> allows any. Default is same-origin only</td></tr>
@@ -274,6 +276,42 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
         <p style="margin-top:16px">Tabs share one jar unless asked otherwise, which is what
         makes two logins to the same site possible at once — see
         <code>tab new --profile</code> and <code>--isolated</code> below.</p>
+      </section>
+
+      <section id="memory">
+        <h2>Memory with many tabs</h2>
+        <p>Chromium gives every tab its own renderer process, and that is where the memory
+        goes. Measured on one machine, nine tabs against one, same page in each:</p>
+        <table class="ref">
+          <thead><tr><th>Setting</th><th>Renderers</th><th>Renderer memory</th><th>Nine tabs computing at once</th></tr></thead>
+          <tbody>
+            <tr><td>default</td><td>9</td><td>1031 MB</td><td>469 ms</td></tr>
+            <tr><td><code>--max-renderers 4</code></td><td>4</td><td>468 MB</td><td>1061 ms</td></tr>
+            <tr><td><code>--max-renderers 3</code></td><td>3</td><td>355 MB</td><td>—</td></tr>
+            <tr><td><code>--process-per-site</code> (see below)</td><td>1–2</td><td>130 MB</td><td>2921 ms</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:18px">One tab on its own was 117 MB of renderer, so the growth is
+        almost entirely per-tab renderer processes rather than anything in the browser process,
+        which moved only 156 → 255 MB across the same range.</p>
+        <div class="note">
+          <p><strong>This is a trade, not a free win.</strong> Tabs that share a process share
+          one main thread, so work that ran in parallel starts queueing — the last column is
+          nine tabs each running the same CPU-bound loop, started at the same instant. Four
+          processes for nine tabs cost 2.3× the wall time, which is the ratio you would
+          predict.</p>
+          <p>It costs nothing when tabs are idle or driven one at a time, and a great deal when
+          they all work at once. Pick the number from how your tabs behave, not from the memory
+          column alone.</p>
+        </div>
+        <h3>Going further</h3>
+        <p>Chromium's own flags pass through, so the more aggressive setting is available
+        without a dedicated option. <code>--process-per-site</code> puts every tab of the same
+        site in one process:</p>
+<pre class="term"><span class="p">$</span> QTWEBENGINE_CHROMIUM_FLAGS=--process-per-site anoa --headless --port 9222</pre>
+        <p style="margin-top:16px">Cross-site isolation survives it — tabs on different sites
+        still get different processes — but same-site parallelism does not, which is the 2921 ms
+        above.</p>
       </section>
 
       <section id="terminal-opts">

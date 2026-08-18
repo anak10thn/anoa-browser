@@ -18,6 +18,10 @@ struct Config {
     QString profileName;
     QStringList extensionPaths;
     QString authToken;
+    // Cap on Chromium renderer processes. 0 leaves Chromium to decide, which
+    // means roughly one per tab. Lower numbers trade parallelism for memory —
+    // see the comment in anoa_browser.cpp where it is applied.
+    int maxRenderers = 0;
     // Origins allowed to put the live view (/render) in an iframe. Empty means
     // 'self' only, because the view forwards input as well as showing pixels —
     // a page that can frame it can drive the browser. "*" opts out entirely.

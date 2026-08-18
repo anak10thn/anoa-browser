@@ -195,6 +195,16 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     if (m_config.headless)
         flags += " --disable-gpu";
 
+    // Chromium gives every tab its own renderer process, and that is where the
+    // memory goes: nine tabs measured at 1031 MB of renderers against 117 MB
+    // for one. Capping the count makes tabs share processes, which is a trade,
+    // not a free win — the same nine tabs doing work at once took 469 ms with a
+    // process each and 1061 ms sharing four, because a shared process has one
+    // main thread. Off by default; the caller decides where on that curve they
+    // want to sit.
+    if (m_config.maxRenderers > 0)
+        flags += " --renderer-process-limit=" + QByteArray::number(m_config.maxRenderers);
+
     // Keep whatever the caller already put there.
     //
     // This used to be a plain qputenv, which silently discarded it — including

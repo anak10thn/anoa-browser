@@ -350,6 +350,25 @@ private slots:
         QCOMPARE(ok.cfg["height"].toInt(), 768);
     }
 
+    // CFG-24: --max-renderers caps Chromium renderer processes. Zero and
+    // negative are refused rather than passed through, because
+    // --renderer-process-limit=0 is not "no limit" to Chromium, and a browser
+    // that starts and then cannot open a page is worse than one that refuses
+    // the flag. The absent case must stay 0, which is what leaves Chromium to
+    // decide.
+    void testMaxRenderersIsValidated()
+    {
+        QCOMPARE(runParseArgs({"--max-renderers", "abc"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--max-renderers", "0"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--max-renderers", "-3"}).exitCode, 1);
+
+        const ParseResult ok = runParseArgs({"--max-renderers", "4"});
+        QCOMPARE(ok.exitCode, 0);
+        QCOMPARE(ok.cfg["maxRenderers"].toInt(), 4);
+
+        QCOMPARE(runParseArgs({}).cfg["maxRenderers"].toInt(), 0);
+    }
+
     // TERM-CFG-12: --term-port and --fps reject a non-numeric value before the
     // range check ever runs. TERM-CFG-05/06/07 already cover the range refusals
     // (--term-port 0 and 70000, --fps 0); this is the branch above them.
@@ -604,6 +623,7 @@ static bool runHarnessIfRequested(int argc, char *argv[])
             {"profileDir", cfg.profileDir},
             {"profileName", cfg.profileName},
             {"width", cfg.width},
+            {"maxRenderers", cfg.maxRenderers},
             {"height", cfg.height},
             {"extensionPaths", QJsonArray::fromStringList(cfg.extensionPaths)},
         };

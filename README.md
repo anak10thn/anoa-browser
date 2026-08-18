@@ -437,6 +437,35 @@ request interception — `anoa network` observes, it cannot block or rewrite.
 
 ---
 
+## Memory with many tabs
+
+Chromium gives every tab its own renderer process, and that is where the memory
+goes. Measured, nine tabs against one, the same page in each:
+
+| Setting | Renderers | Renderer memory | Nine tabs computing at once |
+|---|---|---|---|
+| default | 9 | 1031 MB | 469 ms |
+| `--max-renderers 4` | 4 | 468 MB | 1061 ms |
+| `--max-renderers 3` | 3 | 355 MB | — |
+| `QTWEBENGINE_CHROMIUM_FLAGS=--process-per-site` | 1–2 | 130 MB | 2921 ms |
+
+One tab alone was 117 MB of renderer, and the browser process itself moved only
+156 → 255 MB across the same range, so the growth is almost entirely per-tab
+renderer processes.
+
+**It is a trade, not a free win.** Tabs sharing a process share one main thread,
+so work that ran in parallel starts queueing. The last column is nine tabs each
+running the same CPU-bound loop, started at the same instant: four processes for
+nine tabs cost 2.3× the wall time, which is the ratio you would predict. It
+costs nothing when tabs are idle or driven one at a time, and a great deal when
+they all work at once — pick the number from how your tabs behave, not from the
+memory column alone.
+
+`--process-per-site` keeps cross-site isolation (different sites still get
+different processes) and gives up same-site parallelism entirely.
+
+---
+
 ## Tabs
 
 One browser holds many pages. Each has a short id — `t1`, `t2` — that stays
